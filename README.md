@@ -339,11 +339,11 @@ Format - Convert from .WAV 22050 Hz mono to .VAG before using
 ---
 
 ### Why 22050 Hz?
----
+
 The game's original music runs at 22050 Hz.
 
-Using the same sample rate ensures:
----
+### Using the same sample rate ensures:
+
 Correct playback speed in-game
 
 No pitch issues
@@ -358,8 +358,8 @@ The PS2 has limited SPU2 audio memory (1 MB total).
 
 The game shares this memory across music and sound effects.
 
-Keeping your .VAG under 800 KB ensures:
----
+### Keeping your .VAG under 800 KB ensures:
+
 No crashes on music load
 
 Sound effects still work alongside music
