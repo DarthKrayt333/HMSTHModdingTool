@@ -316,7 +316,7 @@ Output is saved automatically:
 
 ---
 
-### ⚠️ Important — VAG File Size Guidelines
+### Important — VAG File Size Guidelines
 
 The game has a memory limit for files and audio files.
 To avoid crashes or corrupted audio in-game, follow these guidelines:
