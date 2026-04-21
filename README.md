@@ -519,25 +519,26 @@ Output:
 SE.BD  ← all sound effects
 SE.HD  ← header
 
-Extract all sound effects:
+### Extract all sound effects:
 -xvag all SE.BD SE.HD ./sfx
 
 Output: 000.VAG, 001.VAG, 002.VAG, ...
 
-Extract a single sound effect:
+### Extract a single sound effect:
 -xvag SE.BD SE.HD 5
 
 Output: 005.vag (auto-named)
 
-Replace a single sound effect:
+### Replace a single sound effect:
 -rvag 5 new_sfx.vag SE.BD SE.HD
 
-Replace all sound effects from a folder:
+### Replace all sound effects from a folder:
 -rvag all ./sfx SE.BD SE.HD
 
 Repack SE.HDA:
 -chda SE SE.HDA
 
+---
 
 ### HOW TO USE HMSTHModdingTool
 
