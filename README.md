@@ -269,7 +269,6 @@ Output is saved automatically:
              MYSONG\MYSONG.HD             
              MYSONG\MYSONG.SQ
              
----
 
 -xvag <bd_file> <hd_file> <index> [output.vag]
 
@@ -281,7 +280,6 @@ Output is saved automatically:
     
     Example: -xvag SE.BD SE.HD 9 myfx.vag → saves as myfx.vag
     
----
 
 -xvag all <bd_file> <hd_file> <out_folder>
 
@@ -291,7 +289,6 @@ Output is saved automatically:
     
     Example: -xvag all SE.BD SE.HD ./sfx
 
----
 
 -rvag <index> <input.vag> <bd_file> <hd_file>
 
@@ -301,7 +298,6 @@ Output is saved automatically:
     
     Example: -rvag 9 new.vag SE.BD SE.HD
 
----
 
 -rvag all <folder_with_vags> <bd_file> <hd_file>
 
