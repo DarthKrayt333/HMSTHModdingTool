@@ -315,7 +315,7 @@ Output is saved automatically:
 ### Important — VAG File Size Guidelines
 
 The game has a memory limit for files and audio files.
-To avoid crashes or corrupted audio in-game, follow these guidelines:
+To avoid crashes or corrupted audio in-game, follow these steps:
 
 Sample Rate - Use 22050 Hz (matches the game's original audio)
 
