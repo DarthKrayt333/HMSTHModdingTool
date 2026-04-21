@@ -514,7 +514,6 @@ Extract SE.HDA:
 -xhda SE.HDA SE
 
 Output:
-
 SE.BD  ← all sound effects
 SE.HD  ← header
 
