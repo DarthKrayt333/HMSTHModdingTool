@@ -497,15 +497,15 @@ MYSONG\MYSONG.HD
 
 MYSONG\MYSONG.SQ
 
-Extract a single VAG from the music bank:
+### Extract a single VAG from the music bank:
 
 -xvag BAR.BD BAR.HD 0 mysong.vag
 
-Extract all VAGs from the music bank into a Folder:
+### Extract all VAGs from the music bank into a Folder:
 
 -xvag all MUSIC.BD MUSIC.HD FOLDERNAME
 
-Replace a single VAG in the music bank:
+### Replace a single VAG in the music bank:
 
 -rvag 0 mysong.vag BAR.BD BAR.HD
 
