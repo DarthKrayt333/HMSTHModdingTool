@@ -321,17 +321,15 @@ Output is saved automatically:
 The game has a memory limit for files and audio files.
 To avoid crashes or corrupted audio in-game, follow these guidelines:
 
- Rule	          |  Recommendation
+Sample Rate - Use 22050 Hz (matches the game's original audio)
 
-`Sample Rate`	  |  Use `22050 Hz` (matches the game's original audio)
+Max file size - Keep .VAG under 800 KB
 
-`Max file size`   |  Keep .VAG under `800 KB`
+Ideal file size - Try to keep it similar to the original file size
 
-`Ideal file size` |  Try to keep it `similar to the original` file size
+Audio length - Around 1 minute looped fits comfortably within limits
 
-`Audio length`    |  Around `1 minute looped` fits comfortably within limits
-
-`Format`          |  Convert from .WAV 22050 Hz mono to .VAG before using
+Format - Convert from .WAV 22050 Hz mono to .VAG before using
 
 ### Recommended Workflow
 
