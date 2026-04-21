@@ -492,7 +492,9 @@ BAR.SQ <- MIDI sequence
 Output:
 
 MYSONG\MYSONG.BD
+
 MYSONG\MYSONG.HD
+
 MYSONG\MYSONG.SQ
 
 Extract a single VAG from the music bank:
