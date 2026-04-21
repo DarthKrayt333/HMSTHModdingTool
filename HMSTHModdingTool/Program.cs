@@ -1,4 +1,4 @@
-﻿using HMSTHModdingTool;
+using HMSTHModdingTool;
 using HMSTHModdingTool.BMP;
 using HMSTHModdingTool.GDTB;
 using HMSTHModdingTool.IO;
@@ -638,6 +638,9 @@ namespace HMSTHModdingTool
             Console.WriteLine();
 
             // ── Audio / Music Commands ────────────
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine("=== Audio / Music ===");
+            Console.ResetColor();
             Console.WriteLine(
                 "  -xvag    / xvag    <bd_file> <hd_file> <index> [output.vag]");
             Console.WriteLine(
