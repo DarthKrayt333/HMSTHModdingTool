@@ -321,14 +321,19 @@ Output is saved automatically:
 The game has a memory limit for files and audio files.
 To avoid crashes or corrupted audio in-game, follow these guidelines:
 
-`Rule`	          | `Recommendation`
+ Rule	          |  Recommendation
+
 `Sample Rate`	  |  Use `22050 Hz` (matches the game's original audio)
+
 `Max file size`   |  Keep .VAG under `800 KB`
+
 `Ideal file size` |  Try to keep it `similar to the original` file size
+
 `Audio length`    |  Around `1 minute looped` fits comfortably within limits
+
 `Format`          |  Convert from .WAV 22050 Hz mono to .VAG before using
 
-`Recommended Workflow`
+### Recommended Workflow
 
 1. Record or prepare your audio track
 2. Export as .WAV — 22050 Hz, Mono
@@ -339,29 +344,37 @@ To avoid crashes or corrupted audio in-game, follow these guidelines:
 
 ---
 
-`Why 22050 Hz?`
+### Why 22050 Hz?
+---
+The game's original music runs at 22050 Hz.
 
-The game's original music runs at `22050 Hz`.
 Using the same sample rate ensures:
+---
+Correct playback speed in-game
 
-| Correct playback speed in-game |
-| No pitch issues |
-| Stays within memory limits |
-| Compatible with the optimized .HD and .SQ templates |
+No pitch issues
 
-`Why keep it under 800 KB?`
+Stays within memory limits
 
-The PS2 has limited SPU2 audio memory (`1 MB total`).
+Compatible with the optimized .HD and .SQ templates
+
+### Why keep it under 800 KB?
+
+The PS2 has limited SPU2 audio memory (1 MB total).
+
 The game shares this memory across music and sound effects.
-Keeping your .VAG under `800 KB` ensures:
 
-| No crashes on music load |
-| Sound effects still work alongside music |
-| No audio corruption in-game |
+Keeping your .VAG under 800 KB ensures:
+---
+No crashes on music load
 
-`Best practice: Always try to keep your modded audio
+Sound effects still work alongside music
+
+No audio corruption in-game
+
+Best practice: Always try to keep your modded audio
 similar in size to the original file you are replacing.
-The closer to the original size — the safer it is!`
+The closer to the original size — the safer it is!
 
 ---
 
