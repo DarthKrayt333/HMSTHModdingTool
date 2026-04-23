@@ -1,4 +1,5 @@
-﻿using System;
+using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -9,39 +10,85 @@ namespace HMSTHModdingTool.IO
 {
     class HarvestText
     {
-        /// <summary>
-        ///     Decodes a text from Harvest Moon: Save the Homeland.
-        /// </summary>
-        /// <param name="Data">The full path to the data file</param>
-        /// <param name="Pointers">The full path to the pointers file</param>
-        /// <returns>The decoded text as a string</returns>
+        private static readonly byte[] DAT_MAGIC =
+            new byte[] { (byte)'H', (byte)'M', (byte)'H', (byte)'X' };
+
+        private static string GetDatPath(string txtPath)
+        {
+            string dir = Path.GetDirectoryName(txtPath);
+            string name = Path.GetFileNameWithoutExtension(txtPath) + ".dat";
+            if (string.IsNullOrEmpty(dir))
+                return name;
+            return Path.Combine(dir, name);
+        }
+
+        // Type 0x01 = unknown pair
+        // Type 0x02 = [var] pair
+        // Type 0x03 = slot is suppressed from .txt (marker)
+        // Type 0x04 = newline (0x00) token in a suppressed slot
+        private struct HiddenEntry
+        {
+            public int DialogIndex;
+            public int CharPosition;
+            public byte Type;
+            public ushort Primary;
+            public byte Extra;
+        }
+
         public static string Decode(string Data, string Pointers)
         {
-            using (FileStream DataStream = new FileStream(Data, FileMode.Open))
+            using (FileStream DataStream =
+                new FileStream(Data, FileMode.Open))
+            using (FileStream PointersStream =
+                new FileStream(Pointers, FileMode.Open))
             {
-                using (FileStream PointersStream = new FileStream(Pointers, FileMode.Open))
-                {
-                    return Decode(DataStream, PointersStream);
-                }
+                return Decode(DataStream, PointersStream);
             }
         }
 
-        /// <summary>
-        ///     Decodes a text from Harvest Moon: Save the Homeland.
-        /// </summary>
-        /// <param name="Data">The Stream with the text to be decoded</param>
-        /// <param name="Pointers">The Stream with the pointers to the text</param>
-        /// <returns>The decoded text as a string</returns>
         public static string Decode(Stream Data, Stream Pointers)
+        {
+            List<HiddenEntry> entries;
+            return DecodeInternal(Data, Pointers, out entries);
+        }
+
+        public static string DecodeToFile(
+            string DataPath,
+            string PointersPath,
+            string OutputTxtPath)
+        {
+            using (FileStream DataStream =
+                new FileStream(DataPath, FileMode.Open))
+            using (FileStream PointersStream =
+                new FileStream(PointersPath, FileMode.Open))
+            {
+                List<HiddenEntry> entries;
+                string visibleText =
+                    DecodeInternal(DataStream, PointersStream, out entries);
+
+                File.WriteAllText(OutputTxtPath, visibleText, Encoding.UTF8);
+
+                string datPath = GetDatPath(OutputTxtPath);
+                WriteDat(datPath, entries);
+
+                return datPath;
+            }
+        }
+
+        private static string DecodeInternal(
+            Stream Data,
+            Stream Pointers,
+            out List<HiddenEntry> entries)
         {
             BinaryReader Reader = new BinaryReader(Data);
             BinaryReader Pointer = new BinaryReader(Pointers);
             StringBuilder Output = new StringBuilder();
 
+            List<HiddenEntry> Entries = new List<HiddenEntry>();
             string[] Table = GetTable();
+            string EndMarker = Table[2];
 
-            // Table[2] == "[end]\n\n"  (the end-of-dialog marker as it appears in text)
-            string EndMarker = Table[2]; // "[end]\n\n"
+            int dialogIndex = 0;
 
             uint NextOffset = Pointer.ReadUInt32();
             while (Pointers.Position < Pointers.Length)
@@ -55,9 +102,13 @@ namespace HMSTHModdingTool.IO
                 uint Value = 0;
                 byte Header = 0;
                 byte Mask = 0;
+                bool hasVisibleText = false;
 
-                // Read tokens until we hit the [end] marker (value == 2)
-                // or run out of data.
+                // Collect everything for this slot before committing
+                List<HiddenEntry> slotEntries = new List<HiddenEntry>();
+                StringBuilder slotText = new StringBuilder();
+                int slotVisiblePos = 0;
+
                 while (Data.Position < Data.Length && Value != 2)
                 {
                     if ((Mask >>= 1) == 0)
@@ -66,66 +117,186 @@ namespace HMSTHModdingTool.IO
                         Mask = 0x80;
                     }
 
-                    // Read 8 or 16 bit character
                     if ((Header & Mask) == 0)
-                    {
                         Value = (byte)Data.ReadByte();
-                    }
                     else
-                    {
                         Value = Reader.ReadUInt16();
-                    }
 
-                    // Append character (or hex code) to output,
-                    // but do NOT append [end] here — we append it unconditionally below.
                     if (Value == 2)
                     {
-                        // [end] found — exit inner loop; marker appended below.
                         break;
                     }
                     else if (Value == 7)
                     {
-                        Output.Append(string.Format("[var]\\x{0:X4}", Data.ReadByte()));
+                        byte varByte = (byte)Data.ReadByte();
+                        slotEntries.Add(new HiddenEntry
+                        {
+                            DialogIndex = dialogIndex,
+                            CharPosition = slotVisiblePos,
+                            Type = 0x02,
+                            Primary = 7,
+                            Extra = varByte
+                        });
+                    }
+                    else if (Table[Value] == null)
+                    {
+                        byte extraByte = (byte)Data.ReadByte();
+                        slotEntries.Add(new HiddenEntry
+                        {
+                            DialogIndex = dialogIndex,
+                            CharPosition = slotVisiblePos,
+                            Type = 0x01,
+                            Primary = (ushort)Value,
+                            Extra = extraByte
+                        });
                     }
                     else
                     {
-                        if (Table[Value] == null)
+                        string charStr = Table[Value];
+
+                        if (Value == 0)
                         {
-                            Output.Append(string.Format("\\x{0:X4}", Value));
-                            Output.Append(string.Format("\\x{0:X4}", Data.ReadByte()));
+                            // Newline token — store as Type=0x04 so we can
+                            // reproduce it exactly in suppressed slots.
+                            // For visible slots we discard these entries
+                            // since the text string already contains the newline.
+                            slotEntries.Add(new HiddenEntry
+                            {
+                                DialogIndex = dialogIndex,
+                                CharPosition = slotVisiblePos,
+                                Type = 0x04,
+                                Primary = 0,
+                                Extra = 0
+                            });
                         }
                         else
                         {
-                            Output.Append(Table[Value]);
+                            hasVisibleText = true;
                         }
+
+                        slotText.Append(charStr);
+                        slotVisiblePos += charStr.Length;
                     }
                 }
 
-                // Always emit [end]\n\n after every dialog slot,
-                // even if the dialog body was empty (consecutive [end] entries).
-                Output.Append(EndMarker);
+                if (!hasVisibleText)
+                {
+                    // Suppressed slot — keep ALL entries including newlines
+                    // Add Type=0x03 marker so encoder knows slot is suppressed
+                    foreach (HiddenEntry he in slotEntries)
+                        Entries.Add(he);
+                    Entries.Add(new HiddenEntry
+                    {
+                        DialogIndex = dialogIndex,
+                        CharPosition = 0,
+                        Type = 0x03,
+                        Primary = 0,
+                        Extra = 0
+                    });
+                    // Do NOT write to .txt
+                }
+                else
+                {
+                    // Visible slot — keep inline entries (0x01, 0x02) only
+                    // Discard Type=0x04 newline entries — text string has them
+                    foreach (HiddenEntry he in slotEntries)
+                    {
+                        if (he.Type != 0x04)
+                            Entries.Add(he);
+                    }
+                    Output.Append(slotText);
+                    Output.Append(EndMarker);
+                }
+
+                dialogIndex++;
             }
 
+            entries = Entries;
             return Output.ToString();
         }
 
-        /// <summary>
-        ///     Represents the encoded Harvest Moon text.
-        ///     "Data" contains the encoded text itself.
-        ///     "Pointers" contains pointers to the dialogs.
-        /// </summary>
+        private static void WriteDat(string path, List<HiddenEntry> entries)
+        {
+            if (File.Exists(path))
+            {
+                try { File.SetAttributes(path, FileAttributes.Normal); }
+                catch { }
+            }
+
+            using (FileStream fs = new FileStream(
+                       path, FileMode.Create,
+                       FileAccess.Write, FileShare.None))
+            using (BinaryWriter w = new BinaryWriter(fs))
+            {
+                w.Write(DAT_MAGIC);
+                w.Write((int)entries.Count);
+
+                foreach (HiddenEntry e in entries)
+                {
+                    w.Write((int)e.DialogIndex);
+                    w.Write((int)e.CharPosition);
+                    w.Write((byte)e.Type);
+                    w.Write((ushort)e.Primary);
+                    w.Write((byte)e.Extra);
+                }
+
+                w.Flush();
+                fs.Flush(true);
+            }
+
+            try { File.SetAttributes(path, FileAttributes.Normal); }
+            catch { }
+        }
+
+        private static List<HiddenEntry> ReadDat(string path)
+        {
+            List<HiddenEntry> entries = new List<HiddenEntry>();
+
+            if (!File.Exists(path))
+                throw new FileNotFoundException(
+                    "Missing companion .dat file: " + path +
+                    "\nThe .txt cannot be re-imported without its .dat metadata.",
+                    path);
+
+            try { File.SetAttributes(path, FileAttributes.Normal); }
+            catch { }
+
+            using (FileStream fs = new FileStream(
+                       path, FileMode.Open,
+                       FileAccess.Read, FileShare.Read))
+            using (BinaryReader r = new BinaryReader(fs))
+            {
+                byte[] magic = r.ReadBytes(4);
+                if (magic.Length != 4 ||
+                    magic[0] != DAT_MAGIC[0] ||
+                    magic[1] != DAT_MAGIC[1] ||
+                    magic[2] != DAT_MAGIC[2] ||
+                    magic[3] != DAT_MAGIC[3])
+                    throw new InvalidDataException(
+                        "Invalid .dat file (wrong magic): " + path);
+
+                int count = r.ReadInt32();
+                for (int i = 0; i < count; i++)
+                {
+                    HiddenEntry e = new HiddenEntry();
+                    e.DialogIndex = r.ReadInt32();
+                    e.CharPosition = r.ReadInt32();
+                    e.Type = r.ReadByte();
+                    e.Primary = r.ReadUInt16();
+                    e.Extra = r.ReadByte();
+                    entries.Add(e);
+                }
+            }
+
+            return entries;
+        }
+
         public struct EncodedText
         {
             public byte[] Data;
             public byte[] Pointers;
         }
 
-        /// <summary>
-        ///     Encodes a text from Harvest Moon: Save the Homeland.
-        /// </summary>
-        /// <param name="Text">The string to be encoded</param>
-        /// <param name="Data">The full path to the data file that should be created</param>
-        /// <param name="Pointers">The full path to the pointers file that should be created</param>
         public static void Encode(string Text, string Data, string Pointers)
         {
             EncodedText Encoded = Encode(Text);
@@ -133,18 +304,75 @@ namespace HMSTHModdingTool.IO
             File.WriteAllBytes(Pointers, Encoded.Pointers);
         }
 
-        /// <summary>
-        ///     Encodes a text from Harvest Moon: Save the Homeland.
-        /// </summary>
-        /// <param name="Text">The string to be encoded</param>
-        /// <returns>The encoded data</returns>
         public static EncodedText Encode(string Text)
+        {
+            return EncodeInternal(Text, new List<HiddenEntry>());
+        }
+
+        public static void EncodeFromFile(
+            string InputTxtPath,
+            string DataPath,
+            string PointersPath)
+        {
+            string text = File.ReadAllText(InputTxtPath, Encoding.UTF8);
+            string datPath = GetDatPath(InputTxtPath);
+            List<HiddenEntry> entries = ReadDat(datPath);
+            EncodedText Encoded = EncodeInternal(text, entries);
+            File.WriteAllBytes(DataPath, Encoded.Data);
+            File.WriteAllBytes(PointersPath, Encoded.Pointers);
+        }
+
+        private static EncodedText EncodeInternal(
+            string text,
+            List<HiddenEntry> entries)
         {
             EncodedText Output = new EncodedText();
             string[] Table = GetTable();
-
-            // Table[2] is "[end]\n\n" — the separator between dialogs in the text file.
             string EndMarker = Table[2];
+
+            string[] visibleDialogs = text.Split(
+                new string[] { EndMarker },
+                StringSplitOptions.None);
+
+            int visibleCount = visibleDialogs.Length;
+            while (visibleCount > 0 &&
+                   visibleDialogs[visibleCount - 1] == string.Empty)
+                visibleCount--;
+
+            // Collect suppressed slot indices from Type=0x03 markers
+            SortedSet<int> nonVisibleOriginalIndices = new SortedSet<int>();
+            foreach (HiddenEntry e in entries)
+                if (e.Type == 0x03)
+                    nonVisibleOriginalIndices.Add(e.DialogIndex);
+
+            int totalSlots = visibleCount + nonVisibleOriginalIndices.Count;
+
+            int[] origToVisible = new int[totalSlots];
+            int visibleCursor = 0;
+            for (int origIdx = 0; origIdx < totalSlots; origIdx++)
+            {
+                if (nonVisibleOriginalIndices.Contains(origIdx))
+                    origToVisible[origIdx] = -1;
+                else
+                    origToVisible[origIdx] = visibleCursor++;
+            }
+
+            // Build per-slot entry lookup
+            // For suppressed slots: includes Type=0x01, 0x02, 0x04
+            // For visible slots: includes Type=0x01, 0x02 only
+            Dictionary<int, List<HiddenEntry>> inlineByOrig =
+                new Dictionary<int, List<HiddenEntry>>();
+
+            foreach (HiddenEntry e in entries)
+            {
+                if (e.Type == 0x03) continue; // skip markers
+                if (!inlineByOrig.ContainsKey(e.DialogIndex))
+                    inlineByOrig[e.DialogIndex] = new List<HiddenEntry>();
+                inlineByOrig[e.DialogIndex].Add(e);
+            }
+
+            foreach (List<HiddenEntry> list in inlineByOrig.Values)
+                list.Sort((a, b) => a.CharPosition.CompareTo(b.CharPosition));
 
             using (MemoryStream Data = new MemoryStream())
             using (MemoryStream Pointers = new MemoryStream())
@@ -152,71 +380,173 @@ namespace HMSTHModdingTool.IO
                 BinaryWriter Writer = new BinaryWriter(Data);
                 BinaryWriter Pointer = new BinaryWriter(Pointers);
 
-                // FIX: Use StringSplitOptions.None so that empty entries
-                //      (produced by two consecutive [end] markers) are preserved.
-                //      Without this fix, RemoveEmptyEntries silently drops them,
-                //      meaning consecutive [end][end] only encodes one [end].
-                string[] Dialogs = Text.Split(
-                    new string[] { EndMarker },
-                    StringSplitOptions.None);
-
-                // Determine how many dialogs to actually encode.
-                // The split of "...[end]\n\n[end]\n\n" always produces a final
-                // empty trailing entry (after the last [end]) which we must skip,
-                // otherwise we'd write one extra spurious dialog.
-                // We detect the trailing empties conservatively:
-                //   - If the original text ends with EndMarker, the last split
-                //     entry is empty and should be ignored.
-                //   - But intermediate empty entries (consecutive [end]) MUST
-                //     be preserved and encoded.
-                int DialogCount = Dialogs.Length;
-                // Trim exactly the empty entries that are purely trailing
-                // (i.e. the text ended with one or more EndMarkers that produce
-                //  empty strings at the tail of the array with no real content).
-                while (DialogCount > 0 && Dialogs[DialogCount - 1] == string.Empty)
+                for (int origIdx = 0; origIdx < totalSlots; origIdx++)
                 {
-                    DialogCount--;
-                }
-
-                for (int d = 0; d < DialogCount; d++)
-                {
-                    string Dialog = Dialogs[d];
-
                     Align(Data, 4);
                     Pointer.Write((uint)Data.Position);
 
-                    byte Header = 0;
-                    int Mask = 0;
-                    long Position = 0;
-                    long HeaderPosition = Data.Position;
+                    int visIdx = origToVisible[origIdx];
 
-                    // If Dialog is empty (consecutive [end] in source text),
-                    // we still need to write the end-of-dialog marker below.
-                    // The inner encoding loop simply has nothing to iterate.
+                    List<HiddenEntry> mine;
+                    if (!inlineByOrig.TryGetValue(origIdx, out mine))
+                        mine = new List<HiddenEntry>();
 
-                    int i = 0;
-                    while (i < Dialog.Length)
+                    if (visIdx == -1)
                     {
-                        // New header byte every 8 tokens
-                        if ((Mask >>= 1) == 0)
+                        // Suppressed slot — encode all entries in order
+                        // Type=0x01/0x02 = inline pairs
+                        // Type=0x04 = newline (0x00 byte)
+                        // Then end marker
+
+                        if (mine.Count == 0)
                         {
-                            Data.WriteByte(0);
+                            // Truly empty
+                            Data.WriteByte(0x00);
+                            Data.WriteByte(0x02);
+                        }
+                        else
+                        {
+                            byte Header = 0;
+                            int Mask = 0;
+                            long Position = 0;
+                            long HeaderPosition = Data.Position;
+
+                            foreach (HiddenEntry he in mine)
+                            {
+                                if ((Mask >>= 1) == 0)
+                                {
+                                    Data.WriteByte(0);
+                                    Position = Data.Position;
+                                    Data.Seek(HeaderPosition,
+                                        SeekOrigin.Begin);
+                                    Data.WriteByte(Header);
+                                    Data.Seek(Position, SeekOrigin.Begin);
+                                    HeaderPosition = Position - 1;
+                                    Header = 0;
+                                    Mask = 0x80;
+                                }
+
+                                if (he.Type == 0x04)
+                                {
+                                    // Newline token
+                                    Data.WriteByte(0x00);
+                                }
+                                else if (he.Type == 0x02)
+                                {
+                                    Data.WriteByte(7);
+                                    Data.WriteByte(he.Extra);
+                                }
+                                else if (he.Type == 0x01)
+                                {
+                                    if (he.Primary > 0xFF)
+                                    {
+                                        Writer.Write(he.Primary);
+                                        Header |= (byte)Mask;
+                                    }
+                                    else
+                                    {
+                                        Data.WriteByte(
+                                            (byte)(he.Primary & 0xFF));
+                                    }
+                                    Data.WriteByte(he.Extra);
+                                }
+                            }
+
+                            // Flush pending header
                             Position = Data.Position;
+                            if (Header != 0)
+                            {
+                                Data.Seek(HeaderPosition, SeekOrigin.Begin);
+                                Data.WriteByte(Header);
+                                Data.Seek(Position, SeekOrigin.Begin);
+                            }
 
-                            Data.Seek(HeaderPosition, SeekOrigin.Begin);
-                            Data.WriteByte(Header);
+                            // End marker
+                            if ((Mask >>= 1) == 0)
+                            {
+                                Data.WriteByte(0);
+                                HeaderPosition = Data.Position - 1;
+                                Mask = 0x80;
+                            }
+                            Data.WriteByte(2);
 
+                            Position = Data.Position;
                             Data.Seek(Position, SeekOrigin.Begin);
-                            HeaderPosition = Position - 1;
+                        }
+                        continue;
+                    }
 
-                            Header = 0;
-                            Mask = 0x80;
+                    // Visible dialog — encode text + inline entries
+                    string Dialog = visibleDialogs[visIdx];
+
+                    byte Header2 = 0;
+                    int Mask2 = 0;
+                    long Position2 = 0;
+                    long HeaderPosition2 = Data.Position;
+
+                    int visiblePos = 0;
+                    int nextEntry = 0;
+                    int i = 0;
+
+                    while (i <= Dialog.Length)
+                    {
+                        while (nextEntry < mine.Count &&
+                               mine[nextEntry].CharPosition == visiblePos)
+                        {
+                            HiddenEntry he = mine[nextEntry++];
+
+                            if ((Mask2 >>= 1) == 0)
+                            {
+                                Data.WriteByte(0);
+                                Position2 = Data.Position;
+                                Data.Seek(HeaderPosition2, SeekOrigin.Begin);
+                                Data.WriteByte(Header2);
+                                Data.Seek(Position2, SeekOrigin.Begin);
+                                HeaderPosition2 = Position2 - 1;
+                                Header2 = 0;
+                                Mask2 = 0x80;
+                            }
+
+                            if (he.Type == 0x02)
+                            {
+                                Data.WriteByte(7);
+                                Data.WriteByte(he.Extra);
+                            }
+                            else if (he.Type == 0x01)
+                            {
+                                if (he.Primary > 0xFF)
+                                {
+                                    Writer.Write(he.Primary);
+                                    Header2 |= (byte)Mask2;
+                                }
+                                else
+                                {
+                                    Data.WriteByte(
+                                        (byte)(he.Primary & 0xFF));
+                                }
+                                Data.WriteByte(he.Extra);
+                            }
                         }
 
-                        // ── Line breaks ───────────────────────────────────────────────
-                        if (i + 2 <= Dialog.Length && Dialog.Substring(i, 2) == "\r\n")
+                        if (i == Dialog.Length) break;
+
+                        if ((Mask2 >>= 1) == 0)
                         {
                             Data.WriteByte(0);
+                            Position2 = Data.Position;
+                            Data.Seek(HeaderPosition2, SeekOrigin.Begin);
+                            Data.WriteByte(Header2);
+                            Data.Seek(Position2, SeekOrigin.Begin);
+                            HeaderPosition2 = Position2 - 1;
+                            Header2 = 0;
+                            Mask2 = 0x80;
+                        }
+
+                        if (i + 2 <= Dialog.Length &&
+                            Dialog.Substring(i, 2) == "\r\n")
+                        {
+                            Data.WriteByte(0);
+                            visiblePos += 2;
                             i += 2;
                             continue;
                         }
@@ -224,89 +554,26 @@ namespace HMSTHModdingTool.IO
                         if (Dialog[i] == '\n')
                         {
                             Data.WriteByte(0);
+                            visiblePos += 1;
                             i += 1;
                             continue;
                         }
 
-                        // ── [var]\xNNNN  (NNNN is 4 hex digits) ──────────────────────
-                        if (i + 11 <= Dialog.Length &&
-                            Dialog.Substring(i, 5) == "[var]" &&
-                            Dialog.Substring(i + 5, 2) == "\\x")
-                        {
-                            string hexNNNN = Dialog.Substring(i + 7, 4);
-                            ushort varWord = ushort.Parse(hexNNNN, NumberStyles.HexNumber);
-                            byte varByte = (byte)(varWord & 0xFF);
-
-                            Data.WriteByte(7);
-                            Data.WriteByte(varByte);
-
-                            i += 11;
-                            continue;
-                        }
-
-                        // ── \xNNNN\xMMMM pair ─────────────────────────────────────────
-                        if (i + 12 <= Dialog.Length &&
-                            Dialog.Substring(i, 2) == "\\x" &&
-                            Dialog.Substring(i + 6, 2) == "\\x")
-                        {
-                            string hex1 = Dialog.Substring(i + 2, 4);
-                            string hex2 = Dialog.Substring(i + 8, 4);
-
-                            ushort v1 = ushort.Parse(hex1, NumberStyles.HexNumber);
-                            ushort v2 = ushort.Parse(hex2, NumberStyles.HexNumber);
-
-                            if (v1 > 0xFF)
-                            {
-                                Writer.Write(v1);
-                                Header |= (byte)Mask;
-                            }
-                            else
-                            {
-                                Data.WriteByte((byte)(v1 & 0xFF));
-                            }
-
-                            Data.WriteByte((byte)(v2 & 0xFF));
-
-                            i += 12;
-                            continue;
-                        }
-
-                        // ── Standalone \xNNNN ─────────────────────────────────────────
-                        if (i + 6 <= Dialog.Length && Dialog.Substring(i, 2) == "\\x")
-                        {
-                            string hex = Dialog.Substring(i + 2, 4);
-                            ushort v = ushort.Parse(hex, NumberStyles.HexNumber);
-
-                            if (v > 0xFF)
-                            {
-                                Writer.Write(v);
-                                Header |= (byte)Mask;
-                            }
-                            else
-                            {
-                                Data.WriteByte((byte)(v & 0xFF));
-                            }
-
-                            i += 6;
-                            continue;
-                        }
-
-                        // ── Normal table parsing ──────────────────────────────────────
                         int charValue = -1;
 
                         if (Dialog[i] == '[')
                         {
                             bool matched = false;
-                            for (int TblIndex = 0; TblIndex < Table.Length; TblIndex++)
+                            for (int t = 0; t < Table.Length; t++)
                             {
-                                string TblValue = Table[TblIndex];
-                                if (TblValue == null) continue;
-                                if (i + TblValue.Length > Dialog.Length) continue;
-
-                                if (Dialog.Substring(i, TblValue.Length) == TblValue)
+                                string tv = Table[t];
+                                if (tv == null) continue;
+                                if (i + tv.Length > Dialog.Length) continue;
+                                if (Dialog.Substring(i, tv.Length) == tv)
                                 {
-                                    charValue = TblIndex;
-                                    i += TblValue.Length;
+                                    charValue = t;
+                                    visiblePos += tv.Length;
+                                    i += tv.Length;
                                     matched = true;
                                     break;
                                 }
@@ -315,6 +582,7 @@ namespace HMSTHModdingTool.IO
                             if (!matched)
                             {
                                 Data.WriteByte(0x10);
+                                visiblePos += 1;
                                 i += 1;
                             }
                             else
@@ -322,7 +590,7 @@ namespace HMSTHModdingTool.IO
                                 if (charValue > 0xFF)
                                 {
                                     Writer.Write((ushort)charValue);
-                                    Header |= (byte)Mask;
+                                    Header2 |= (byte)Mask2;
                                 }
                                 else
                                 {
@@ -340,7 +608,7 @@ namespace HMSTHModdingTool.IO
                                 if (charValue > 0xFF)
                                 {
                                     Writer.Write((ushort)charValue);
-                                    Header |= (byte)Mask;
+                                    Header2 |= (byte)Mask2;
                                 }
                                 else
                                 {
@@ -352,45 +620,31 @@ namespace HMSTHModdingTool.IO
                                 Data.WriteByte(0x10);
                             }
 
+                            visiblePos += 1;
                             i += 1;
                         }
-                    } // end while (i < Dialog.Length)
-
-                    // ── End-of-dialog marker ──────────────────────────────────────────
-                    // Write the pending header byte if needed, then emit value 0x02.
-                    // This must happen even when Dialog is empty (consecutive [end]).
-
-                    // Flush pending header
-                    Position = Data.Position;
-                    if (Header != 0)
-                    {
-                        Data.Seek(HeaderPosition, SeekOrigin.Begin);
-                        Data.WriteByte(Header);
-                        Data.Seek(Position, SeekOrigin.Begin);
                     }
 
-                    // The end marker (value == 2) is a single uncompressed byte.
-                    // It needs its own mask slot.
-                    if ((Mask >>= 1) == 0)
+                    Position2 = Data.Position;
+                    if (Header2 != 0)
                     {
-                        // Need a fresh header byte for the end marker
-                        Data.WriteByte(0);          // header placeholder (value 0 = all 8-bit)
-                        HeaderPosition = Data.Position - 1;
-                        Mask = 0x80;
+                        Data.Seek(HeaderPosition2, SeekOrigin.Begin);
+                        Data.WriteByte(Header2);
+                        Data.Seek(Position2, SeekOrigin.Begin);
                     }
 
-                    // Write the end-of-dialog byte (0x02) as an 8-bit token
-                    // (mask bit stays 0, no header bit set).
+                    if ((Mask2 >>= 1) == 0)
+                    {
+                        Data.WriteByte(0);
+                        HeaderPosition2 = Data.Position - 1;
+                        Mask2 = 0x80;
+                    }
+
                     Data.WriteByte(2);
 
-                    // Finalize the last header byte
-                    Position = Data.Position;
-                    // Header for the end-marker slot is always 0 (8-bit token),
-                    // so we only need to seek back if there's something pending.
-                    // (Already flushed above; this is a no-op but kept for safety.)
-                    Data.Seek(Position, SeekOrigin.Begin);
-
-                } // end foreach Dialog
+                    Position2 = Data.Position;
+                    Data.Seek(Position2, SeekOrigin.Begin);
+                }
 
                 Align(Data, 4);
                 Pointer.Write((uint)Data.Length);
@@ -402,101 +656,6 @@ namespace HMSTHModdingTool.IO
             }
 
             return Output;
-        }
-
-        /// <summary>
-        ///     Encodes a chunk of normal text using the game's compression.
-        /// </summary>
-        private static byte[] EncodeTextChunk(string Text, string[] Table)
-        {
-            using (MemoryStream Data = new MemoryStream())
-            {
-                BinaryWriter Writer = new BinaryWriter(Data);
-
-                byte Header = 0;
-                int Mask = 0;
-                long Position = 0;
-                long HeaderPosition = Data.Position;
-
-                for (int Index = 0; Index < Text.Length; Index++)
-                {
-                    if ((Mask >>= 1) == 0)
-                    {
-                        Data.WriteByte(0);
-                        Position = Data.Position;
-                        Data.Seek(HeaderPosition, SeekOrigin.Begin);
-                        Data.WriteByte(Header);
-                        Data.Seek(Position, SeekOrigin.Begin);
-                        HeaderPosition = Position - 1;
-
-                        Header = 0;
-                        Mask = 0x80;
-                    }
-
-                    if (Index + 2 <= Text.Length && Text.Substring(Index, 2) == "\r\n")
-                    {
-                        Data.WriteByte(0);
-                        Index++;
-                    }
-                    else if (Text[Index] == '\n')
-                    {
-                        Data.WriteByte(0);
-                    }
-                    else
-                    {
-                        int Value = -1;
-                        string Character = Text.Substring(Index, 1);
-
-                        if (Character == "[")
-                        {
-                            for (int TblIndex = 0; TblIndex < Table.Length; TblIndex++)
-                            {
-                                string TblValue = Table[TblIndex];
-                                if (TblValue == null || Index + TblValue.Length > Text.Length) continue;
-
-                                if (Text.Substring(Index, TblValue.Length) == TblValue)
-                                {
-                                    Value = TblIndex;
-                                    Index += TblValue.Length - 1;
-                                    break;
-                                }
-                            }
-                        }
-                        else
-                        {
-                            Value = Array.IndexOf(Table, Character);
-                        }
-
-                        if (Value > -1)
-                        {
-                            if (Value > 0xff)
-                            {
-                                Writer.Write((ushort)Value);
-                                Header |= (byte)Mask;
-                            }
-                            else
-                            {
-                                Data.WriteByte((byte)Value);
-                            }
-                        }
-                        else
-                        {
-                            Data.WriteByte(0x10);
-                        }
-                    }
-                }
-
-                Position = Data.Position;
-                if (Header != 0)
-                {
-                    Data.Seek(HeaderPosition, SeekOrigin.Begin);
-                    Data.WriteByte(Header);
-                }
-                Data.Seek(Position, SeekOrigin.Begin);
-                if (Mask == 1) Data.WriteByte(0);
-
-                return Data.ToArray();
-            }
         }
 
         private static string[] GetTable()
@@ -524,7 +683,8 @@ namespace HMSTHModdingTool.IO
         private static void Align(Stream Stream, int Bytes)
         {
             int Mask = Bytes - 1;
-            while ((Stream.Position & Mask) != 0) Stream.WriteByte(0);
+            while ((Stream.Position & Mask) != 0)
+                Stream.WriteByte(0);
         }
     }
 }
