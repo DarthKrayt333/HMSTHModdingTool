@@ -340,7 +340,7 @@ Format - Convert from .WAV 22050 Hz mono to .VAG before using
 
 ### Why 22050 Hz?
 
-To make Audio file smaller, just in case that it doesn't get
+To make the Audio file smaller, just in case that it doesn't get
 over the game's maximum memory limit.
 
 ### Using the same sample rate ensures:
