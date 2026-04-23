@@ -23,7 +23,7 @@ namespace HMSTHModdingTool.IO
         }
 
         // Type 0x01 = unknown pair
-        // Type 0x02 = [var] pair
+        // Type 0x02 = [var] pair (legacy — kept for old .dat compatibility)
         // Type 0x03 = slot is suppressed from .txt (marker)
         // Type 0x04 = newline (0x00) token in a suppressed slot
         private struct HiddenEntry
@@ -104,7 +104,6 @@ namespace HMSTHModdingTool.IO
                 byte Mask = 0;
                 bool hasVisibleText = false;
 
-                // Collect everything for this slot before committing
                 List<HiddenEntry> slotEntries = new List<HiddenEntry>();
                 StringBuilder slotText = new StringBuilder();
                 int slotVisiblePos = 0;
@@ -128,15 +127,13 @@ namespace HMSTHModdingTool.IO
                     }
                     else if (Value == 7)
                     {
+                        // [var] — visible in .txt as [hex_XX]
                         byte varByte = (byte)Data.ReadByte();
-                        slotEntries.Add(new HiddenEntry
-                        {
-                            DialogIndex = dialogIndex,
-                            CharPosition = slotVisiblePos,
-                            Type = 0x02,
-                            Primary = 7,
-                            Extra = varByte
-                        });
+                        string hexTag = string.Format(
+                            "[hex_{0:X2}]", varByte);
+                        slotText.Append(hexTag);
+                        slotVisiblePos += hexTag.Length;
+                        hasVisibleText = true;
                     }
                     else if (Table[Value] == null)
                     {
@@ -156,10 +153,6 @@ namespace HMSTHModdingTool.IO
 
                         if (Value == 0)
                         {
-                            // Newline token — store as Type=0x04 so we can
-                            // reproduce it exactly in suppressed slots.
-                            // For visible slots we discard these entries
-                            // since the text string already contains the newline.
                             slotEntries.Add(new HiddenEntry
                             {
                                 DialogIndex = dialogIndex,
@@ -181,8 +174,6 @@ namespace HMSTHModdingTool.IO
 
                 if (!hasVisibleText)
                 {
-                    // Suppressed slot — keep ALL entries including newlines
-                    // Add Type=0x03 marker so encoder knows slot is suppressed
                     foreach (HiddenEntry he in slotEntries)
                         Entries.Add(he);
                     Entries.Add(new HiddenEntry
@@ -193,12 +184,9 @@ namespace HMSTHModdingTool.IO
                         Primary = 0,
                         Extra = 0
                     });
-                    // Do NOT write to .txt
                 }
                 else
                 {
-                    // Visible slot — keep inline entries (0x01, 0x02) only
-                    // Discard Type=0x04 newline entries — text string has them
                     foreach (HiddenEntry he in slotEntries)
                     {
                         if (he.Type != 0x04)
@@ -339,7 +327,6 @@ namespace HMSTHModdingTool.IO
                    visibleDialogs[visibleCount - 1] == string.Empty)
                 visibleCount--;
 
-            // Collect suppressed slot indices from Type=0x03 markers
             SortedSet<int> nonVisibleOriginalIndices = new SortedSet<int>();
             foreach (HiddenEntry e in entries)
                 if (e.Type == 0x03)
@@ -357,15 +344,12 @@ namespace HMSTHModdingTool.IO
                     origToVisible[origIdx] = visibleCursor++;
             }
 
-            // Build per-slot entry lookup
-            // For suppressed slots: includes Type=0x01, 0x02, 0x04
-            // For visible slots: includes Type=0x01, 0x02 only
             Dictionary<int, List<HiddenEntry>> inlineByOrig =
                 new Dictionary<int, List<HiddenEntry>>();
 
             foreach (HiddenEntry e in entries)
             {
-                if (e.Type == 0x03) continue; // skip markers
+                if (e.Type == 0x03) continue;
                 if (!inlineByOrig.ContainsKey(e.DialogIndex))
                     inlineByOrig[e.DialogIndex] = new List<HiddenEntry>();
                 inlineByOrig[e.DialogIndex].Add(e);
@@ -393,14 +377,9 @@ namespace HMSTHModdingTool.IO
 
                     if (visIdx == -1)
                     {
-                        // Suppressed slot — encode all entries in order
-                        // Type=0x01/0x02 = inline pairs
-                        // Type=0x04 = newline (0x00 byte)
-                        // Then end marker
-
+                        // ── Suppressed slot ───────────────────────────
                         if (mine.Count == 0)
                         {
-                            // Truly empty
                             Data.WriteByte(0x00);
                             Data.WriteByte(0x02);
                         }
@@ -420,7 +399,8 @@ namespace HMSTHModdingTool.IO
                                     Data.Seek(HeaderPosition,
                                         SeekOrigin.Begin);
                                     Data.WriteByte(Header);
-                                    Data.Seek(Position, SeekOrigin.Begin);
+                                    Data.Seek(Position,
+                                        SeekOrigin.Begin);
                                     HeaderPosition = Position - 1;
                                     Header = 0;
                                     Mask = 0x80;
@@ -428,11 +408,11 @@ namespace HMSTHModdingTool.IO
 
                                 if (he.Type == 0x04)
                                 {
-                                    // Newline token
                                     Data.WriteByte(0x00);
                                 }
                                 else if (he.Type == 0x02)
                                 {
+                                    // Legacy .dat compatibility
                                     Data.WriteByte(7);
                                     Data.WriteByte(he.Extra);
                                 }
@@ -452,16 +432,15 @@ namespace HMSTHModdingTool.IO
                                 }
                             }
 
-                            // Flush pending header
                             Position = Data.Position;
                             if (Header != 0)
                             {
-                                Data.Seek(HeaderPosition, SeekOrigin.Begin);
+                                Data.Seek(HeaderPosition,
+                                    SeekOrigin.Begin);
                                 Data.WriteByte(Header);
                                 Data.Seek(Position, SeekOrigin.Begin);
                             }
 
-                            // End marker
                             if ((Mask >>= 1) == 0)
                             {
                                 Data.WriteByte(0);
@@ -476,7 +455,7 @@ namespace HMSTHModdingTool.IO
                         continue;
                     }
 
-                    // Visible dialog — encode text + inline entries
+                    // ── Visible dialog ────────────────────────────────
                     string Dialog = visibleDialogs[visIdx];
 
                     byte Header2 = 0;
@@ -490,6 +469,7 @@ namespace HMSTHModdingTool.IO
 
                     while (i <= Dialog.Length)
                     {
+                        // Re-inject inline entries at this position
                         while (nextEntry < mine.Count &&
                                mine[nextEntry].CharPosition == visiblePos)
                         {
@@ -499,7 +479,8 @@ namespace HMSTHModdingTool.IO
                             {
                                 Data.WriteByte(0);
                                 Position2 = Data.Position;
-                                Data.Seek(HeaderPosition2, SeekOrigin.Begin);
+                                Data.Seek(HeaderPosition2,
+                                    SeekOrigin.Begin);
                                 Data.WriteByte(Header2);
                                 Data.Seek(Position2, SeekOrigin.Begin);
                                 HeaderPosition2 = Position2 - 1;
@@ -509,6 +490,7 @@ namespace HMSTHModdingTool.IO
 
                             if (he.Type == 0x02)
                             {
+                                // Legacy .dat compatibility
                                 Data.WriteByte(7);
                                 Data.WriteByte(he.Extra);
                             }
@@ -530,6 +512,42 @@ namespace HMSTHModdingTool.IO
 
                         if (i == Dialog.Length) break;
 
+                        // ── Check for [hex_XX] BEFORE mask allocation ─
+                        if (i + 8 <= Dialog.Length &&
+                            Dialog.Substring(i, 5) == "[hex_" &&
+                            Dialog[i + 7] == ']')
+                        {
+                            byte varByte;
+                            if (byte.TryParse(
+                                    Dialog.Substring(i + 5, 2),
+                                    NumberStyles.HexNumber,
+                                    CultureInfo.InvariantCulture,
+                                    out varByte))
+                            {
+                                // Allocate mask slot for var token
+                                if ((Mask2 >>= 1) == 0)
+                                {
+                                    Data.WriteByte(0);
+                                    Position2 = Data.Position;
+                                    Data.Seek(HeaderPosition2,
+                                        SeekOrigin.Begin);
+                                    Data.WriteByte(Header2);
+                                    Data.Seek(Position2,
+                                        SeekOrigin.Begin);
+                                    HeaderPosition2 = Position2 - 1;
+                                    Header2 = 0;
+                                    Mask2 = 0x80;
+                                }
+                                // Write var token — no header bit (8-bit)
+                                Data.WriteByte(7);
+                                Data.WriteByte(varByte);
+                                visiblePos += 8;
+                                i += 8;
+                                continue;
+                            }
+                        }
+
+                        // ── Allocate mask slot for this character ─────
                         if ((Mask2 >>= 1) == 0)
                         {
                             Data.WriteByte(0);
@@ -568,7 +586,8 @@ namespace HMSTHModdingTool.IO
                             {
                                 string tv = Table[t];
                                 if (tv == null) continue;
-                                if (i + tv.Length > Dialog.Length) continue;
+                                if (i + tv.Length > Dialog.Length)
+                                    continue;
                                 if (Dialog.Substring(i, tv.Length) == tv)
                                 {
                                     charValue = t;
@@ -623,7 +642,8 @@ namespace HMSTHModdingTool.IO
                             visiblePos += 1;
                             i += 1;
                         }
-                    }
+
+                    } // end character loop
 
                     Position2 = Data.Position;
                     if (Header2 != 0)
@@ -644,7 +664,8 @@ namespace HMSTHModdingTool.IO
 
                     Position2 = Data.Position;
                     Data.Seek(Position2, SeekOrigin.Begin);
-                }
+
+                } // end original slot loop
 
                 Align(Data, 4);
                 Pointer.Write((uint)Data.Length);
