@@ -17,7 +17,7 @@ new features to allow deep modding of the game's assets including textures, audi
 
 ## Changelog
 
-### Version v1.2.0-Beta
+### Version v1.3.0-Beta
 - **Renamed** HDATextTool -> HMSTHModdingTool
 - **Fixed** a bug where NPC text was not exporting and importing correctly
 - **Fixed** a bug where SHOP Text had empty [end] character inside text, which wasn't importing into BODY File correctly.
