@@ -138,6 +138,10 @@ namespace HMSTHModdingTool
                 // Normalize: strip "-" or "--" prefix
                 string cmd = NormalizeCommand(args[0]);
 
+                // Flag: if the case prints its own Finished + extras,
+                // set this to true to skip the generic one at the bottom.
+                bool customFinish = false;
+
                 switch (cmd)
                 {
                     // ════════════════════════════
@@ -155,20 +159,101 @@ namespace HMSTHModdingTool
                         HarvestDataArchive.Pack(args[2], args[1]);
                         break;
 
+                    // ════════════════════════════
+                    // TEXT COMMANDS
+                    // ════════════════════════════
+
+                    // ── xtxt: export text + dat, then report both ────────
                     case "xtxt":
                         RequireArgs(args, 4,
                             "-xtxt <text.bin> <ptr.bin> <out.txt>");
-                        File.WriteAllText(
-                            args[3],
-                            HarvestText.Decode(args[1], args[2]));
+                        {
+                            // Check that the two input files are not the same file
+                            string xtxtData = Path.GetFullPath(args[1]);
+                            string xtxtPtrs = Path.GetFullPath(args[2]);
+
+                            if (string.Equals(xtxtData, xtxtPtrs,
+                                    StringComparison.OrdinalIgnoreCase))
+                            {
+                                Console.WriteLine();
+                                Console.ForegroundColor = ConsoleColor.Red;
+                                Console.WriteLine(
+                                    "  ERROR: This is the same file." +
+                                    " These must be two different files.");
+                                Console.ResetColor();
+                                Console.ForegroundColor = ConsoleColor.Yellow;
+                                Console.WriteLine(
+                                    "  text.bin : " + xtxtData);
+                                Console.WriteLine(
+                                    "  ptr.bin  : " + xtxtPtrs);
+                                Console.WriteLine(
+                                    "  These must be two different files.");
+                                Console.ForegroundColor = ConsoleColor.Cyan;
+                                Console.WriteLine(
+                                    "  Example: -xtxt File_00001.bin File_00000.bin out.txt");
+                                Console.ResetColor();
+                                Console.WriteLine();
+                                customFinish = true;
+                                break;
+                            }
+
+                            string datPath = HarvestText.DecodeToFile(
+                                args[1], args[2], args[3]);
+
+                            TextOut.PrintSuccess("Finished!");
+                            Console.ForegroundColor = ConsoleColor.Cyan;
+                            Console.WriteLine(
+                                "  " + Path.GetFileName(args[3]) + " Exported");
+                            Console.WriteLine(
+                                "  " + Path.GetFileName(datPath) + " Exported");
+                            Console.ResetColor();
+                            customFinish = true;
+                        }
                         break;
 
+                    // ── ctxt: check .dat exists before importing ─────────
                     case "ctxt":
                         RequireArgs(args, 4,
                             "-ctxt <in.txt> <text.bin> <ptr.bin>");
-                        HarvestText.Encode(
-                            File.ReadAllText(args[1]),
-                            args[2], args[3]);
+                        {
+                            // Build the expected .dat path the same way
+                            // HarvestText does, so we can warn early.
+                            string txtFull = Path.GetFullPath(args[1]);
+                            string datCheck = Path.Combine(
+                                Path.GetDirectoryName(txtFull) ?? ".",
+                                Path.GetFileNameWithoutExtension(txtFull) + ".dat");
+
+                            if (!File.Exists(datCheck))
+                            {
+                                Console.WriteLine();
+                                Console.ForegroundColor = ConsoleColor.Red;
+                                Console.WriteLine(
+                                    "  ERROR: companion .dat file not found!");
+                                Console.ResetColor();
+                                Console.ForegroundColor = ConsoleColor.Yellow;
+                                Console.WriteLine(
+                                    "  Expected: " + Path.GetFileName(datCheck));
+                                Console.WriteLine(
+                                    "  The .dat file is created when you run -xtxt.");
+                                Console.WriteLine(
+                                    "  It must stay in the same folder as the .txt");
+                                Console.WriteLine(
+                                    "  and have the same base name.");
+                                Console.ResetColor();
+                                Console.WriteLine();
+                                return; // stop here, do not attempt encode
+                            }
+
+                            HarvestText.EncodeFromFile(args[1], args[2], args[3]);
+
+                            TextOut.PrintSuccess("Finished!");
+                            Console.ForegroundColor = ConsoleColor.Cyan;
+                            Console.WriteLine(
+                                "  " + Path.GetFileName(args[1]) + " and " +
+                                Path.GetFileNameWithoutExtension(args[1]) + ".dat Being Combined!");
+                            Console.ResetColor();
+                            customFinish = true;
+                        }
                         break;
 
                     case "fixelf":
@@ -282,19 +367,20 @@ namespace HMSTHModdingTool
                     case "cmusic":
                         RequireArgs(args, 2,
                             "-cmusic <input.vag>");
+                        {
+                            string vagPath = args[1];
+                            if (!Path.IsPathRooted(vagPath))
+                                vagPath = Path.Combine(
+                                    Directory.GetCurrentDirectory(),
+                                    vagPath);
 
-                        string vagPath = args[1];
-                        if (!Path.IsPathRooted(vagPath))
-                            vagPath = Path.Combine(
-                                Directory.GetCurrentDirectory(),
-                                vagPath);
+                            Console.ForegroundColor = ConsoleColor.Cyan;
+                            Console.WriteLine(
+                                "Converting VAG to BD/HD/SQ...");
+                            Console.ResetColor();
 
-                        Console.ForegroundColor = ConsoleColor.Cyan;
-                        Console.WriteLine(
-                            "Converting VAG to BD/HD/SQ...");
-                        Console.ResetColor();
-
-                        AudioConverter.ConvertVagToMusic(vagPath);
+                            AudioConverter.ConvertVagToMusic(vagPath);
+                        }
                         break;
 
                     case "xvag":
@@ -332,17 +418,16 @@ namespace HMSTHModdingTool
                             string hdPathX = args[2];
                             int idxX = int.Parse(args[3]);
 
-                            // ── Auto-generate output filename if not provided ─────────
+                            // Auto-generate output filename if not provided
                             // e.g. index 9 → "009.vag", index 73 → "073.vag"
                             string outVag;
-                            if (args.Length >= 5 && !string.IsNullOrEmpty(args[4]))
+                            if (args.Length >= 5 &&
+                                !string.IsNullOrEmpty(args[4]))
                             {
-                                // User provided a filename
                                 outVag = args[4];
                             }
                             else
                             {
-                                // Auto-name by index: 009.vag, 073.vag, etc.
                                 outVag = string.Format("{0:000}.vag", idxX);
                             }
 
@@ -409,8 +494,6 @@ namespace HMSTHModdingTool
                         }
                         break;
 
-                        
-
                     // ════════════════════════════
                     // UNKNOWN COMMAND
                     // ════════════════════════════
@@ -423,7 +506,9 @@ namespace HMSTHModdingTool
                         return;
                 }
 
-                TextOut.PrintSuccess("Finished!");
+                // Generic finish — skipped if the case handled it itself
+                if (!customFinish)
+                    TextOut.PrintSuccess("Finished!");
             }
             catch (FileNotFoundException e)
             {
@@ -587,6 +672,10 @@ namespace HMSTHModdingTool
                 "  -xtxt   / xtxt   <text.bin> <ptr.bin> <out.txt>");
             Console.WriteLine(
                 "  -ctxt   / ctxt   <in.txt> <text.bin> <ptr.bin>");
+            Console.WriteLine(
+                "  NOTE: -xtxt also creates a <out.dat> companion file.");
+            Console.WriteLine(
+                "        Keep it next to your .txt — needed for -ctxt!");
             Console.WriteLine();
 
             // ── ELF Commands ──────────────────────
@@ -692,6 +781,20 @@ namespace HMSTHModdingTool
                 "  tool.exe chda ./folder game.hda");
             Console.WriteLine();
 
+            // Text examples
+            Console.WriteLine(
+                "  tool.exe -xtxt File_00001.bin File_00000.bin hayato.txt");
+            Console.WriteLine(
+                "  → Creates: hayato.txt");
+            Console.WriteLine(
+                "             hayato.dat  (companion — keep next to .txt!)");
+            Console.WriteLine();
+            Console.WriteLine(
+                "  tool.exe -ctxt hayato.txt File_00001.bin File_00000.bin");
+            Console.WriteLine(
+                "  → Requires: hayato.txt + hayato.dat in the same folder");
+            Console.WriteLine();
+
             // GDTB examples
             Console.WriteLine(
                 "  tool.exe -igdtb textures.gdtb");
@@ -758,7 +861,6 @@ namespace HMSTHModdingTool
                 "             MYSONG\\MYSONG.SQ");
             Console.WriteLine();
 
-            // Audio examples
             Console.WriteLine(
                 "  tool.exe -xvag MUSIC.BD MUSIC.HD 9");
             Console.WriteLine(
