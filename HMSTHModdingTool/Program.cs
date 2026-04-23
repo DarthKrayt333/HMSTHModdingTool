@@ -150,13 +150,31 @@ namespace HMSTHModdingTool
                     case "xhda":
                         RequireArgs(args, 3,
                             "-xhda <file.hda> <out_folder>");
-                        HarvestDataArchive.Unpack(args[1], args[2]);
+                        {
+                            // Uppercase only the last folder name segment
+                            string xhdaOut = args[2];
+                            string xhdaDir = Path.GetDirectoryName(xhdaOut);
+                            string xhdaName = Path.GetFileName(xhdaOut).ToUpper();
+                            xhdaOut = string.IsNullOrEmpty(xhdaDir)
+                                ? xhdaName
+                                : Path.Combine(xhdaDir, xhdaName);
+                            HarvestDataArchive.Unpack(args[1], xhdaOut);
+                        }
                         break;
 
                     case "chda":
                         RequireArgs(args, 3,
                             "-chda <in_folder> <file.hda>");
-                        HarvestDataArchive.Pack(args[2], args[1]);
+                        {
+                            // Uppercase only the output .hda filename segment
+                            string chdaOut = args[2];
+                            string chdaDir = Path.GetDirectoryName(chdaOut);
+                            string chdaName = Path.GetFileName(chdaOut).ToUpper();
+                            chdaOut = string.IsNullOrEmpty(chdaDir)
+                                ? chdaName
+                                : Path.Combine(chdaDir, chdaName);
+                            HarvestDataArchive.Pack(chdaOut, args[1]);
+                        }
                         break;
 
                     // ════════════════════════════
@@ -190,7 +208,7 @@ namespace HMSTHModdingTool
                                     "  These must be two different files.");
                                 Console.ForegroundColor = ConsoleColor.Cyan;
                                 Console.WriteLine(
-                                    "  Example: -xtxt File_00001.bin File_00000.bin out.txt");
+                                    "  Example: -xtxt <text.bin> <ptr.bin> <out.txt>");
                                 Console.ResetColor();
                                 Console.WriteLine();
                                 customFinish = true;
@@ -250,7 +268,7 @@ namespace HMSTHModdingTool
                             Console.ForegroundColor = ConsoleColor.Cyan;
                             Console.WriteLine(
                                 "  " + Path.GetFileName(args[1]) + " and " +
-                                Path.GetFileNameWithoutExtension(args[1]) + ".dat Being Combined!");
+                                Path.GetFileNameWithoutExtension(args[1]) + ".dat Being Combined and Completed!");
                             Console.ResetColor();
                             customFinish = true;
                         }
