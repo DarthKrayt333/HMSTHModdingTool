@@ -2,6 +2,8 @@ using HMSTHModdingTool;
 using HMSTHModdingTool.BMP;
 using HMSTHModdingTool.GDTB;
 using HMSTHModdingTool.IO;
+using HMSTHModdingTool.IO.Compression;
+using HMSTHModdingTool.RDTB;
 using System;
 using System.IO;
 
@@ -15,7 +17,7 @@ namespace HMSTHModdingTool
         const string TOOL_NAME =
             "HMSTHModdingTool original as HDATextTool by gdkchan";
         const string TOOL_VERSION =
-            "v1.3.0-Beta";
+            "v1.4.0-Beta";
         const string TOOL_AUTHOR =
             "gdkchan + DarthKrayt333 & HMSTH Community";
 
@@ -163,17 +165,158 @@ namespace HMSTHModdingTool
                         break;
 
                     case "chda":
-                        RequireArgs(args, 3,
-                            "-chda <in_folder> <file.hda>");
+                        // ── chda <folder> <out.hda>              (compressed, default)
+                        // ── chda uncomp <folder> <out.hda>       (uncompressed)
+                        if (args.Length >= 2 &&
+                            args[1].ToLower() == "uncomp")
                         {
-                            // Uppercase only the output .hda filename segment
+                            // -chda uncomp <in_folder> <file.hda>
+                            RequireArgs(args, 4,
+                                "-chda uncomp <in_folder> <file.hda>");
+
+                            string chdaOut = args[3];
+                            string chdaDir =
+                                Path.GetDirectoryName(chdaOut);
+                            string chdaName =
+                                Path.GetFileName(chdaOut).ToUpper();
+                            chdaOut =
+                                string.IsNullOrEmpty(chdaDir)
+                                    ? chdaName
+                                    : Path.Combine(chdaDir, chdaName);
+
+                            Console.ForegroundColor = ConsoleColor.Cyan;
+                            Console.WriteLine(
+                                "Packing uncompressed HDA...");
+                            Console.ResetColor();
+
+                            HarvestDataArchive.Pack(chdaOut, args[2]);
+                        }
+                        else
+                        {
+                            // -chda <in_folder> <file.hda>
+                            // Default = compressed
+                            RequireArgs(args, 3,
+                                "-chda <in_folder> <file.hda>");
+
                             string chdaOut = args[2];
-                            string chdaDir = Path.GetDirectoryName(chdaOut);
-                            string chdaName = Path.GetFileName(chdaOut).ToUpper();
-                            chdaOut = string.IsNullOrEmpty(chdaDir)
-                                ? chdaName
-                                : Path.Combine(chdaDir, chdaName);
-                            HarvestDataArchive.Pack(chdaOut, args[1]);
+                            string chdaDir =
+                                Path.GetDirectoryName(chdaOut);
+                            string chdaName =
+                                Path.GetFileName(chdaOut).ToUpper();
+                            chdaOut =
+                                string.IsNullOrEmpty(chdaDir)
+                                    ? chdaName
+                                    : Path.Combine(chdaDir, chdaName);
+
+                            HarvestDataArchive.PackCompressed(
+                                chdaOut, args[1]);
+                        }
+                        break;
+
+                    // ════════════════════════════
+                    // SINGLE FILE COMPRESS
+                    // ════════════════════════════
+                    case "compress":
+                        RequireArgs(args, 3,
+                            "-compress <input_file> <output_file>");
+
+                        {
+                            string inPath = args[1];
+                            string outPath = args[2];
+
+                            if (!File.Exists(inPath))
+                            {
+                                TextOut.PrintError(
+                                    "Input file not found: " + inPath);
+                                return;
+                            }
+
+                            byte[] raw = File.ReadAllBytes(inPath);
+
+                            Console.ForegroundColor = ConsoleColor.Cyan;
+                            Console.WriteLine(
+                                "Compressing single file...");
+                            Console.ResetColor();
+
+                            var sw = System.Diagnostics.Stopwatch.StartNew();
+
+                            byte[] comp =
+                                HarvestCompression.Compress(
+                                    raw,
+                                    (cur, total) =>
+                                    {
+                                        // Optional progress display
+                                        double pct =
+                                            total == 0
+                                            ? 100
+                                            : (double)cur * 100.0 / total;
+
+                                        Console.Error.Write(
+                                            "\r  {0:F1}%  ({1:N0}/{2:N0})   ",
+                                            pct, cur, total);
+                                    });
+
+                            sw.Stop();
+                            Console.Error.Write(
+                                "\r" + new string(' ', 50) + "\r");
+
+                            File.WriteAllBytes(outPath, comp);
+
+                            double ratio =
+                                raw.Length == 0
+                                ? 0
+                                : (double)comp.Length / raw.Length * 100.0;
+
+                            Console.ForegroundColor =
+                                ConsoleColor.Green;
+                            Console.WriteLine(
+                                "Done!  {0:N0} → {1:N0} bytes  ({2:F1}%)  in {3:F2}s",
+                                raw.Length,
+                                comp.Length,
+                                ratio,
+                                sw.Elapsed.TotalSeconds);
+                            Console.ResetColor();
+                        }
+                        break;
+
+
+                    // ════════════════════════════
+                    // SINGLE FILE UNCOMPRESS
+                    // ════════════════════════════
+                    case "uncompress":
+                        RequireArgs(args, 3,
+                            "-uncompress <input_file> <output_file>");
+
+                        {
+                            string inPath = args[1];
+                            string outPath = args[2];
+
+                            if (!File.Exists(inPath))
+                            {
+                                TextOut.PrintError(
+                                    "Input file not found: " + inPath);
+                                return;
+                            }
+
+                            byte[] comp = File.ReadAllBytes(inPath);
+
+                            Console.ForegroundColor = ConsoleColor.Cyan;
+                            Console.WriteLine(
+                                "Decompressing single file...");
+                            Console.ResetColor();
+
+                            byte[] raw =
+                                HarvestCompression.Decompress(comp);
+
+                            File.WriteAllBytes(outPath, raw);
+
+                            Console.ForegroundColor =
+                                ConsoleColor.Green;
+                            Console.WriteLine(
+                                "Done!  {0:N0} → {1:N0} bytes",
+                                comp.Length,
+                                raw.Length);
+                            Console.ResetColor();
                         }
                         break;
 
@@ -281,6 +424,73 @@ namespace HMSTHModdingTool
                             args[1],
                             uint.Parse(args[2]),
                             uint.Parse(args[3]));
+                        break;
+
+                    // ════════════════════════════
+                    // RDTB COMMANDS
+                    // ════════════════════════════
+                    case "irdtb":
+                        RequireArgs(args, 2,
+                            "-irdtb <file.rdtb>");
+                        RDTBArchive.Info(args[1]);
+                        break;
+
+                    case "irdtbnb":
+                        RequireArgs(args, 2,
+                            "-irdtbnb <file.rdtb>");
+                        RDTBArchive.InfoNoBones(args[1]);
+                        break;
+
+                    case "xrdtb":
+                        RequireArgs(args, 3,
+                            "-xrdtb <file.rdtb> <out_folder>");
+                        RDTBArchive.Extract(args[1], args[2]);
+                        break;
+
+                    case "crdtb":
+                        RequireArgs(args, 3,
+                            "-crdtb <in_folder> <file.rdtb>");
+                        RDTBArchive.Create(args[1], args[2]);
+                        break;
+
+                    case "srdtb":
+                        RequireArgs(args, 2,
+                            "-srdtb <file.rdtb>");
+                        RDTBArchive.Skeleton(args[1]);
+                        break;
+
+                    case "rrdtb":
+                        RequireArgs(args, 3,
+                            "-rrdtb <file_a.rdtb> <file_b.rdtb>");
+                        RDTBArchive.Compare(args[1], args[2]);
+                        break;
+
+                    case "vrdtb":
+                        RequireArgs(args, 3,
+                            "-vrdtb <original.rdtb> <rebuilt.rdtb>");
+                        RDTBArchive.Verify(args[1], args[2]);
+                        break;
+
+                    case "rcrdtb":
+                        RequireArgs(args, 4,
+                            "-rcrdtb <file.rdtb> <index> <chunk.bin>");
+                        {
+                            int rcIdx;
+                            if (!int.TryParse(args[2], out rcIdx))
+                            {
+                                TextOut.PrintError(
+                                    "Invalid index: " + args[2]);
+                                return;
+                            }
+                            RDTBArchive.ReplaceChunk(
+                                args[1], rcIdx, args[3]);
+                        }
+                        break;
+
+                    case "scanrdtb":
+                        RequireArgs(args, 2,
+                            "-scanrdtb <folder>");
+                        RDTBArchive.ScanFolder(args[1]);
                         break;
 
                     // ════════════════════════════
@@ -619,15 +829,21 @@ namespace HMSTHModdingTool
             var knownCommands =
                 new System.Collections.Generic.HashSet<string>
             {
-                "xhda",    "chda",
-                "xtxt",    "ctxt",
+                "xhda",     "chda",
+                "compress", "uncompress",
+                "xtxt",     "ctxt",
                 "fixelf",
-                "igdtb",   "xgdtb",  "cgdtb",
-                "rgdtb",   "rfgdtb", "cngdtb",
-                "tops2bmp","towinbmp",
-                "xbmppal", "rbmppal",
+                "irdtb",    "irdtbnb",
+                "xrdtb",    "crdtb",
+                "srdtb",    "rrdtb",
+                "vrdtb",    "rcrdtb",
+                "scanrdtb",
+                "igdtb",    "xgdtb",   "cgdtb",
+                "rgdtb",    "rfgdtb",  "cngdtb",
+                "tops2bmp", "towinbmp",
+                "xbmppal",  "rbmppal",
                 "cmusic",
-                "xvag",    "rvag"
+                "xvag",     "rvag"
             };
 
             bool firstIsCommand =
@@ -677,9 +893,25 @@ namespace HMSTHModdingTool
             Console.WriteLine("=== HDA Archive ===");
             Console.ResetColor();
             Console.WriteLine(
-                "  -xhda   / xhda   <file.hda> <out_folder>");
+                "  -xhda          / xhda          <file.hda> <out_folder>");
             Console.WriteLine(
-                "  -chda   / chda   <in_folder> <file.hda>");
+                "  -chda          / chda          <in_folder> <file.hda>");
+            Console.WriteLine(
+                "    Default: creates compressed HDA (recommended)");
+            Console.WriteLine(
+                "  -chda uncomp   / chda uncomp   <in_folder> <file.hda>");
+            Console.WriteLine(
+                "    Creates uncompressed HDA (larger, use only if needed)");
+            Console.WriteLine();
+
+            // ── Single File Compression ─────────────────────
+            Console.ForegroundColor = ConsoleColor.White;
+            Console.WriteLine("=== Single File Compression ===");
+            Console.ResetColor();
+            Console.WriteLine(
+                "  -compress   / compress   <input_file> <output_file>");
+            Console.WriteLine(
+                "  -uncompress / uncompress <input_file> <output_file>");
             Console.WriteLine();
 
             // ── Text Commands ─────────────────────
@@ -702,6 +934,109 @@ namespace HMSTHModdingTool
             Console.ResetColor();
             Console.WriteLine(
                 "  -fixelf / fixelf <SLUS> <lba> <size>");
+            Console.WriteLine();
+
+            // ── RDTB Commands ─────────────────────
+            Console.ForegroundColor = ConsoleColor.Magenta;
+            Console.WriteLine("=== RDTB Model Archive ===");
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine(
+                "  Show full info including bone list");
+            Console.ForegroundColor = ConsoleColor.White;
+            Console.WriteLine(
+                "    -irdtb   / irdtb   <file.rdtb>");
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine(
+                "  Show info without bone list");
+            Console.ForegroundColor = ConsoleColor.White;
+            Console.WriteLine(
+                "    -irdtbnb / irdtbnb <file.rdtb>");
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine(
+                "  Extract all chunks + skeleton.csv + manifest");
+            Console.ForegroundColor = ConsoleColor.White;
+            Console.WriteLine(
+                "    -xrdtb   / xrdtb   <file.rdtb> <out_folder>");
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine(
+                "  Rebuild RDTB from extracted folder");
+            Console.ForegroundColor = ConsoleColor.White;
+            Console.WriteLine(
+                "    -crdtb   / crdtb   <in_folder> <file.rdtb>");
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine(
+                "  Show ASCII skeleton bone tree");
+            Console.ForegroundColor = ConsoleColor.White;
+            Console.WriteLine(
+                "    -srdtb   / srdtb   <file.rdtb>");
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine(
+                "  Compare two RDTB files structurally");
+            Console.ForegroundColor = ConsoleColor.White;
+            Console.WriteLine(
+                "    -rrdtb   / rrdtb   <file_a.rdtb> <file_b.rdtb>");
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine(
+                "  Byte-for-byte verify rebuild vs original");
+            Console.ForegroundColor = ConsoleColor.White;
+            Console.WriteLine(
+                "    -vrdtb   / vrdtb   <original.rdtb> <rebuilt.rdtb>");
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine(
+                "  Replace a single chunk by index");
+            Console.WriteLine(
+                "  Safe warnings for skeleton/mesh/UV chunks");
+            Console.ForegroundColor = ConsoleColor.White;
+            Console.WriteLine(
+                "    -rcrdtb  / rcrdtb  <file.rdtb> <index> <chunk.bin>");
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine(
+                "  Scan folder for all .rdtb files");
+            Console.WriteLine(
+                "  Classifies each as player/NPC/prop/tool");
+            Console.ForegroundColor = ConsoleColor.White;
+            Console.WriteLine(
+                "    -scanrdtb / scanrdtb <folder>");
+            Console.WriteLine();
+
+            // ── RDTB Examples ─────────────────────
+            Console.ForegroundColor = ConsoleColor.DarkYellow;
+            Console.WriteLine("=== RDTB Examples ===");
+            Console.ResetColor();
+            Console.ForegroundColor = ConsoleColor.White;
+
+            Console.WriteLine(
+                "  tool.exe -irdtb   BOY_00000.rdtb");
+            Console.WriteLine(
+                "  tool.exe -irdtbnb HAYATO_00000.rdtb");
+            Console.WriteLine(
+                "  tool.exe -xrdtb   BOY_00000.rdtb ./boy_out");
+            Console.WriteLine(
+                "  tool.exe -crdtb   ./boy_out BOY_00000.rdtb");
+            Console.WriteLine(
+                "  tool.exe -srdtb   BOY_00000.rdtb");
+            Console.WriteLine(
+                "  tool.exe -rrdtb   BOY_00000.rdtb HAYATO_00000.rdtb");
+            Console.WriteLine(
+                "  tool.exe -vrdtb   BOY_00000.rdtb BOY_rebuilt.rdtb");
+            Console.WriteLine(
+                "  tool.exe -rcrdtb  BOY_00000.rdtb 2 kurt_mesh.bin");
+            Console.WriteLine(
+                "  tool.exe -rcrdtb  BOY_00000.rdtb 11 kurt_uv.bin");
+            Console.WriteLine(
+                "  tool.exe -scanrdtb ./extracted_game");
+            Console.WriteLine(
+                "  tool.exe -scanrdtb ./hayato_out");
+            Console.ResetColor();
             Console.WriteLine();
 
             // ── GDTB Commands ─────────────────────
@@ -788,15 +1123,12 @@ namespace HMSTHModdingTool
             Console.ResetColor();
             Console.ForegroundColor = ConsoleColor.DarkGray;
 
-            // HDA examples
+            // ── Single File Compression ─────────────────────
+
             Console.WriteLine(
-                "  tool.exe -xhda game.hda ./output");
+                "  tool.exe -compress BOY_00001.bin BOY_00001_comp.bin");
             Console.WriteLine(
-                "  tool.exe xhda game.hda ./output");
-            Console.WriteLine(
-                "  tool.exe -chda ./folder game.hda");
-            Console.WriteLine(
-                "  tool.exe chda ./folder game.hda");
+                "  tool.exe -uncompress BOY_00001_comp.bin BOY_00001.bin");
             Console.WriteLine();
 
             // Text examples
@@ -811,6 +1143,76 @@ namespace HMSTHModdingTool
                 "  tool.exe -ctxt hayato.txt File_00001.bin File_00000.bin");
             Console.WriteLine(
                 "  → Requires: hayato.txt + hayato.dat in the same folder");
+            Console.WriteLine();
+
+            // RDTB examples
+            Console.ForegroundColor = ConsoleColor.DarkYellow;
+            Console.WriteLine(
+                "=== Experimental - RDTB Examples ===");
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine(
+                "  === Info ===");
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "  tool.exe -irdtb   BOY_00000.rdtb          # full info + bones");
+            Console.WriteLine(
+                "  tool.exe -irdtbnb BOY_00000.rdtb          # info without bones");
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine(
+                "  === Extract ===");
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "  tool.exe -xrdtb BOY_00000.rdtb ./boy_extracted");
+            Console.WriteLine(
+                "  tool.exe -xrdtb HAYATO_00000.rdtb ./kurt_extracted");
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine(
+                "  === Rebuild ===");
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "  tool.exe -crdtb ./boy_extracted BOY_00000_new.rdtb");
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine(
+                "  === Skeleton Tree ===");
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "  tool.exe -srdtb BOY_00000.rdtb");
+            Console.WriteLine(
+                "  tool.exe -srdtb HAYATO_00000.rdtb");
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine(
+                "  === Compare two models ===");
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "  tool.exe -rrdtb BOY_00000.rdtb HAYATO_00000.rdtb");
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine(
+                "  === Verify byte-perfect rebuild ===");
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "  tool.exe -vrdtb BOY_00000.rdtb BOY_00000_new.rdtb");
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine(
+                "  === Replace ===");
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "  -rcrdtb  / rcrdtb  " +
+                "<file.rdtb> <index> <chunk.bin>");
+            Console.WriteLine(
+                "    Replace single chunk by index");
+            Console.WriteLine(
+                "    Example:");
+            Console.WriteLine(
+                "    tool.exe -rcrdtb BOY_00000.rdtb " +
+                "2 kurt_02_mesh_main.bin");
+
+            Console.ResetColor();
             Console.WriteLine();
 
             // GDTB examples
@@ -904,9 +1306,39 @@ namespace HMSTHModdingTool
             Console.WriteLine(
                 "    (stops at max index if folder has more,");
             Console.WriteLine(
-                "     replaces only up to folder count if fewer)");
+                "     replaces only up to folder count if fewer)");            
+            Console.WriteLine();
 
-            Console.ResetColor();
+            // HDA examples
+            Console.ForegroundColor = ConsoleColor.DarkYellow;
+            Console.WriteLine(
+                "=== HDA Examples ===");
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "  tool.exe -xhda game.hda ./output");
+            Console.WriteLine(
+                "  tool.exe xhda game.hda ./output");
+            Console.WriteLine();
+            Console.WriteLine(
+                "  tool.exe -chda uncomp HAYATO HAYATONEW.HDA");
+            Console.WriteLine(
+                "    → Packs HAYATO folder into HAYATONEW.HDA (uncompressed)");
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.DarkYellow;
+            Console.WriteLine(
+                "  === Highly Recommended Default: Make Compressed Files in HDA ===");
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    tool.exe -chda ./folder game.hda");
+            Console.WriteLine(
+                "    tool.exe chda ./folder game.hda");
+            Console.WriteLine();
+            Console.WriteLine(
+                "    tool.exe -chda HAYATO HAYATONEW.HDA");
+            Console.WriteLine(
+                "      → Packs HAYATO folder into HAYATONEW.HDA (compressed)");
             Console.WriteLine();
         }
     }
