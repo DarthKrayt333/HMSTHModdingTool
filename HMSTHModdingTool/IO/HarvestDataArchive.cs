@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using HMSTHModdingTool.IO.Compression;
@@ -8,31 +9,27 @@ namespace HMSTHModdingTool.IO
 {
     /// <summary>
     ///     Handles the HDA format from Harvest Moon: Save the Homeland.
-    ///     Supports smart file recognition for known formats:
-    ///     .GDTB, .RDTB, .SRDB (3D/Texture archives)
-    ///     .HDA  (nested HDA archives)
-    ///     .BD, .HD, .SQ (PS2 Sound Bank audio)
+    ///
+    ///     Supports:
+    ///       -xhda  : extract (decompress if needed)
+    ///       -chda  : pack uncompressed
+    ///       -chda comp : pack with HMSTH LZO compression + progress bar
     /// </summary>
     class HarvestDataArchive
     {
         // ═══════════════════════════════════════════════════════
-        // MAGIC BYTES - FILE FORMAT SIGNATURES
+        // MAGIC BYTES
         // ═══════════════════════════════════════════════════════
 
-        // "RDTB" - 3D Model/Render Data Table Binary
         private static readonly byte[] MAGIC_RDTB =
             { 0x52, 0x44, 0x54, 0x42 };
 
-        // "GDTB" - Graphics/Texture Data Table Binary
         private static readonly byte[] MAGIC_GDTB =
             { 0x47, 0x44, 0x54, 0x42 };
 
-        // "SRDB" - Stage/Scene Render Data Binary (map models)
         private static readonly byte[] MAGIC_SRDB =
             { 0x53, 0x52, 0x44, 0x42 };
 
-        // HDA - Nested HDA archive
-        // "10 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
         private static readonly byte[] MAGIC_HDA =
         {
             0x10, 0x00, 0x00, 0x00,
@@ -41,54 +38,27 @@ namespace HMSTHModdingTool.IO
             0x00, 0x00, 0x00, 0x00
         };
 
-        // "IECSsreV" - .HD Sound Bank Header
-        // Offset 0x00: 49 45 43 53 73 72 65 56
         private static readonly byte[] MAGIC_HD_START =
             { 0x49, 0x45, 0x43, 0x53, 0x73, 0x72, 0x65, 0x56 };
 
-        // "IECSquoS" - .SQ MIDI Sequence
-        // Offset 0x00: 49 45 43 53 73 72 65 56 (same first 8)
-        // Offset 0x10: 49 45 43 53 75 71 65 53
         private static readonly byte[] MAGIC_SQ_LINE2 =
             { 0x49, 0x45, 0x43, 0x53, 0x75, 0x71, 0x65, 0x53 };
 
         // ═══════════════════════════════════════════════════════
-        // PUBLIC API
+        // UNPACK
         // ═══════════════════════════════════════════════════════
 
-        /// <summary>
-        ///     Unpacks the data inside a HDA file.
-        /// </summary>
-        /// <param name="Data">The full path to the HDA file</param>
-        /// <param name="OutputFolder">
-        ///     The output folder where the files should be placed
-        /// </param>
         public static void Unpack(string Data, string OutputFolder)
         {
             using (FileStream Input =
                 new FileStream(Data, FileMode.Open))
             {
-                // Derive archive base name from file name
-                // e.g. "COMMON.HDA" -> "COMMON"
-                // e.g. "BGM_FRM.HDA" -> "BGM_FRM"
                 string archiveName =
-                    Path.GetFileNameWithoutExtension(Data)
-                        .ToUpper();
-
+                    Path.GetFileNameWithoutExtension(Data).ToUpper();
                 Unpack(Input, OutputFolder, archiveName);
             }
         }
 
-        /// <summary>
-        ///     Unpacks the data inside a HDA file stream.
-        /// </summary>
-        /// <param name="Data">The HDA stream</param>
-        /// <param name="OutputFolder">
-        ///     The output folder where the files should be placed
-        /// </param>
-        /// <param name="archiveName">
-        ///     The base name used for output files (e.g. "COMMON")
-        /// </param>
         public static void Unpack(
             Stream Data,
             string OutputFolder,
@@ -100,11 +70,6 @@ namespace HMSTHModdingTool.IO
             BinaryReader Reader = new BinaryReader(Data);
 
             uint BaseOffset = Reader.ReadUInt32();
-
-            // ── Collect all raw file buffers first ──────────────
-            // We need all buffers before naming audio files,
-            // because .BD/.HD/.SQ identity depends on their
-            // position relative to each other.
             var buffers = new List<byte[]>();
 
             Data.Seek(BaseOffset, SeekOrigin.Begin);
@@ -119,7 +84,7 @@ namespace HMSTHModdingTool.IO
                 bool IsCompressed = Reader.ReadUInt32() == 1;
                 uint DecompressedLength = Reader.ReadUInt32();
                 uint CompressedLength = Reader.ReadUInt32();
-                uint Padding = Reader.ReadUInt32(); // 0x0
+                uint Padding = Reader.ReadUInt32();
 
                 byte[] Buffer = new byte[CompressedLength];
                 Data.Read(Buffer, 0, Buffer.Length);
@@ -135,32 +100,18 @@ namespace HMSTHModdingTool.IO
                     Data.Position - 4 > BaseOffset) break;
             }
 
-            // ── Determine if this is an audio HDA ───────────────
-            // Audio HDA = BAR.HDA / SE.HDA style
-            // Detected by checking if files match
-            // .BD/.HD/.SQ or .BD/.HD patterns
             bool isAudioHDA = DetectAudioHDA(buffers);
 
-            // ── Write all files with smart names ────────────────
             if (isAudioHDA)
-            {
-                WriteAudioFiles(
-                    buffers, OutputFolder, archiveName);
-            }
+                WriteAudioFiles(buffers, OutputFolder, archiveName);
             else
-            {
-                WriteDataFiles(
-                    buffers, OutputFolder, archiveName);
-            }
+                WriteDataFiles(buffers, OutputFolder, archiveName);
         }
 
         // ═══════════════════════════════════════════════════════
-        // PACK
+        // PACK  — uncompressed  (original behaviour)
         // ═══════════════════════════════════════════════════════
 
-        /// <summary>
-        ///     Packs the data inside a folder into a HDA file.
-        /// </summary>
         public static void Pack(string Data, string InputFolder)
         {
             using (FileStream Output =
@@ -170,19 +121,9 @@ namespace HMSTHModdingTool.IO
             }
         }
 
-        /// <summary>
-        ///     Packs the data inside a folder into a HDA file.
-        ///     Files are sorted to maintain correct order.
-        ///     Named files (e.g. COMMON_00000.GDTB) are
-        ///     sorted by their numeric index so order is
-        ///     preserved correctly on repack.
-        /// </summary>
         public static void Pack(Stream Data, string InputFolder)
         {
-            // Sort files by numeric index embedded in filename
-            // e.g. COMMON_00000.GDTB < COMMON_00003.bin
             string[] Files = GetSortedFiles(InputFolder);
-
             BinaryWriter Writer = new BinaryWriter(Data);
 
             Writer.Write(0x10u);
@@ -199,10 +140,10 @@ namespace HMSTHModdingTool.IO
                 DataOffset += Buffer.Length + 0x10;
                 DataOffset = Align(DataOffset);
 
-                Writer.Write(0u); // Uncompressed
-                Writer.Write(Buffer.Length);
-                Writer.Write(Buffer.Length);
-                Writer.Write(0u);
+                Writer.Write(0u);               // uncompressed flag
+                Writer.Write(Buffer.Length);    // decompressed size
+                Writer.Write(Buffer.Length);    // stored size
+                Writer.Write(0u);               // padding
 
                 Data.Write(Buffer, 0, Buffer.Length);
             }
@@ -212,61 +153,287 @@ namespace HMSTHModdingTool.IO
         }
 
         // ═══════════════════════════════════════════════════════
-        // AUDIO HDA DETECTION
+        // PACK COMPRESSED
         // ═══════════════════════════════════════════════════════
 
         /// <summary>
-        ///     Detects whether this HDA is an audio archive.
+        ///     Packs all files from InputFolder into a HDA archive,
+        ///     compressing each file with the HMSTH LZO compressor.
         ///
-        ///     Audio HDA patterns:
-        ///     BGM style:  [BD] [HD] [SQ]  (3 files)
-        ///     SE  style:  [BD] [HD]        (2 files)
+        ///     HDA entry header layout (16 bytes per file):
+        ///       [0x00] uint32  compressed flag  (1 = compressed)
+        ///       [0x04] uint32  decompressed size
+        ///       [0x08] uint32  compressed (stored) size
+        ///       [0x0C] uint32  padding (0)
         ///
-        ///     .HD is identified by magic "IECSsreV"
-        ///     .SQ is identified by:
-        ///         offset 0x00: "IECSsreV"
-        ///         offset 0x10: "IECSquoS"
-        ///     .BD has no strict magic but is the
-        ///         first file when HD is second.
+        ///     The offset table at the start of the HDA points to each
+        ///     entry's header (not the data).  The first uint32 of the
+        ///     HDA is the base offset of the offset table itself (0x10).
         /// </summary>
+        public static void PackCompressed(
+            string outputHda,
+            string inputFolder)
+        {
+            string[] files = GetSortedFiles(inputFolder);
+
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine(
+                "  Packing " + files.Length +
+                " file(s) with compression → " +
+                Path.GetFileName(outputHda));
+            Console.ResetColor();
+            Console.WriteLine();
+
+            // ── Compress all files first ──────────────────────
+            // We need sizes before we can write the offset table.
+            var rawDatas = new byte[files.Length][];
+            var compDatas = new byte[files.Length][];
+
+            long totalRaw = 0;
+            long totalComp = 0;
+
+            for (int i = 0; i < files.Length; i++)
+            {
+                string fname = Path.GetFileName(files[i]);
+                rawDatas[i] = File.ReadAllBytes(files[i]);
+                int rawLen = rawDatas[i].Length;
+                totalRaw += rawLen;
+
+                Console.ForegroundColor = ConsoleColor.White;
+                Console.Write(
+                    "  [{0}/{1}] {2,-30}  ",
+                    i + 1, files.Length,
+                    fname.Length > 30
+                        ? fname.Substring(0, 27) + "..."
+                        : fname);
+                Console.ResetColor();
+
+                // ── Compression progress bar ──────────────────
+                var sw = Stopwatch.StartNew();
+
+                // We pass a callback that draws the progress bar.
+                // The callback is invoked for each percentage point.
+                int barWidth = 38;
+                int lastDrawn = -1;
+
+                void OnProgress(int cur, int total)
+                {
+                    double frac = total == 0
+                        ? 1.0
+                        : (double)cur / total;
+                    int pct = (int)(frac * 100.0);
+                    if (pct == lastDrawn) return;
+                    lastDrawn = pct;
+
+                    double elSec = sw.Elapsed.TotalSeconds;
+                    double mbDone = cur / 1048576.0;
+                    double mbTotal = total / 1048576.0;
+                    double mbps = elSec > 0
+                        ? (cur / 1048576.0) / elSec
+                        : 0;
+                    double eta = (mbps > 0 && frac < 1.0)
+                        ? (total - cur) / 1048576.0 / mbps
+                        : 0;
+
+                    int filled = (int)(frac * barWidth);
+                    var bar = new StringBuilder("[");
+                    for (int b = 0; b < barWidth; b++)
+                        bar.Append(b < filled ? '█' : '░');
+                    bar.Append(']');
+
+                    // Format sizes with KB/MB auto-switch
+                    string sizeStr = total < 1024 * 1024
+                        ? string.Format(
+                            "{0:F1}/{1:F1} KB",
+                            cur / 1024.0,
+                            total / 1024.0)
+                        : string.Format(
+                            "{0:F1}/{1:F1} MB",
+                            mbDone, mbTotal);
+
+                    string line = string.Format(
+                        "\r    Compressing: {0} {1,5:F1}%  {2}  {3:F1} MB/s  ETA {4:F0}s   ",
+                        bar, frac * 100.0, sizeStr, mbps, eta);
+
+                    // Write to stderr so it doesn't pollute stdout
+                    Console.Error.Write(line);
+                }
+
+                compDatas[i] = HarvestCompression.Compress(
+                    rawDatas[i],
+                    OnProgress);
+
+                sw.Stop();
+                double elTotal = sw.Elapsed.TotalSeconds;
+                double ratioVal = rawLen == 0
+                    ? 0
+                    : (double)compDatas[i].Length / rawLen * 100.0;
+                totalComp += compDatas[i].Length;
+
+                // Clear the progress line and print final status
+                Console.Error.Write(
+                    "\r" + new string(' ', 100) + "\r");
+
+                // Final bar (100%)
+                string doneBar =
+                    "[" + new string('█', barWidth) + "]";
+
+                // Format sizes
+                string doneSizes = rawLen < 1024 * 1024
+                    ? string.Format(
+                        "{0:F1}/{1:F1} KB",
+                        rawLen / 1024.0,
+                        rawLen / 1024.0)
+                    : string.Format(
+                        "{0:F1}/{1:F1} MB",
+                        rawLen / 1048576.0,
+                        rawLen / 1048576.0);
+
+                double mbpsAvg = elTotal > 0
+                    ? rawLen / 1048576.0 / elTotal
+                    : 0;
+
+                // Print the "Done" line on stderr
+                Console.Error.WriteLine(
+                    string.Format(
+                        "    Compressing: {0} {1,5:F1}%  {2}  " +
+                        "{3:F1} MB/s  ETA 0s   " +
+                        "✓ Done in {4:F2}s  " +
+                        "({5:N0} bytes compressed, {6:F1}% of original)",
+                        doneBar,
+                        100.0,
+                        doneSizes,
+                        mbpsAvg,
+                        elTotal,
+                        compDatas[i].Length,
+                        ratioVal));
+
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine("✓");
+                Console.ResetColor();
+            }
+
+            // ── Write the HDA file ────────────────────────────
+            using (FileStream fs =
+                new FileStream(outputHda, FileMode.Create))
+            using (BinaryWriter wr = new BinaryWriter(fs))
+            {
+                // Base offset of offset table = 0x10
+                wr.Write(0x10u);
+                // 12 bytes padding to reach 0x10
+                wr.Write(0u); wr.Write(0u); wr.Write(0u);
+
+                // Calculate where each file's header starts.
+                // Offset table: files.Length * 4 bytes, aligned to 16.
+                // Each entry: 16-byte header + data + alignment.
+                int dataStart = Align(files.Length * 4);
+                var entryOffsets = new int[files.Length];
+                int cursor = dataStart;
+
+                for (int i = 0; i < files.Length; i++)
+                {
+                    entryOffsets[i] = cursor;
+                    // 16-byte header + compressed data + alignment
+                    int entrySize = 0x10 + compDatas[i].Length;
+                    entrySize = Align(entrySize);
+                    cursor += entrySize;
+                }
+
+                // Write offset table
+                for (int i = 0; i < files.Length; i++)
+                {
+                    fs.Seek(0x10 + i * 4, SeekOrigin.Begin);
+                    wr.Write((uint)entryOffsets[i]);
+                }
+
+                // Write each entry
+                for (int i = 0; i < files.Length; i++)
+                {
+                    fs.Seek(entryOffsets[i] + 0x10,
+                            SeekOrigin.Begin);
+
+                    int rawLen = rawDatas[i].Length;
+                    int compLen = compDatas[i].Length;
+
+                    wr.Write(1u);               // compressed flag = 1
+                    wr.Write((uint)rawLen);     // decompressed size
+                    wr.Write((uint)compLen);    // compressed size
+                    wr.Write(0u);               // padding
+
+                    fs.Write(compDatas[i], 0, compLen);
+
+                    // Align to 16-byte boundary
+                    while ((fs.Position & 0xF) != 0)
+                        fs.WriteByte(0);
+                }
+            }
+
+            // ── Summary ───────────────────────────────────────
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine("  ── Summary ──────────────────────────────");
+            Console.WriteLine(
+                string.Format(
+                    "  Files packed  : {0}",
+                    files.Length));
+            Console.WriteLine(
+                string.Format(
+                    "  Raw total     : {0:N0} bytes  ({1:F2} MB)",
+                    totalRaw,
+                    totalRaw / 1048576.0));
+            Console.WriteLine(
+                string.Format(
+                    "  Compressed    : {0:N0} bytes  ({1:F2} MB)",
+                    totalComp,
+                    totalComp / 1048576.0));
+
+            // HDA file size
+            long hdaSize = new FileInfo(outputHda).Length;
+            Console.WriteLine(
+                string.Format(
+                    "  HDA file size : {0:N0} bytes  ({1:F2} MB)",
+                    hdaSize,
+                    hdaSize / 1048576.0));
+
+            double overallRatio = totalRaw == 0
+                ? 0
+                : (double)totalComp / totalRaw * 100.0;
+            Console.WriteLine(
+                string.Format(
+                    "  Overall ratio : {0:F1}%",
+                    overallRatio));
+            Console.WriteLine(
+                "  Output        : " + outputHda);
+            Console.WriteLine(
+                "  ─────────────────────────────────────────");
+            Console.ResetColor();
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // AUDIO HDA DETECTION
+        // ═══════════════════════════════════════════════════════
+
         private static bool DetectAudioHDA(List<byte[]> buffers)
         {
             if (buffers.Count < 2 || buffers.Count > 3)
                 return false;
-
-            // Check if file[1] is .HD
-            if (!IsHDFile(buffers[1]))
+            if (!IsHDFile(buffers[1])) return false;
+            if (buffers.Count == 3 && !IsSQFile(buffers[2]))
                 return false;
-
-            // For 3-file archive, check file[2] is .SQ
-            if (buffers.Count == 3 &&
-                !IsSQFile(buffers[2]))
-                return false;
-
             return true;
         }
 
         // ═══════════════════════════════════════════════════════
-        // WRITE AUDIO FILES  (no _XXXXX numbering)
+        // WRITE HELPERS
         // ═══════════════════════════════════════════════════════
 
-        /// <summary>
-        ///     Writes audio files with names:
-        ///     BGM_FRM.BD, BGM_FRM.HD, BGM_FRM.SQ
-        ///     or
-        ///     SE.BD, SE.HD
-        ///
-        ///     The archiveName IS the track/bank name.
-        ///     Order: BD first, HD second, SQ third.
-        /// </summary>
         private static void WriteAudioFiles(
             List<byte[]> buffers,
             string outputFolder,
             string archiveName)
         {
-            // Extensions in order: BD, HD, SQ
-            string[] audioExt =
-                { ".BD", ".HD", ".SQ" };
+            string[] audioExt = { ".BD", ".HD", ".SQ" };
 
             for (int i = 0; i < buffers.Count; i++)
             {
@@ -280,31 +447,12 @@ namespace HMSTHModdingTool.IO
 
                 File.WriteAllBytes(filePath, buffers[i]);
 
-                Console.ForegroundColor =
-                    ConsoleColor.Cyan;
-                Console.WriteLine(
-                    "  [AUDIO] " + fileName);
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.WriteLine("  [AUDIO] " + fileName);
                 Console.ResetColor();
             }
         }
 
-        // ═══════════════════════════════════════════════════════
-        // WRITE DATA FILES  (with _XXXXX numbering + extension)
-        // ═══════════════════════════════════════════════════════
-
-        /// <summary>
-        ///     Writes data files using smart naming:
-        ///
-        ///     Recognized:
-        ///       COMMON_00000.GDTB
-        ///       COMMON_00003.RDTB
-        ///       COMMON_00008.SRDB
-        ///       COMMON_00001.HDA  (nested)
-        ///
-        ///     Unrecognized:
-        ///       COMMON_00001.bin
-        ///       COMMON_00002.bin
-        /// </summary>
         private static void WriteDataFiles(
             List<byte[]> buffers,
             string outputFolder,
@@ -312,220 +460,117 @@ namespace HMSTHModdingTool.IO
         {
             for (int i = 0; i < buffers.Count; i++)
             {
-                // 0-based index, 5 digits: _00000
-                int fileNumber = i;
-
-                string detectedExt =
-                    DetectExtension(buffers[i]);
+                string detectedExt = DetectExtension(buffers[i]);
 
                 string fileName = (detectedExt == ".HDA")
                     ? string.Format(
                         "{0}_{1:D2}{2}",
-                        archiveName,
-                        fileNumber,
-                        detectedExt)
+                        archiveName, i, detectedExt)
                     : string.Format(
                         "{0}_{1:D5}{2}",
-                        archiveName,
-                        fileNumber,
-                        detectedExt);
+                        archiveName, i, detectedExt);
 
                 string filePath =
                     Path.Combine(outputFolder, fileName);
 
                 File.WriteAllBytes(filePath, buffers[i]);
 
-                // Color-code output by type
                 if (detectedExt == ".bin")
                 {
-                    Console.ForegroundColor =
-                        ConsoleColor.DarkGray;
-                    Console.WriteLine(
-                        "  [???]   " + fileName);
+                    Console.ForegroundColor = ConsoleColor.DarkGray;
+                    Console.WriteLine("  [???]   " + fileName);
                 }
                 else
                 {
-                    Console.ForegroundColor =
-                        ConsoleColor.Green;
+                    Console.ForegroundColor = ConsoleColor.Green;
                     Console.WriteLine(
                         "  [" +
                         detectedExt.TrimStart('.')
-                            .PadRight(4) +
+                                   .PadRight(4) +
                         "] " + fileName);
                 }
-
                 Console.ResetColor();
             }
         }
 
         // ═══════════════════════════════════════════════════════
-        // FILE FORMAT DETECTION
+        // EXTENSION DETECTION
         // ═══════════════════════════════════════════════════════
 
-        /// <summary>
-        ///     Detects the file extension based on magic bytes.
-        ///     Returns ".GDTB", ".RDTB", ".SRDB", ".HDA",
-        ///             ".HD",   ".SQ",  or ".bin"
-        /// </summary>
         private static string DetectExtension(byte[] data)
         {
             if (data == null || data.Length < 4)
                 return ".bin";
 
-            // ── 4-byte magic checks ────────────────────────────
-            if (StartsWith(data, MAGIC_GDTB))
-                return ".gdtb";
+            if (StartsWith(data, MAGIC_GDTB)) return ".gdtb";
+            if (StartsWith(data, MAGIC_RDTB)) return ".rdtb";
+            if (StartsWith(data, MAGIC_SRDB)) return ".srdb";
 
-            if (StartsWith(data, MAGIC_RDTB))
-                return ".rdtb";
-
-            if (StartsWith(data, MAGIC_SRDB))
-                return ".srdb";
-
-            // ── 16-byte HDA magic ──────────────────────────────
-            if (data.Length >= 16 &&
-                StartsWith(data, MAGIC_HDA))
+            if (data.Length >= 16 && StartsWith(data, MAGIC_HDA))
                 return ".HDA";
 
-            // ── Audio file checks ──────────────────────────────
-            // .SQ must be checked BEFORE .HD
-            // because .SQ also starts with MAGIC_HD_START
-            if (IsSQFile(data))
-                return ".SQ";
+            if (IsSQFile(data)) return ".SQ";
+            if (IsHDFile(data)) return ".HD";
 
-            if (IsHDFile(data))
-                return ".HD";
-
-            // .BD has no reliable magic in all cases.
-            // It is identified by position in audio HDA,
-            // not here. So it falls through to .bin
-            // unless detected in context.
             return ".bin";
         }
 
-        // ─────────────────────────────────────────
-        // .HD Detection
-        // Magic at offset 0x00: 49 45 43 53 73 72 65 56
-        // Second line (0x10) must NOT be SQ marker
-        // ─────────────────────────────────────────
         private static bool IsHDFile(byte[] data)
         {
-            if (data == null || data.Length < 8)
-                return false;
-
-            // Must start with IECSsreV
-            if (!StartsWith(data, MAGIC_HD_START))
-                return false;
-
-            // If it is a .SQ it will also have
-            // MAGIC_SQ_LINE2 at offset 0x10
-            // So if that matches -> it is .SQ not .HD
-            if (IsSQFile(data))
-                return false;
-
+            if (data == null || data.Length < 8) return false;
+            if (!StartsWith(data, MAGIC_HD_START)) return false;
+            if (IsSQFile(data)) return false;
             return true;
         }
 
-        // ─────────────────────────────────────────
-        // .SQ Detection
-        // Offset 0x00: 49 45 43 53 73 72 65 56
-        // Offset 0x10: 49 45 43 53 75 71 65 53
-        // ─────────────────────────────────────────
         private static bool IsSQFile(byte[] data)
         {
-            if (data == null || data.Length < 0x18)
-                return false;
-
-            // First 8 bytes = IECSsreV
-            if (!StartsWith(data, MAGIC_HD_START))
-                return false;
-
-            // Bytes at offset 0x10 = IECSquoS
+            if (data == null || data.Length < 0x18) return false;
+            if (!StartsWith(data, MAGIC_HD_START)) return false;
             for (int i = 0; i < MAGIC_SQ_LINE2.Length; i++)
-            {
-                if (data[0x10 + i] != MAGIC_SQ_LINE2[i])
-                    return false;
-            }
-
+                if (data[0x10 + i] != MAGIC_SQ_LINE2[i]) return false;
             return true;
         }
 
-        // ─────────────────────────────────────────
-        // Byte Array StartsWith helper
-        // ─────────────────────────────────────────
-        private static bool StartsWith(
-            byte[] data,
-            byte[] magic)
+        private static bool StartsWith(byte[] data, byte[] magic)
         {
-            if (data.Length < magic.Length)
-                return false;
-
+            if (data.Length < magic.Length) return false;
             for (int i = 0; i < magic.Length; i++)
-            {
-                if (data[i] != magic[i])
-                    return false;
-            }
-
+                if (data[i] != magic[i]) return false;
             return true;
         }
 
         // ═══════════════════════════════════════════════════════
-        // SORTED FILE LISTING FOR PACK
-        // Sorts by embedded number in filename
-        // COMMON_00000.GDTB -> index 0
-        // COMMON_00003.bin  -> index 3
-        // BGM_FRM.BD        -> index 0 (audio, no number)
+        // SORTED FILE LISTING
         // ═══════════════════════════════════════════════════════
-        private static string[] GetSortedFiles(
-            string inputFolder)
-        {
-            string[] files =
-                Directory.GetFiles(inputFolder);
 
+        private static string[] GetSortedFiles(string inputFolder)
+        {
+            string[] files = Directory.GetFiles(inputFolder);
             Array.Sort(files, (a, b) =>
             {
-                int idxA = ExtractFileIndex(
-                    Path.GetFileName(a));
-                int idxB = ExtractFileIndex(
-                    Path.GetFileName(b));
-                return idxA.CompareTo(idxB);
+                int ia = ExtractFileIndex(Path.GetFileName(a));
+                int ib = ExtractFileIndex(Path.GetFileName(b));
+                return ia.CompareTo(ib);
             });
-
             return files;
         }
 
-        /// <summary>
-        ///     Extracts the numeric index from a filename.
-        ///     "COMMON_00003.bin" -> 3
-        ///     "BGM_FRM.BD"       -> 0  (audio, no index)
-        ///     Falls back to 0 if no number found.
-        /// </summary>
-        private static int ExtractFileIndex(
-            string fileName)
+        private static int ExtractFileIndex(string fileName)
         {
-            // Strip extension
             string name =
-                Path.GetFileNameWithoutExtension(
-                    fileName);
-
-            // Find last underscore
-            int underscorePos = name.LastIndexOf('_');
-            if (underscorePos < 0)
-                return 0;
-
-            string numPart =
-                name.Substring(underscorePos + 1);
-
+                Path.GetFileNameWithoutExtension(fileName);
+            int u = name.LastIndexOf('_');
+            if (u < 0) return 0;
             int result;
-            if (int.TryParse(numPart, out result))
-                return result;
-
-            return 0;
+            return int.TryParse(name.Substring(u + 1), out result)
+                ? result : 0;
         }
 
         // ═══════════════════════════════════════════════════════
-        // ALIGNMENT HELPER
+        // ALIGNMENT
         // ═══════════════════════════════════════════════════════
+
         private static int Align(int Value)
         {
             if ((Value & 0xf) != 0)
