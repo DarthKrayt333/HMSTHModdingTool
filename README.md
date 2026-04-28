@@ -19,7 +19,7 @@ new features to allow deep modding of the game's assets including textures, audi
 
 ### Version v1.3.0-Beta
 - **Renamed** HDATextTool -> HMSTHModdingTool
-- **Fixed** File compressor to handle game memory limits - Now works, usage -chda or chda to make Compressed files inside .HDA
+- **Fixed** File compressor to handle game memory limits - Now it's available, usage -chda or chda to make Compressed files inside .HDA
 - **Fixed** a bug where NPC text was not exporting and importing correctly
 - **Fixed** a bug where SHOP Text had empty [end] character inside text, which wasn't importing into BODY File correctly.
 - **Added** double-click interactive mode (tool now opens when double clicked in Windows)
