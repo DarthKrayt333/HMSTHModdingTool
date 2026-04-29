@@ -1211,8 +1211,6 @@ namespace HMSTHModdingTool
             Console.WriteLine(
                 "    tool.exe -rcrdtb BOY_00000.rdtb " +
                 "2 kurt_02_mesh_main.bin");
-
-            Console.ResetColor();
             Console.WriteLine();
 
             // GDTB examples
