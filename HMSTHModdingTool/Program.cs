@@ -1325,7 +1325,7 @@ namespace HMSTHModdingTool
             Console.WriteLine();
             Console.ForegroundColor = ConsoleColor.DarkYellow;
             Console.WriteLine(
-                "  === Highly Recommended Default: Make Compressed Files in HDA ===");
+                "  === Recommended by Default: Make Compressed Files in HDA ===");
             Console.WriteLine();
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.WriteLine(
