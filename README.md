@@ -17,7 +17,7 @@ new features to allow deep modding of the game's assets including textures, audi
 
 ## Changelog
 
-### Version v1.4.0-Beta
+### Version v1.4.2-Beta
 - **Renamed** HDATextTool -> HMSTHModdingTool
 - **Fixed** File compressor to handle game memory limits - Now it's available, usage by Default -chda or chda to make Compressed files inside .HDA
 - **Fixed** a bug where NPC text was not exporting and importing correctly
@@ -309,6 +309,14 @@ Output is saved automatically:
     
     Example: -rvag all ./sfx SE.BD SE.HD
 
+
+---
+
+The compressor had a few issues with .BD .HD .SQ Audio files.
+
+Now it's even better, the compressed Audio files must be bigger than the RAW format for now.
+
+But maybe if the file is too large, when making .HDA, try to use -chda uncomp <folder_name> <new_file.HDA> instead.
 
 ---
 
