@@ -17,7 +17,7 @@ namespace HMSTHModdingTool
         const string TOOL_NAME =
             "HMSTHModdingTool original as HDATextTool by gdkchan";
         const string TOOL_VERSION =
-            "v1.4.0-Beta";
+            "v1.4.2-Beta";
         const string TOOL_AUTHOR =
             "gdkchan + DarthKrayt333 & HMSTH Community";
 
@@ -217,65 +217,67 @@ namespace HMSTHModdingTool
                     // SINGLE FILE COMPRESS
                     // ════════════════════════════
                     case "compress":
-                        RequireArgs(args, 3,
-                            "-compress <input_file> <output_file>");
-
+                        RequireArgs(args, 3, "-compress <input_file> <output_file>");
                         {
                             string inPath = args[1];
                             string outPath = args[2];
 
                             if (!File.Exists(inPath))
                             {
-                                TextOut.PrintError(
-                                    "Input file not found: " + inPath);
+                                TextOut.PrintError("Input file not found: " + inPath);
                                 return;
                             }
 
                             byte[] raw = File.ReadAllBytes(inPath);
 
                             Console.ForegroundColor = ConsoleColor.Cyan;
-                            Console.WriteLine(
-                                "Compressing single file...");
+                            Console.WriteLine("Compressing single file...");
                             Console.ResetColor();
 
                             var sw = System.Diagnostics.Stopwatch.StartNew();
 
-                            byte[] comp =
-                                HarvestCompression.Compress(
-                                    raw,
-                                    (cur, total) =>
-                                    {
-                                        // Optional progress display
-                                        double pct =
-                                            total == 0
-                                            ? 100
-                                            : (double)cur * 100.0 / total;
+                            byte[] comp = HarvestCompression.Compress(
+                                raw,
+                                (cur, total) =>
+                                {
+                                    double pct = total == 0 ? 100 : (double)cur * 100.0 / total;
+                                    Console.Error.Write("\r  {0:F1}%  ({1:N0}/{2:N0})   ", pct, cur, total);
+                                });
 
-                                        Console.Error.Write(
-                                            "\r  {0:F1}%  ({1:N0}/{2:N0})   ",
-                                            pct, cur, total);
-                                    });
-
+                            Console.Error.Write("\r" + new string(' ', 50) + "\r");
                             sw.Stop();
-                            Console.Error.Write(
-                                "\r" + new string(' ', 50) + "\r");
+
+                            bool ok = HarvestCompression.VerifyRoundTrip(raw, comp);
+
+                            if (!ok || comp.Length > raw.Length)
+                            {
+                                Console.ForegroundColor = ConsoleColor.Yellow;
+                                Console.WriteLine("  Using single literal stream (minimal overhead)...");
+                                Console.ResetColor();
+                                comp = HarvestCompression.CompressAsLiterals(raw);
+                                ok = HarvestCompression.VerifyRoundTrip(raw, comp);
+                            }
 
                             File.WriteAllBytes(outPath, comp);
 
-                            double ratio =
-                                raw.Length == 0
-                                ? 0
-                                : (double)comp.Length / raw.Length * 100.0;
+                            double ratio = raw.Length == 0 ? 0 : (double)comp.Length / raw.Length * 100.0;
 
-                            Console.ForegroundColor =
-                                ConsoleColor.Green;
+                            if (ratio <= 100.1)
+                                Console.ForegroundColor = ConsoleColor.Green;
+                            else
+                                Console.ForegroundColor = ConsoleColor.Yellow;
+
                             Console.WriteLine(
                                 "Done!  {0:N0} → {1:N0} bytes  ({2:F1}%)  in {3:F2}s",
-                                raw.Length,
-                                comp.Length,
-                                ratio,
-                                sw.Elapsed.TotalSeconds);
+                                raw.Length, comp.Length, ratio, sw.Elapsed.TotalSeconds);
                             Console.ResetColor();
+
+                            if (!ok)
+                            {
+                                Console.ForegroundColor = ConsoleColor.Red;
+                                Console.WriteLine("ERROR: final verify failed!");
+                                Console.ResetColor();
+                            }
                         }
                         break;
 
@@ -893,15 +895,31 @@ namespace HMSTHModdingTool
             Console.WriteLine("=== HDA Archive ===");
             Console.ResetColor();
             Console.WriteLine(
-                "  -xhda          / xhda          <file.hda> <out_folder>");
+                "  -xhda        / xhda" +
+                "        <file.hda> <out_folder>");
             Console.WriteLine(
-                "  -chda          / chda          <in_folder> <file.hda>");
+                "  -chda        / chda" +
+                "        <in_folder> <file.hda>");
             Console.WriteLine(
-                "    Default: creates compressed HDA (recommended)");
+                "    Smart compressed HDA (recommended):");
             Console.WriteLine(
-                "  -chda uncomp   / chda uncomp   <in_folder> <file.hda>");
+                "      files <= 64 bytes    → RAW" +
+                " (palette/tiny, flag=0)");
             Console.WriteLine(
-                "    Creates uncompressed HDA (larger, use only if needed)");
+                "      if compressed > raw  → literal stream" +
+                " (flag=1, ~100.0-100.1%)");
+            Console.WriteLine(
+                "      compressible files   → compressed" +
+                " (flag=1, round-trip verified)");
+            Console.WriteLine(
+                "      if compressed > raw  → literal stream" +
+                " used instead (flag=1)");
+            Console.WriteLine(
+                "  -chda uncomp / chda uncomp" +
+                " <in_folder> <file.hda>");
+            Console.WriteLine(
+                "    Fully uncompressed HDA" +
+                " (larger, for testing only)");
             Console.WriteLine();
 
             // ── Single File Compression ─────────────────────
@@ -1304,7 +1322,7 @@ namespace HMSTHModdingTool
             Console.WriteLine(
                 "    (stops at max index if folder has more,");
             Console.WriteLine(
-                "     replaces only up to folder count if fewer)");            
+                "     replaces only up to folder count if fewer)");
             Console.WriteLine();
 
             // HDA examples
