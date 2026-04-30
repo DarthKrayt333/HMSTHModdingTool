@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
-using System.Text;
 using HMSTHModdingTool.IO.Compression;
 
 namespace HMSTHModdingTool.IO
@@ -11,9 +9,15 @@ namespace HMSTHModdingTool.IO
     ///     Handles the HDA format from Harvest Moon: Save the Homeland.
     ///
     ///     Supports:
-    ///       -xhda  : extract (decompress if needed)
-    ///       -chda  : pack uncompressed
-    ///       -chda comp : pack with HMSTH LZO compression + progress bar
+    ///       -xhda        : extract (decompress if needed)
+    ///       -chda uncomp : pack uncompressed
+    ///       -chda        : smart pack
+    ///
+    ///     Smart pack rules:
+    ///       - files <= 64 bytes are stored RAW (flag=0)
+    ///       - all other files are compressed (flag=1)
+    ///       - if normal compression expands, use single-literal
+    ///         compressed stream (still flag=1)
     /// </summary>
     class HarvestDataArchive
     {
@@ -96,8 +100,10 @@ namespace HMSTHModdingTool.IO
 
                 Data.Seek(Position, SeekOrigin.Begin);
                 Offset = Reader.ReadUInt32();
+
                 if (Offset == 0 &&
-                    Data.Position - 4 > BaseOffset) break;
+                    Data.Position - 4 > BaseOffset)
+                    break;
             }
 
             bool isAudioHDA = DetectAudioHDA(buffers);
@@ -109,7 +115,7 @@ namespace HMSTHModdingTool.IO
         }
 
         // ═══════════════════════════════════════════════════════
-        // PACK  — uncompressed  (original behaviour)
+        // PACK — UNCOMPRESSED
         // ═══════════════════════════════════════════════════════
 
         public static void Pack(string Data, string InputFolder)
@@ -130,12 +136,14 @@ namespace HMSTHModdingTool.IO
             Data.Seek(0xc, SeekOrigin.Current);
 
             int DataOffset = Align(Files.Length * 4);
+
             for (int i = 0; i < Files.Length; i++)
             {
                 Data.Seek(0x10 + i * 4, SeekOrigin.Begin);
                 Writer.Write(DataOffset);
 
                 byte[] Buffer = File.ReadAllBytes(Files[i]);
+
                 Data.Seek(DataOffset + 0x10, SeekOrigin.Begin);
                 DataOffset += Buffer.Length + 0x10;
                 DataOffset = Align(DataOffset);
@@ -153,23 +161,9 @@ namespace HMSTHModdingTool.IO
         }
 
         // ═══════════════════════════════════════════════════════
-        // PACK COMPRESSED
+        // PACK — SMART COMPRESSED
         // ═══════════════════════════════════════════════════════
 
-        /// <summary>
-        ///     Packs all files from InputFolder into a HDA archive,
-        ///     compressing each file with the HMSTH LZO compressor.
-        ///
-        ///     HDA entry header layout (16 bytes per file):
-        ///       [0x00] uint32  compressed flag  (1 = compressed)
-        ///       [0x04] uint32  decompressed size
-        ///       [0x08] uint32  compressed (stored) size
-        ///       [0x0C] uint32  padding (0)
-        ///
-        ///     The offset table at the start of the HDA points to each
-        ///     entry's header (not the data).  The first uint32 of the
-        ///     HDA is the base offset of the offset table itself (0x10).
-        /// </summary>
         public static void PackCompressed(
             string outputHda,
             string inputFolder)
@@ -180,18 +174,27 @@ namespace HMSTHModdingTool.IO
             Console.ForegroundColor = ConsoleColor.Cyan;
             Console.WriteLine(
                 "  Packing " + files.Length +
-                " file(s) with compression → " +
+                " file(s) with Smart Compression → " +
                 Path.GetFileName(outputHda));
+            Console.WriteLine(
+                "  Rule: files <= 64 bytes = RAW (flag=0). All others = Compressed (flag=1).");
+            Console.WriteLine(
+                "  If compression expands data, use single-literal compressed stream (minimal overhead).");
             Console.ResetColor();
             Console.WriteLine();
 
-            // ── Compress all files first ──────────────────────
-            // We need sizes before we can write the offset table.
             var rawDatas = new byte[files.Length][];
-            var compDatas = new byte[files.Length][];
+            var storedDatas = new byte[files.Length][];
+            var compressedFlags = new bool[files.Length];
 
             long totalRaw = 0;
-            long totalComp = 0;
+            long totalStored = 0;
+            int compCount = 0;
+            int rawCount = 0;
+
+            // ── Pretty counter width: [01/50], [002/150], etc. ──
+            int indexWidth = Math.Max(2, files.Length.ToString().Length);
+            string totalText = files.Length.ToString("D" + indexWidth);
 
             for (int i = 0; i < files.Length; i++)
             {
@@ -200,133 +203,77 @@ namespace HMSTHModdingTool.IO
                 int rawLen = rawDatas[i].Length;
                 totalRaw += rawLen;
 
+                string currentText = (i + 1).ToString("D" + indexWidth);
+
                 Console.ForegroundColor = ConsoleColor.White;
                 Console.Write(
                     "  [{0}/{1}] {2,-30}  ",
-                    i + 1, files.Length,
+                    currentText,
+                    totalText,
                     fname.Length > 30
                         ? fname.Substring(0, 27) + "..."
                         : fname);
                 Console.ResetColor();
 
-                // ── Compression progress bar ──────────────────
-                var sw = Stopwatch.StartNew();
-
-                // We pass a callback that draws the progress bar.
-                // The callback is invoked for each percentage point.
-                int barWidth = 38;
-                int lastDrawn = -1;
-
-                void OnProgress(int cur, int total)
+                // ── Only <= 64 bytes are RAW ───────────────────
+                if (rawLen <= 64)
                 {
-                    double frac = total == 0
-                        ? 1.0
-                        : (double)cur / total;
-                    int pct = (int)(frac * 100.0);
-                    if (pct == lastDrawn) return;
-                    lastDrawn = pct;
+                    storedDatas[i] = rawDatas[i];
+                    compressedFlags[i] = false;
+                    totalStored += rawLen;
+                    rawCount++;
 
-                    double elSec = sw.Elapsed.TotalSeconds;
-                    double mbDone = cur / 1048576.0;
-                    double mbTotal = total / 1048576.0;
-                    double mbps = elSec > 0
-                        ? (cur / 1048576.0) / elSec
-                        : 0;
-                    double eta = (mbps > 0 && frac < 1.0)
-                        ? (total - cur) / 1048576.0 / mbps
-                        : 0;
-
-                    int filled = (int)(frac * barWidth);
-                    var bar = new StringBuilder("[");
-                    for (int b = 0; b < barWidth; b++)
-                        bar.Append(b < filled ? '█' : '░');
-                    bar.Append(']');
-
-                    // Format sizes with KB/MB auto-switch
-                    string sizeStr = total < 1024 * 1024
-                        ? string.Format(
-                            "{0:F1}/{1:F1} KB",
-                            cur / 1024.0,
-                            total / 1024.0)
-                        : string.Format(
-                            "{0:F1}/{1:F1} MB",
-                            mbDone, mbTotal);
-
-                    string line = string.Format(
-                        "\r    Compressing: {0} {1,5:F1}%  {2}  {3:F1} MB/s  ETA {4:F0}s   ",
-                        bar, frac * 100.0, sizeStr, mbps, eta);
-
-                    // Write to stderr so it doesn't pollute stdout
-                    Console.Error.Write(line);
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine("OK RAW (<= 64 bytes)");
+                    Console.ResetColor();
+                    continue;
                 }
 
-                compDatas[i] = HarvestCompression.Compress(
-                    rawDatas[i],
-                    OnProgress);
+                // ── Try normal compression first ────────────────
+                byte[] comp = HarvestCompression.Compress(rawDatas[i]);
+                bool verified = HarvestCompression.VerifyRoundTrip(
+                    rawDatas[i], comp);
 
-                sw.Stop();
-                double elTotal = sw.Elapsed.TotalSeconds;
-                double ratioVal = rawLen == 0
+                // ── If compression fails or expands, use single-literal compressed stream
+                if (!verified || comp.Length > rawLen)
+                {
+                    comp = HarvestCompression.CompressAsLiterals(rawDatas[i]);
+                    verified = HarvestCompression.VerifyRoundTrip(
+                        rawDatas[i], comp);
+                }
+
+                storedDatas[i] = comp;
+                compressedFlags[i] = true; // everything > 64 bytes stays compressed flag=1
+                totalStored += comp.Length;
+                compCount++;
+
+                double ratio = rawLen == 0
                     ? 0
-                    : (double)compDatas[i].Length / rawLen * 100.0;
-                totalComp += compDatas[i].Length;
+                    : (double)comp.Length / rawLen * 100.0;
 
-                // Clear the progress line and print final status
-                Console.Error.Write(
-                    "\r" + new string(' ', 100) + "\r");
+                if (ratio <= 100.1)
+                    Console.ForegroundColor = ConsoleColor.Green;
+                else
+                    Console.ForegroundColor = ConsoleColor.Yellow;
 
-                // Final bar (100%)
-                string doneBar =
-                    "[" + new string('█', barWidth) + "]";
-
-                // Format sizes
-                string doneSizes = rawLen < 1024 * 1024
-                    ? string.Format(
-                        "{0:F1}/{1:F1} KB",
-                        rawLen / 1024.0,
-                        rawLen / 1024.0)
-                    : string.Format(
-                        "{0:F1}/{1:F1} MB",
-                        rawLen / 1048576.0,
-                        rawLen / 1048576.0);
-
-                double mbpsAvg = elTotal > 0
-                    ? rawLen / 1048576.0 / elTotal
-                    : 0;
-
-                // Print the "Done" line on stderr
-                Console.Error.WriteLine(
-                    string.Format(
-                        "    Compressing: {0} {1,5:F1}%  {2}  " +
-                        "{3:F1} MB/s  ETA 0s   " +
-                        "✓ Done in {4:F2}s  " +
-                        "({5:N0} bytes compressed, {6:F1}% of original)",
-                        doneBar,
-                        100.0,
-                        doneSizes,
-                        mbpsAvg,
-                        elTotal,
-                        compDatas[i].Length,
-                        ratioVal));
-
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine("✓");
+                Console.WriteLine(
+                    "OK {0:N0} → {1:N0} bytes ({2:F1}%)",
+                    rawLen,
+                    comp.Length,
+                    ratio);
                 Console.ResetColor();
             }
 
-            // ── Write the HDA file ────────────────────────────
+            // ── Write HDA ──────────────────────────────────────
             using (FileStream fs =
                 new FileStream(outputHda, FileMode.Create))
             using (BinaryWriter wr = new BinaryWriter(fs))
             {
-                // Base offset of offset table = 0x10
                 wr.Write(0x10u);
-                // 12 bytes padding to reach 0x10
-                wr.Write(0u); wr.Write(0u); wr.Write(0u);
+                wr.Write(0u);
+                wr.Write(0u);
+                wr.Write(0u);
 
-                // Calculate where each file's header starts.
-                // Offset table: files.Length * 4 bytes, aligned to 16.
-                // Each entry: 16-byte header + data + alignment.
                 int dataStart = Align(files.Length * 4);
                 var entryOffsets = new int[files.Length];
                 int cursor = dataStart;
@@ -334,77 +281,55 @@ namespace HMSTHModdingTool.IO
                 for (int i = 0; i < files.Length; i++)
                 {
                     entryOffsets[i] = cursor;
-                    // 16-byte header + compressed data + alignment
-                    int entrySize = 0x10 + compDatas[i].Length;
-                    entrySize = Align(entrySize);
-                    cursor += entrySize;
+                    cursor += Align(0x10 + storedDatas[i].Length);
                 }
 
-                // Write offset table
+                // offset table
                 for (int i = 0; i < files.Length; i++)
                 {
                     fs.Seek(0x10 + i * 4, SeekOrigin.Begin);
                     wr.Write((uint)entryOffsets[i]);
                 }
 
-                // Write each entry
+                // entries
                 for (int i = 0; i < files.Length; i++)
                 {
-                    fs.Seek(entryOffsets[i] + 0x10,
-                            SeekOrigin.Begin);
+                    fs.Seek(entryOffsets[i] + 0x10, SeekOrigin.Begin);
 
-                    int rawLen = rawDatas[i].Length;
-                    int compLen = compDatas[i].Length;
+                    wr.Write(compressedFlags[i] ? 1u : 0u);
+                    wr.Write((uint)rawDatas[i].Length);
+                    wr.Write((uint)storedDatas[i].Length);
+                    wr.Write(0u);
 
-                    wr.Write(1u);               // compressed flag = 1
-                    wr.Write((uint)rawLen);     // decompressed size
-                    wr.Write((uint)compLen);    // compressed size
-                    wr.Write(0u);               // padding
+                    fs.Write(storedDatas[i], 0, storedDatas[i].Length);
 
-                    fs.Write(compDatas[i], 0, compLen);
-
-                    // Align to 16-byte boundary
                     while ((fs.Position & 0xF) != 0)
                         fs.WriteByte(0);
                 }
             }
 
-            // ── Summary ───────────────────────────────────────
+            // ── Summary ────────────────────────────────────────
             Console.WriteLine();
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine("  ── Summary ──────────────────────────────");
             Console.WriteLine(
-                string.Format(
-                    "  Files packed  : {0}",
-                    files.Length));
+                "  ── Summary ─────────────────────────────");
             Console.WriteLine(
-                string.Format(
-                    "  Raw total     : {0:N0} bytes  ({1:F2} MB)",
-                    totalRaw,
-                    totalRaw / 1048576.0));
+                "  Files packed   : " + files.Length);
             Console.WriteLine(
-                string.Format(
-                    "  Compressed    : {0:N0} bytes  ({1:F2} MB)",
-                    totalComp,
-                    totalComp / 1048576.0));
-
-            // HDA file size
-            long hdaSize = new FileInfo(outputHda).Length;
+                "  Compressed     : " + compCount);
             Console.WriteLine(
-                string.Format(
-                    "  HDA file size : {0:N0} bytes  ({1:F2} MB)",
-                    hdaSize,
-                    hdaSize / 1048576.0));
+                "  Stored RAW     : " + rawCount);
 
             double overallRatio = totalRaw == 0
                 ? 0
-                : (double)totalComp / totalRaw * 100.0;
+                : (double)totalStored / totalRaw * 100.0;
+
             Console.WriteLine(
                 string.Format(
-                    "  Overall ratio : {0:F1}%",
+                    "  Overall ratio  : {0:F1}%",
                     overallRatio));
             Console.WriteLine(
-                "  Output        : " + outputHda);
+                "  Output         : " + outputHda);
             Console.WriteLine(
                 "  ─────────────────────────────────────────");
             Console.ResetColor();
@@ -442,8 +367,7 @@ namespace HMSTHModdingTool.IO
                     : string.Format("_{0:D5}.bin", i);
 
                 string fileName = archiveName + ext;
-                string filePath =
-                    Path.Combine(outputFolder, fileName);
+                string filePath = Path.Combine(outputFolder, fileName);
 
                 File.WriteAllBytes(filePath, buffers[i]);
 
@@ -463,15 +387,12 @@ namespace HMSTHModdingTool.IO
                 string detectedExt = DetectExtension(buffers[i]);
 
                 string fileName = (detectedExt == ".HDA")
-                    ? string.Format(
-                        "{0}_{1:D2}{2}",
+                    ? string.Format("{0}_{1:D2}{2}",
                         archiveName, i, detectedExt)
-                    : string.Format(
-                        "{0}_{1:D5}{2}",
+                    : string.Format("{0}_{1:D5}{2}",
                         archiveName, i, detectedExt);
 
-                string filePath =
-                    Path.Combine(outputFolder, fileName);
+                string filePath = Path.Combine(outputFolder, fileName);
 
                 File.WriteAllBytes(filePath, buffers[i]);
 
@@ -485,10 +406,10 @@ namespace HMSTHModdingTool.IO
                     Console.ForegroundColor = ConsoleColor.Green;
                     Console.WriteLine(
                         "  [" +
-                        detectedExt.TrimStart('.')
-                                   .PadRight(4) +
+                        detectedExt.TrimStart('.').PadRight(4) +
                         "] " + fileName);
                 }
+
                 Console.ResetColor();
             }
         }
@@ -527,16 +448,21 @@ namespace HMSTHModdingTool.IO
         {
             if (data == null || data.Length < 0x18) return false;
             if (!StartsWith(data, MAGIC_HD_START)) return false;
+
             for (int i = 0; i < MAGIC_SQ_LINE2.Length; i++)
-                if (data[0x10 + i] != MAGIC_SQ_LINE2[i]) return false;
+                if (data[0x10 + i] != MAGIC_SQ_LINE2[i])
+                    return false;
+
             return true;
         }
 
         private static bool StartsWith(byte[] data, byte[] magic)
         {
             if (data.Length < magic.Length) return false;
+
             for (int i = 0; i < magic.Length; i++)
                 if (data[i] != magic[i]) return false;
+
             return true;
         }
 
@@ -547,24 +473,27 @@ namespace HMSTHModdingTool.IO
         private static string[] GetSortedFiles(string inputFolder)
         {
             string[] files = Directory.GetFiles(inputFolder);
+
             Array.Sort(files, (a, b) =>
             {
                 int ia = ExtractFileIndex(Path.GetFileName(a));
                 int ib = ExtractFileIndex(Path.GetFileName(b));
                 return ia.CompareTo(ib);
             });
+
             return files;
         }
 
         private static int ExtractFileIndex(string fileName)
         {
-            string name =
-                Path.GetFileNameWithoutExtension(fileName);
+            string name = Path.GetFileNameWithoutExtension(fileName);
             int u = name.LastIndexOf('_');
             if (u < 0) return 0;
+
             int result;
             return int.TryParse(name.Substring(u + 1), out result)
-                ? result : 0;
+                ? result
+                : 0;
         }
 
         // ═══════════════════════════════════════════════════════
