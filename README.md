@@ -165,6 +165,14 @@ by the game engine rather than a MIDI sequence.
 
 ---
 
+The compressor had a few issues with .BD .HD .SQ Audio files.
+
+Now it's even better, the compressed Audio files must be bigger than the RAW format for now.
+
+But maybe if the file is too large, when making .HDA, try to use -chda uncomp <folder_name> <new_file.HDA> instead.
+
+---
+
 ### PS2 EXE (SLUS_202.51)
 The PS2 game executable for the USA version is `SLUS_202.51`.
 It is believed to be responsible for:
@@ -309,14 +317,6 @@ Output is saved automatically:
     
     Example: -rvag all ./sfx SE.BD SE.HD
 
-
----
-
-The compressor had a few issues with .BD .HD .SQ Audio files.
-
-Now it's even better, the compressed Audio files must be bigger than the RAW format for now.
-
-But maybe if the file is too large, when making .HDA, try to use -chda uncomp <folder_name> <new_file.HDA> instead.
 
 ---
 
