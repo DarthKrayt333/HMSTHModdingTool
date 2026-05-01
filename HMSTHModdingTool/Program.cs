@@ -31,14 +31,16 @@ namespace HMSTHModdingTool
             // ─────────────────────────────────────────
             if (args.Length == 0)
             {
-                // Set working directory to where the EXE is located
-                string exeDir = AppDomain.CurrentDomain.BaseDirectory;
+                string exeDir =
+                    AppDomain.CurrentDomain.BaseDirectory;
                 Directory.SetCurrentDirectory(exeDir);
 
                 Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine("Running in interactive mode.");
+                Console.WriteLine(
+                    "Running in interactive mode.");
                 Console.ForegroundColor = ConsoleColor.Gray;
-                Console.WriteLine("Working directory: " + exeDir);
+                Console.WriteLine(
+                    "Working directory: " + exeDir);
                 Console.ResetColor();
                 Console.WriteLine();
 
@@ -46,7 +48,8 @@ namespace HMSTHModdingTool
 
                 while (true)
                 {
-                    Console.ForegroundColor = ConsoleColor.White;
+                    Console.ForegroundColor =
+                        ConsoleColor.White;
                     Console.Write("HMSTHModdingTool> ");
                     Console.ResetColor();
 
@@ -60,7 +63,8 @@ namespace HMSTHModdingTool
                         input.ToLower() == "quit" ||
                         input.ToLower() == "q")
                     {
-                        Console.ForegroundColor = ConsoleColor.Cyan;
+                        Console.ForegroundColor =
+                            ConsoleColor.Cyan;
                         Console.WriteLine("Goodbye!");
                         Console.ResetColor();
                         break;
@@ -77,20 +81,21 @@ namespace HMSTHModdingTool
                         input.ToLower() == "clear")
                     {
                         Console.Clear();
-                        Console.ForegroundColor = ConsoleColor.Cyan;
+                        Console.ForegroundColor =
+                            ConsoleColor.Cyan;
                         Console.WriteLine(TOOL_NAME);
-                        Console.WriteLine("Version " + TOOL_VERSION);
-                        Console.WriteLine("By " + TOOL_AUTHOR);
+                        Console.WriteLine(
+                            "Version " + TOOL_VERSION);
+                        Console.WriteLine(
+                            "By " + TOOL_AUTHOR);
                         Console.ResetColor();
                         Console.WriteLine();
                         continue;
                     }
 
-                    // Parse the input line into args array
                     string[] parsedArgs = ParseInput(input);
                     if (parsedArgs.Length == 0) continue;
 
-                    // Run the command
                     RunCommand(parsedArgs);
 
                     Console.WriteLine();
@@ -106,7 +111,6 @@ namespace HMSTHModdingTool
             Console.ResetColor();
             Console.WriteLine();
 
-            // ── Normal CMD mode (args passed) ────────────────────
             if (args.Length < 2)
             {
                 PrintUsage();
@@ -118,8 +122,6 @@ namespace HMSTHModdingTool
 
         // ═════════════════════════════════════════
         // NORMALIZE COMMAND
-        // Strips leading "-" or "--" so both
-        // "-xhda" and "xhda" work the same.
         // ═════════════════════════════════════════
         static string NormalizeCommand(string cmd)
         {
@@ -131,70 +133,75 @@ namespace HMSTHModdingTool
         }
 
         // ═════════════════════════════════════════
-        // RUN COMMAND (shared by both modes)
+        // RUN COMMAND
         // ═════════════════════════════════════════
         static void RunCommand(string[] args)
         {
             try
             {
-                // Normalize: strip "-" or "--" prefix
                 string cmd = NormalizeCommand(args[0]);
 
-                // Flag: if the case prints its own Finished + extras,
-                // set this to true to skip the generic one at the bottom.
                 bool customFinish = false;
 
                 switch (cmd)
                 {
                     // ════════════════════════════
-                    // ORIGINAL HDA COMMANDS
+                    // HDA COMMANDS
                     // ════════════════════════════
                     case "xhda":
                         RequireArgs(args, 3,
                             "-xhda <file.hda> <out_folder>");
                         {
-                            // Uppercase only the last folder name segment
                             string xhdaOut = args[2];
-                            string xhdaDir = Path.GetDirectoryName(xhdaOut);
-                            string xhdaName = Path.GetFileName(xhdaOut).ToUpper();
-                            xhdaOut = string.IsNullOrEmpty(xhdaDir)
-                                ? xhdaName
-                                : Path.Combine(xhdaDir, xhdaName);
-                            HarvestDataArchive.Unpack(args[1], xhdaOut);
+                            string xhdaDir =
+                                Path.GetDirectoryName(xhdaOut);
+                            string xhdaName =
+                                Path.GetFileName(xhdaOut)
+                                    .ToUpper();
+                            xhdaOut =
+                                string.IsNullOrEmpty(xhdaDir)
+                                    ? xhdaName
+                                    : Path.Combine(
+                                        xhdaDir, xhdaName);
+                            HarvestDataArchive.Unpack(
+                                args[1], xhdaOut);
                         }
                         break;
 
                     case "chda":
-                        // ── chda <folder> <out.hda>              (compressed, default)
-                        // ── chda uncomp <folder> <out.hda>       (uncompressed)
                         if (args.Length >= 2 &&
-                            args[1].ToLower() == "uncomp")
+                            (args[1].ToLower() == "raw" ||
+                             args[1].ToLower() == "-raw" ||
+                             args[1].ToLower() == "uncomp" ||
+                             args[1].ToLower() == "-uncomp"))
                         {
-                            // -chda uncomp <in_folder> <file.hda>
                             RequireArgs(args, 4,
-                                "-chda uncomp <in_folder> <file.hda>");
+                                "-chda raw/uncomp <in_folder>" +
+                                " <file.hda>");
 
                             string chdaOut = args[3];
                             string chdaDir =
                                 Path.GetDirectoryName(chdaOut);
                             string chdaName =
-                                Path.GetFileName(chdaOut).ToUpper();
+                                Path.GetFileName(chdaOut)
+                                    .ToUpper();
                             chdaOut =
                                 string.IsNullOrEmpty(chdaDir)
                                     ? chdaName
-                                    : Path.Combine(chdaDir, chdaName);
+                                    : Path.Combine(
+                                        chdaDir, chdaName);
 
-                            Console.ForegroundColor = ConsoleColor.Cyan;
+                            Console.ForegroundColor =
+                                ConsoleColor.Cyan;
                             Console.WriteLine(
                                 "Packing uncompressed HDA...");
                             Console.ResetColor();
 
-                            HarvestDataArchive.Pack(chdaOut, args[2]);
+                            HarvestDataArchive.Pack(
+                                chdaOut, args[2]);
                         }
                         else
                         {
-                            // -chda <in_folder> <file.hda>
-                            // Default = compressed
                             RequireArgs(args, 3,
                                 "-chda <in_folder> <file.hda>");
 
@@ -202,11 +209,13 @@ namespace HMSTHModdingTool
                             string chdaDir =
                                 Path.GetDirectoryName(chdaOut);
                             string chdaName =
-                                Path.GetFileName(chdaOut).ToUpper();
+                                Path.GetFileName(chdaOut)
+                                    .ToUpper();
                             chdaOut =
                                 string.IsNullOrEmpty(chdaDir)
                                     ? chdaName
-                                    : Path.Combine(chdaDir, chdaName);
+                                    : Path.Combine(
+                                        chdaDir, chdaName);
 
                             HarvestDataArchive.PackCompressed(
                                 chdaOut, args[1]);
@@ -214,81 +223,67 @@ namespace HMSTHModdingTool
                         break;
 
                     // ════════════════════════════
-                    // SINGLE FILE COMPRESS
+                    // SHORTCUT: -raw = uncompressed HDA
                     // ════════════════════════════
-                    case "compress":
-                        RequireArgs(args, 3, "-compress <input_file> <output_file>");
+                    case "raw":
+                    case "uncomp":
+                        RequireArgs(args, 3,
+                            "-raw <in_folder> <file.hda>");
                         {
-                            string inPath = args[1];
-                            string outPath = args[2];
+                            string rawOut = args[2];
+                            string rawDir =
+                                Path.GetDirectoryName(rawOut);
+                            string rawName =
+                                Path.GetFileName(rawOut)
+                                    .ToUpper();
+                            rawOut =
+                                string.IsNullOrEmpty(rawDir)
+                                    ? rawName
+                                    : Path.Combine(
+                                        rawDir, rawName);
 
-                            if (!File.Exists(inPath))
-                            {
-                                TextOut.PrintError("Input file not found: " + inPath);
-                                return;
-                            }
-
-                            byte[] raw = File.ReadAllBytes(inPath);
-
-                            Console.ForegroundColor = ConsoleColor.Cyan;
-                            Console.WriteLine("Compressing single file...");
-                            Console.ResetColor();
-
-                            var sw = System.Diagnostics.Stopwatch.StartNew();
-
-                            byte[] comp = HarvestCompression.Compress(
-                                raw,
-                                (cur, total) =>
-                                {
-                                    double pct = total == 0 ? 100 : (double)cur * 100.0 / total;
-                                    Console.Error.Write("\r  {0:F1}%  ({1:N0}/{2:N0})   ", pct, cur, total);
-                                });
-
-                            Console.Error.Write("\r" + new string(' ', 50) + "\r");
-                            sw.Stop();
-
-                            bool ok = HarvestCompression.VerifyRoundTrip(raw, comp);
-
-                            if (!ok || comp.Length > raw.Length)
-                            {
-                                Console.ForegroundColor = ConsoleColor.Yellow;
-                                Console.WriteLine("  Using single literal stream (minimal overhead)...");
-                                Console.ResetColor();
-                                comp = HarvestCompression.CompressAsLiterals(raw);
-                                ok = HarvestCompression.VerifyRoundTrip(raw, comp);
-                            }
-
-                            File.WriteAllBytes(outPath, comp);
-
-                            double ratio = raw.Length == 0 ? 0 : (double)comp.Length / raw.Length * 100.0;
-
-                            if (ratio <= 100.1)
-                                Console.ForegroundColor = ConsoleColor.Green;
-                            else
-                                Console.ForegroundColor = ConsoleColor.Yellow;
-
+                            Console.ForegroundColor =
+                                ConsoleColor.Cyan;
                             Console.WriteLine(
-                                "Done!  {0:N0} → {1:N0} bytes  ({2:F1}%)  in {3:F2}s",
-                                raw.Length, comp.Length, ratio, sw.Elapsed.TotalSeconds);
+                                "Packing uncompressed HDA...");
                             Console.ResetColor();
 
-                            if (!ok)
-                            {
-                                Console.ForegroundColor = ConsoleColor.Red;
-                                Console.WriteLine("ERROR: final verify failed!");
-                                Console.ResetColor();
-                            }
+                            HarvestDataArchive.Pack(
+                                rawOut, args[1]);
                         }
                         break;
 
-
                     // ════════════════════════════
-                    // SINGLE FILE UNCOMPRESS
+                    // SHORTCUT: -comp = compressed HDA
                     // ════════════════════════════
-                    case "uncompress":
+                    case "comp":
                         RequireArgs(args, 3,
-                            "-uncompress <input_file> <output_file>");
+                            "-comp <in_folder> <file.hda>");
+                        {
+                            string compOut = args[2];
+                            string compDir =
+                                Path.GetDirectoryName(compOut);
+                            string compName =
+                                Path.GetFileName(compOut)
+                                    .ToUpper();
+                            compOut =
+                                string.IsNullOrEmpty(compDir)
+                                    ? compName
+                                    : Path.Combine(
+                                        compDir, compName);
 
+                            HarvestDataArchive.PackCompressed(
+                                compOut, args[1]);
+                        }
+                        break;
+
+                    // ════════════════════════════
+                    // SINGLE FILE COMPRESS
+                    // ════════════════════════════
+                    case "compress":
+                        RequireArgs(args, 3,
+                            "-compress <input_file>" +
+                            " <output_file>");
                         {
                             string inPath = args[1];
                             string outPath = args[2];
@@ -296,19 +291,131 @@ namespace HMSTHModdingTool
                             if (!File.Exists(inPath))
                             {
                                 TextOut.PrintError(
-                                    "Input file not found: " + inPath);
+                                    "Input file not found: " +
+                                    inPath);
                                 return;
                             }
 
-                            byte[] comp = File.ReadAllBytes(inPath);
+                            byte[] raw =
+                                File.ReadAllBytes(inPath);
 
-                            Console.ForegroundColor = ConsoleColor.Cyan;
+                            Console.ForegroundColor =
+                                ConsoleColor.Cyan;
+                            Console.WriteLine(
+                                "Compressing single file...");
+                            Console.ResetColor();
+
+                            var sw = System.Diagnostics
+                                .Stopwatch.StartNew();
+
+                            byte[] comp =
+                                HarvestCompression.Compress(
+                                    raw,
+                                    (cur, total) =>
+                                    {
+                                        double pct = total == 0
+                                            ? 100
+                                            : (double)cur *
+                                              100.0 / total;
+                                        Console.Error.Write(
+                                            "\r  {0:F1}%" +
+                                            "  ({1:N0}/{2:N0})" +
+                                            "   ",
+                                            pct, cur, total);
+                                    });
+
+                            Console.Error.Write(
+                                "\r" +
+                                new string(' ', 50) + "\r");
+                            sw.Stop();
+
+                            bool ok =
+                                HarvestCompression
+                                    .VerifyRoundTrip(raw, comp);
+
+                            if (!ok || comp.Length > raw.Length)
+                            {
+                                Console.ForegroundColor =
+                                    ConsoleColor.Yellow;
+                                Console.WriteLine(
+                                    "  Using single literal" +
+                                    " stream...");
+                                Console.ResetColor();
+                                comp =
+                                    HarvestCompression
+                                        .CompressAsLiterals(raw);
+                                ok =
+                                    HarvestCompression
+                                        .VerifyRoundTrip(
+                                            raw, comp);
+                            }
+
+                            File.WriteAllBytes(outPath, comp);
+
+                            double ratio = raw.Length == 0
+                                ? 0
+                                : (double)comp.Length /
+                                  raw.Length * 100.0;
+
+                            if (ratio <= 100.1)
+                                Console.ForegroundColor =
+                                    ConsoleColor.Green;
+                            else
+                                Console.ForegroundColor =
+                                    ConsoleColor.Yellow;
+
+                            Console.WriteLine(
+                                "Done!  {0:N0} → {1:N0}" +
+                                " bytes  ({2:F1}%)" +
+                                "  in {3:F2}s",
+                                raw.Length,
+                                comp.Length,
+                                ratio,
+                                sw.Elapsed.TotalSeconds);
+                            Console.ResetColor();
+
+                            if (!ok)
+                            {
+                                Console.ForegroundColor =
+                                    ConsoleColor.Red;
+                                Console.WriteLine(
+                                    "Verify failed!");
+                                Console.ResetColor();
+                            }
+                        }
+                        break;
+
+                    // ════════════════════════════
+                    // SINGLE FILE UNCOMPRESS
+                    // ════════════════════════════
+                    case "uncompress":
+                        RequireArgs(args, 3,
+                            "-uncompress <input_file>" +
+                            " <output_file>");
+                        {
+                            string inPath = args[1];
+                            string outPath = args[2];
+
+                            if (!File.Exists(inPath))
+                            {
+                                TextOut.PrintError(
+                                    "Input file not found: " +
+                                    inPath);
+                                return;
+                            }
+
+                            byte[] comp =
+                                File.ReadAllBytes(inPath);
+
+                            Console.ForegroundColor =
+                                ConsoleColor.Cyan;
                             Console.WriteLine(
                                 "Decompressing single file...");
                             Console.ResetColor();
 
                             byte[] raw =
-                                HarvestCompression.Decompress(comp);
+                                HarvestCompression
+                                    .Decompress(comp);
 
                             File.WriteAllBytes(outPath, raw);
 
@@ -325,95 +432,118 @@ namespace HMSTHModdingTool
                     // ════════════════════════════
                     // TEXT COMMANDS
                     // ════════════════════════════
-
-                    // ── xtxt: export text + dat, then report both ────────
                     case "xtxt":
                         RequireArgs(args, 4,
-                            "-xtxt <text.bin> <ptr.bin> <out.txt>");
+                            "-xtxt <text.bin> <ptr.bin>" +
+                            " <out.txt>");
                         {
-                            // Check that the two input files are not the same file
-                            string xtxtData = Path.GetFullPath(args[1]);
-                            string xtxtPtrs = Path.GetFullPath(args[2]);
+                            string xtxtData =
+                                Path.GetFullPath(args[1]);
+                            string xtxtPtrs =
+                                Path.GetFullPath(args[2]);
 
-                            if (string.Equals(xtxtData, xtxtPtrs,
-                                    StringComparison.OrdinalIgnoreCase))
+                            if (string.Equals(
+                                    xtxtData, xtxtPtrs,
+                                    StringComparison
+                                        .OrdinalIgnoreCase))
                             {
                                 Console.WriteLine();
-                                Console.ForegroundColor = ConsoleColor.Red;
+                                Console.ForegroundColor =
+                                    ConsoleColor.Yellow;
                                 Console.WriteLine(
-                                    "  ERROR: This is the same file." +
-                                    " These must be two different files.");
-                                Console.ResetColor();
-                                Console.ForegroundColor = ConsoleColor.Yellow;
+                                    "  This is the same file." +
+                                    " These must be two" +
+                                    " different files.");
                                 Console.WriteLine(
                                     "  text.bin : " + xtxtData);
                                 Console.WriteLine(
                                     "  ptr.bin  : " + xtxtPtrs);
+                                Console.ForegroundColor =
+                                    ConsoleColor.Cyan;
                                 Console.WriteLine(
-                                    "  These must be two different files.");
-                                Console.ForegroundColor = ConsoleColor.Cyan;
-                                Console.WriteLine(
-                                    "  Example: -xtxt <text.bin> <ptr.bin> <out.txt>");
+                                    "  Example: -xtxt" +
+                                    " <text.bin> <ptr.bin>" +
+                                    " <out.txt>");
                                 Console.ResetColor();
                                 Console.WriteLine();
                                 customFinish = true;
                                 break;
                             }
 
-                            string datPath = HarvestText.DecodeToFile(
-                                args[1], args[2], args[3]);
+                            string datPath =
+                                HarvestText.DecodeToFile(
+                                    args[1], args[2], args[3]);
 
                             TextOut.PrintSuccess("Finished!");
-                            Console.ForegroundColor = ConsoleColor.Cyan;
+                            Console.ForegroundColor =
+                                ConsoleColor.Cyan;
                             Console.WriteLine(
-                                "  " + Path.GetFileName(args[3]) + " Exported");
+                                "  " +
+                                Path.GetFileName(args[3]) +
+                                " Exported");
                             Console.WriteLine(
-                                "  " + Path.GetFileName(datPath) + " Exported");
+                                "  " +
+                                Path.GetFileName(datPath) +
+                                " Exported");
                             Console.ResetColor();
                             customFinish = true;
                         }
                         break;
 
-                    // ── ctxt: check .dat exists before importing ─────────
                     case "ctxt":
                         RequireArgs(args, 4,
-                            "-ctxt <in.txt> <text.bin> <ptr.bin>");
+                            "-ctxt <in.txt> <text.bin>" +
+                            " <ptr.bin>");
                         {
-                            // Build the expected .dat path the same way
-                            // HarvestText does, so we can warn early.
-                            string txtFull = Path.GetFullPath(args[1]);
+                            string txtFull =
+                                Path.GetFullPath(args[1]);
                             string datCheck = Path.Combine(
-                                Path.GetDirectoryName(txtFull) ?? ".",
-                                Path.GetFileNameWithoutExtension(txtFull) + ".dat");
+                                Path.GetDirectoryName(
+                                    txtFull) ?? ".",
+                                Path
+                                    .GetFileNameWithoutExtension(
+                                        txtFull) + ".dat");
 
                             if (!File.Exists(datCheck))
                             {
                                 Console.WriteLine();
-                                Console.ForegroundColor = ConsoleColor.Red;
+                                Console.ForegroundColor =
+                                    ConsoleColor.Yellow;
                                 Console.WriteLine(
-                                    "  ERROR: companion .dat file not found!");
-                                Console.ResetColor();
-                                Console.ForegroundColor = ConsoleColor.Yellow;
+                                    "  Companion .dat file" +
+                                    " not found!");
                                 Console.WriteLine(
-                                    "  Expected: " + Path.GetFileName(datCheck));
+                                    "  Expected: " +
+                                    Path.GetFileName(datCheck));
                                 Console.WriteLine(
-                                    "  The .dat file is created when you run -xtxt.");
+                                    "  The .dat file is created" +
+                                    " when you run -xtxt.");
                                 Console.WriteLine(
-                                    "  It must stay in the same folder as the .txt");
+                                    "  It must stay in the same" +
+                                    " folder as the .txt");
                                 Console.WriteLine(
-                                    "  and have the same base name.");
+                                    "  and have the same" +
+                                    " base name.");
                                 Console.ResetColor();
                                 Console.WriteLine();
-                                return; // stop here, do not attempt encode
+                                return;
                             }
 
-                            HarvestText.EncodeFromFile(args[1], args[2], args[3]);
+                            HarvestText.EncodeFromFile(
+                                args[1], args[2], args[3]);
 
                             TextOut.PrintSuccess("Finished!");
-                            Console.ForegroundColor = ConsoleColor.Cyan;
+                            Console.ForegroundColor =
+                                ConsoleColor.Cyan;
                             Console.WriteLine(
-                                "  " + Path.GetFileName(args[1]) + " and " +
-                                Path.GetFileNameWithoutExtension(args[1]) + ".dat Being Combined and Completed!");
+                                "  " +
+                                Path.GetFileName(args[1]) +
+                                " and " +
+                                Path
+                                    .GetFileNameWithoutExtension(
+                                        args[1]) +
+                                ".dat Being Combined" +
+                                " and Completed!");
                             Console.ResetColor();
                             customFinish = true;
                         }
@@ -445,14 +575,18 @@ namespace HMSTHModdingTool
 
                     case "xrdtb":
                         RequireArgs(args, 3,
-                            "-xrdtb <file.rdtb> <out_folder>");
-                        RDTBArchive.Extract(args[1], args[2]);
+                            "-xrdtb <file.rdtb>" +
+                            " <out_folder>");
+                        RDTBArchive.Extract(
+                            args[1], args[2]);
                         break;
 
                     case "crdtb":
                         RequireArgs(args, 3,
-                            "-crdtb <in_folder> <file.rdtb>");
-                        RDTBArchive.Create(args[1], args[2]);
+                            "-crdtb <in_folder>" +
+                            " <file.rdtb>");
+                        RDTBArchive.Create(
+                            args[1], args[2]);
                         break;
 
                     case "srdtb":
@@ -463,25 +597,32 @@ namespace HMSTHModdingTool
 
                     case "rrdtb":
                         RequireArgs(args, 3,
-                            "-rrdtb <file_a.rdtb> <file_b.rdtb>");
-                        RDTBArchive.Compare(args[1], args[2]);
+                            "-rrdtb <file_a.rdtb>" +
+                            " <file_b.rdtb>");
+                        RDTBArchive.Compare(
+                            args[1], args[2]);
                         break;
 
                     case "vrdtb":
                         RequireArgs(args, 3,
-                            "-vrdtb <original.rdtb> <rebuilt.rdtb>");
-                        RDTBArchive.Verify(args[1], args[2]);
+                            "-vrdtb <original.rdtb>" +
+                            " <rebuilt.rdtb>");
+                        RDTBArchive.Verify(
+                            args[1], args[2]);
                         break;
 
                     case "rcrdtb":
                         RequireArgs(args, 4,
-                            "-rcrdtb <file.rdtb> <index> <chunk.bin>");
+                            "-rcrdtb <file.rdtb>" +
+                            " <index> <chunk.bin>");
                         {
                             int rcIdx;
-                            if (!int.TryParse(args[2], out rcIdx))
+                            if (!int.TryParse(
+                                    args[2], out rcIdx))
                             {
                                 TextOut.PrintError(
-                                    "Invalid index: " + args[2]);
+                                    "Invalid index: " +
+                                    args[2]);
                                 return;
                             }
                             RDTBArchive.ReplaceChunk(
@@ -506,43 +647,53 @@ namespace HMSTHModdingTool
 
                     case "xgdtb":
                         RequireArgs(args, 3,
-                            "-xgdtb <file.gdtb> <out_folder>");
-                        GDTBArchive.Extract(args[1], args[2]);
+                            "-xgdtb <file.gdtb>" +
+                            " <out_folder>");
+                        GDTBArchive.Extract(
+                            args[1], args[2]);
                         break;
 
                     case "cgdtb":
                         RequireArgs(args, 3,
-                            "-cgdtb <in_folder> <file.gdtb>");
-                        GDTBArchive.Create(args[1], args[2]);
+                            "-cgdtb <in_folder>" +
+                            " <file.gdtb>");
+                        GDTBArchive.Create(
+                            args[1], args[2]);
                         break;
 
                     case "rgdtb":
                         RequireArgs(args, 4,
-                            "-rgdtb <index> <texture.bmp> <file.gdtb>");
+                            "-rgdtb <index> <texture.bmp>" +
+                            " <file.gdtb>");
                         int rIdx;
-                        if (!int.TryParse(args[1], out rIdx))
+                        if (!int.TryParse(
+                                args[1], out rIdx))
                         {
                             TextOut.PrintError(
                                 "Invalid index: " + args[1]);
                             return;
                         }
-                        GDTBArchive.Replace(args[3], rIdx, args[2]);
+                        GDTBArchive.Replace(
+                            args[3], rIdx, args[2]);
                         break;
 
                     case "rfgdtb":
                         int startIdx = 0;
                         if (args.Length >= 4 &&
-                            int.TryParse(args[2], out startIdx))
+                            int.TryParse(
+                                args[2], out startIdx))
                         {
                             RequireArgs(args, 4,
-                                "-rfgdtb <folder> <start> <file.gdtb>");
+                                "-rfgdtb <folder> <start>" +
+                                " <file.gdtb>");
                             GDTBArchive.ReplaceFolder(
                                 args[3], args[1], startIdx);
                         }
                         else
                         {
                             RequireArgs(args, 3,
-                                "-rfgdtb <folder> <file.gdtb>");
+                                "-rfgdtb <folder>" +
+                                " <file.gdtb>");
                             GDTBArchive.ReplaceFolder(
                                 args[2], args[1], 0);
                         }
@@ -552,13 +703,15 @@ namespace HMSTHModdingTool
                         RequireArgs(args, 3,
                             "-cngdtb <number> <file.gdtb>");
                         int newCnt;
-                        if (!int.TryParse(args[1], out newCnt))
+                        if (!int.TryParse(
+                                args[1], out newCnt))
                         {
                             TextOut.PrintError(
                                 "Invalid number: " + args[1]);
                             return;
                         }
-                        GDTBArchive.ChangeCount(args[2], newCnt);
+                        GDTBArchive.ChangeCount(
+                            args[2], newCnt);
                         break;
 
                     // ════════════════════════════
@@ -581,14 +734,18 @@ namespace HMSTHModdingTool
                     // ════════════════════════════
                     case "xbmppal":
                         RequireArgs(args, 3,
-                            "-xbmppal <image.bmp> <palette_name>");
-                        BMPPalette.Extract(args[1], args[2]);
+                            "-xbmppal <image.bmp>" +
+                            " <palette_name>");
+                        BMPPalette.Extract(
+                            args[1], args[2]);
                         break;
 
                     case "rbmppal":
                         RequireArgs(args, 3,
-                            "-rbmppal <palette_file> <image.bmp>");
-                        BMPPalette.Import(args[1], args[2]);
+                            "-rbmppal <palette_file>" +
+                            " <image.bmp>");
+                        BMPPalette.Import(
+                            args[1], args[2]);
                         break;
 
                     // ════════════════════════════
@@ -601,25 +758,29 @@ namespace HMSTHModdingTool
                             string vagPath = args[1];
                             if (!Path.IsPathRooted(vagPath))
                                 vagPath = Path.Combine(
-                                    Directory.GetCurrentDirectory(),
+                                    Directory
+                                        .GetCurrentDirectory(),
                                     vagPath);
 
-                            Console.ForegroundColor = ConsoleColor.Cyan;
+                            Console.ForegroundColor =
+                                ConsoleColor.Cyan;
                             Console.WriteLine(
-                                "Converting VAG to BD/HD/SQ...");
+                                "Converting VAG to" +
+                                " BD/HD/SQ...");
                             Console.ResetColor();
 
-                            AudioConverter.ConvertVagToMusic(vagPath);
+                            AudioConverter
+                                .ConvertVagToMusic(vagPath);
                         }
                         break;
 
                     case "xvag":
-                        // Check for "all" mode first
-                        if (args.Length >= 2 && args[1].ToLower() == "all")
+                        if (args.Length >= 2 &&
+                            args[1].ToLower() == "all")
                         {
-                            // -xvag all <bd_file> <hd_file> <out_folder>
                             RequireArgs(args, 5,
-                                "-xvag all <bd_file> <hd_file> <out_folder>");
+                                "-xvag all <bd_file>" +
+                                " <hd_file> <out_folder>");
 
                             string hdPathAllX = args[3];
                             string bdPathAllX = args[2];
@@ -627,29 +788,35 @@ namespace HMSTHModdingTool
 
                             if (!Path.IsPathRooted(hdPathAllX))
                                 hdPathAllX = Path.Combine(
-                                    Directory.GetCurrentDirectory(), hdPathAllX);
+                                    Directory
+                                        .GetCurrentDirectory(),
+                                    hdPathAllX);
                             if (!Path.IsPathRooted(bdPathAllX))
                                 bdPathAllX = Path.Combine(
-                                    Directory.GetCurrentDirectory(), bdPathAllX);
+                                    Directory
+                                        .GetCurrentDirectory(),
+                                    bdPathAllX);
                             if (!Path.IsPathRooted(outFolder))
                                 outFolder = Path.Combine(
-                                    Directory.GetCurrentDirectory(), outFolder);
+                                    Directory
+                                        .GetCurrentDirectory(),
+                                    outFolder);
 
-                            AudioBank.ExtractAllVags(hdPathAllX, bdPathAllX, outFolder);
+                            AudioBank.ExtractAllVags(
+                                hdPathAllX,
+                                bdPathAllX,
+                                outFolder);
                         }
                         else
                         {
-                            // -xvag <bd_file> <hd_file> <index> [output.vag]
-                            // output.vag is OPTIONAL — if omitted, auto-named by index
                             RequireArgs(args, 4,
-                                "-xvag <bd_file> <hd_file> <index> [output.vag]");
+                                "-xvag <bd_file> <hd_file>" +
+                                " <index> [output.vag]");
 
                             string bdPathX = args[1];
                             string hdPathX = args[2];
                             int idxX = int.Parse(args[3]);
 
-                            // Auto-generate output filename if not provided
-                            // e.g. index 9 → "009.vag", index 73 → "073.vag"
                             string outVag;
                             if (args.Length >= 5 &&
                                 !string.IsNullOrEmpty(args[4]))
@@ -658,52 +825,71 @@ namespace HMSTHModdingTool
                             }
                             else
                             {
-                                outVag = string.Format("{0:000}.vag", idxX);
+                                outVag = string.Format(
+                                    "{0:000}.vag", idxX);
                             }
 
                             if (!Path.IsPathRooted(hdPathX))
                                 hdPathX = Path.Combine(
-                                    Directory.GetCurrentDirectory(), hdPathX);
+                                    Directory
+                                        .GetCurrentDirectory(),
+                                    hdPathX);
                             if (!Path.IsPathRooted(bdPathX))
                                 bdPathX = Path.Combine(
-                                    Directory.GetCurrentDirectory(), bdPathX);
+                                    Directory
+                                        .GetCurrentDirectory(),
+                                    bdPathX);
                             if (!Path.IsPathRooted(outVag))
                                 outVag = Path.Combine(
-                                    Directory.GetCurrentDirectory(), outVag);
+                                    Directory
+                                        .GetCurrentDirectory(),
+                                    outVag);
 
-                            AudioBank.ExtractVag(hdPathX, bdPathX, idxX, outVag);
+                            AudioBank.ExtractVag(
+                                hdPathX, bdPathX,
+                                idxX, outVag);
                         }
                         break;
 
                     case "rvag":
-                        // Check for "all" mode first
-                        if (args.Length >= 2 && args[1].ToLower() == "all")
+                        if (args.Length >= 2 &&
+                            args[1].ToLower() == "all")
                         {
-                            // -rvag all <folder_with_vags> <bd_file> <hd_file>
                             RequireArgs(args, 5,
-                                "-rvag all <folder_with_vags> <bd_file> <hd_file>");
+                                "-rvag all <folder_with_vags>" +
+                                " <bd_file> <hd_file>");
 
                             string folderWithVags = args[2];
                             string bdPathAllI = args[3];
                             string hdPathAllI = args[4];
 
-                            if (!Path.IsPathRooted(folderWithVags))
+                            if (!Path.IsPathRooted(
+                                    folderWithVags))
                                 folderWithVags = Path.Combine(
-                                    Directory.GetCurrentDirectory(), folderWithVags);
+                                    Directory
+                                        .GetCurrentDirectory(),
+                                    folderWithVags);
                             if (!Path.IsPathRooted(bdPathAllI))
                                 bdPathAllI = Path.Combine(
-                                    Directory.GetCurrentDirectory(), bdPathAllI);
+                                    Directory
+                                        .GetCurrentDirectory(),
+                                    bdPathAllI);
                             if (!Path.IsPathRooted(hdPathAllI))
                                 hdPathAllI = Path.Combine(
-                                    Directory.GetCurrentDirectory(), hdPathAllI);
+                                    Directory
+                                        .GetCurrentDirectory(),
+                                    hdPathAllI);
 
-                            AudioBank.ReplaceAllVags(hdPathAllI, bdPathAllI, folderWithVags);
+                            AudioBank.ReplaceAllVags(
+                                hdPathAllI,
+                                bdPathAllI,
+                                folderWithVags);
                         }
                         else
                         {
-                            // -rvag <index> <input.vag> <bd_file> <hd_file>
                             RequireArgs(args, 5,
-                                "-rvag <index> <input.vag> <bd_file> <hd_file>");
+                                "-rvag <index> <input.vag>" +
+                                " <bd_file> <hd_file>");
 
                             int idxI = int.Parse(args[1]);
                             string inVag = args[2];
@@ -712,15 +898,23 @@ namespace HMSTHModdingTool
 
                             if (!Path.IsPathRooted(hdPathI))
                                 hdPathI = Path.Combine(
-                                    Directory.GetCurrentDirectory(), hdPathI);
+                                    Directory
+                                        .GetCurrentDirectory(),
+                                    hdPathI);
                             if (!Path.IsPathRooted(bdPathI))
                                 bdPathI = Path.Combine(
-                                    Directory.GetCurrentDirectory(), bdPathI);
+                                    Directory
+                                        .GetCurrentDirectory(),
+                                    bdPathI);
                             if (!Path.IsPathRooted(inVag))
                                 inVag = Path.Combine(
-                                    Directory.GetCurrentDirectory(), inVag);
+                                    Directory
+                                        .GetCurrentDirectory(),
+                                    inVag);
 
-                            AudioBank.ImportVag(hdPathI, bdPathI, idxI, inVag);
+                            AudioBank.ImportVag(
+                                hdPathI, bdPathI,
+                                idxI, inVag);
                         }
                         break;
 
@@ -728,70 +922,237 @@ namespace HMSTHModdingTool
                     // UNKNOWN COMMAND
                     // ════════════════════════════
                     default:
-                        TextOut.PrintError(
-                            "Invalid command \"" +
-                            args[0] + "\" used!");
                         Console.WriteLine();
-                        PrintUsage();
+                        Console.ForegroundColor =
+                            ConsoleColor.Yellow;
+                        Console.WriteLine(
+                            "  Unknown command: " +
+                            args[0]);
+                        Console.WriteLine();
+                        Console.WriteLine(
+                            "  Type 'help' to see" +
+                            " all available commands.");
+                        Console.ResetColor();
+                        Console.WriteLine();
                         return;
                 }
 
-                // Generic finish — skipped if the case handled it itself
                 if (!customFinish)
                     TextOut.PrintSuccess("Finished!");
             }
             catch (FileNotFoundException e)
             {
                 Console.WriteLine();
-                TextOut.PrintError("File not found: " + e.FileName);
+                Console.ForegroundColor =
+                    ConsoleColor.Yellow;
+                Console.WriteLine(
+                    "  File not found: " + e.FileName);
+                Console.WriteLine();
+                Console.WriteLine(
+                    "  Did you type the filename" +
+                    " correctly?");
+                Console.ResetColor();
+                Console.WriteLine();
+                Console.ForegroundColor =
+                    ConsoleColor.Cyan;
+                Console.WriteLine(
+                    "  === Quick Help ===");
+                Console.WriteLine(
+                    "  Extract:  -xhda <file.hda>" +
+                    " <out_folder>");
+                Console.WriteLine(
+                    "  Pack:     -chda <in_folder>" +
+                    " <file.hda>");
+                Console.WriteLine();
+                Console.WriteLine(
+                    "  Example: -xhda START.HDA START");
+                Console.ResetColor();
+                Console.WriteLine();
             }
-            catch (DirectoryNotFoundException e)
+            catch (DirectoryNotFoundException)
             {
                 Console.WriteLine();
-                TextOut.PrintError(
-                    "Directory not found: " + e.Message);
+                Console.ForegroundColor =
+                    ConsoleColor.Yellow;
+                Console.WriteLine(
+                    "  Folder not found!");
+                Console.WriteLine();
+                Console.WriteLine(
+                    "  Did you type the folder name" +
+                    " correctly?");
+                Console.ResetColor();
+                Console.WriteLine();
+                Console.ForegroundColor =
+                    ConsoleColor.Cyan;
+                Console.WriteLine(
+                    "  === Quick Help ===");
+                Console.WriteLine(
+                    "  Extract:  -xhda <file.hda>" +
+                    " <out_folder>");
+                Console.WriteLine(
+                    "  Pack:     -chda <in_folder>" +
+                    " <file.hda>");
+                Console.ResetColor();
+                Console.WriteLine();
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Console.WriteLine();
+                Console.ForegroundColor =
+                    ConsoleColor.Blue;
+                Console.WriteLine(
+                    "  You typed something wrong!");
+                Console.WriteLine();
+                Console.WriteLine(
+                    "  Maybe you typed a FOLDER where" +
+                    " a FILE");
+                Console.WriteLine(
+                    "  was expected, or the other" +
+                    " way around.");
+                Console.ResetColor();
+                Console.WriteLine();
+                Console.ForegroundColor =
+                    ConsoleColor.Cyan;
+                Console.WriteLine(
+                    "  === HDA Commands ===");
+                Console.WriteLine(
+                    "  Extract:  -xhda <file.hda>" +
+                    " <out_folder>");
+                Console.WriteLine(
+                    "  Pack:     -chda <in_folder>" +
+                    " <file.hda>");
+                Console.WriteLine();
+                Console.WriteLine(
+                    "  === Examples ===");
+                Console.WriteLine(
+                    "  -xhda START.HDA START");
+                Console.WriteLine(
+                    "    → Extracts START.HDA into" +
+                    " START folder");
+                Console.WriteLine();
+                Console.WriteLine(
+                    "  -chda START STARTNEW.HDA");
+                Console.WriteLine(
+                    "    → Packs START folder into" +
+                    " STARTNEW.HDA");
+                Console.ResetColor();
+                Console.WriteLine();
             }
             catch (ArgumentException e)
             {
                 Console.WriteLine();
-                TextOut.PrintError(e.Message);
+
+                string msg = e.Message;
+
+                // Check if it's our "Not enough arguments" message
+                if (msg.Contains("Not enough arguments"))
+                {
+                    string[] parts = msg.Split('\n');
+
+                    // "Not enough arguments!" in Yellow
+                    Console.ForegroundColor = ConsoleColor.Blue;
+                    Console.WriteLine("  " + parts[0].Trim());
+
+                    // "Usage: ..." in Cyan
+                    if (parts.Length > 1)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Cyan;
+                        Console.WriteLine("  " + parts[1].Trim());
+                    }
+                }
+                else
+                {
+                    Console.ForegroundColor = ConsoleColor.Blue;
+                    Console.WriteLine("  " + msg);
+                }
+
+                Console.ResetColor();
+                Console.WriteLine();
             }
             catch (InvalidDataException e)
             {
                 Console.WriteLine();
-                TextOut.PrintError("Invalid data: " + e.Message);
+                Console.ForegroundColor =
+                    ConsoleColor.Yellow;
+                Console.WriteLine(
+                    "  Invalid data: " + e.Message);
+                Console.ResetColor();
+                Console.WriteLine();
             }
             catch (FormatException)
             {
                 Console.WriteLine();
-                TextOut.PrintError("Invalid number format!");
+                Console.ForegroundColor =
+                    ConsoleColor.Yellow;
+                Console.WriteLine(
+                    "  You typed an invalid number!");
+                Console.WriteLine();
+                Console.WriteLine(
+                    "  Check the command and" +
+                    " try again.");
+                Console.ResetColor();
+                Console.WriteLine();
             }
-            catch (Exception e)
+            catch (IOException)
             {
                 Console.WriteLine();
-                TextOut.PrintError("Unexpected error: " + e.Message);
+                Console.ForegroundColor =
+                    ConsoleColor.Yellow;
+                Console.WriteLine(
+                    "  You typed something wrong!");
                 Console.WriteLine();
-                Console.ForegroundColor = ConsoleColor.DarkGray;
-                Console.WriteLine(e.StackTrace);
+                Console.WriteLine(
+                    "  Check your file and folder" +
+                    " names.");
                 Console.ResetColor();
+                Console.WriteLine();
+                Console.ForegroundColor =
+                    ConsoleColor.Cyan;
+                Console.WriteLine(
+                    "  === Quick Help ===");
+                Console.WriteLine(
+                    "  Extract:  -xhda <file.hda>" +
+                    " <out_folder>");
+                Console.WriteLine(
+                    "  Pack:     -chda <in_folder>" +
+                    " <file.hda>");
+                Console.WriteLine(
+                    "  Help:     help");
+                Console.ResetColor();
+                Console.WriteLine();
+            }
+            catch (Exception)
+            {
+                Console.WriteLine();
+                Console.ForegroundColor =
+                    ConsoleColor.Yellow;
+                Console.WriteLine(
+                    "  Something went wrong!");
+                Console.WriteLine();
+                Console.WriteLine(
+                    "  Check your command and" +
+                    " try again.");
+                Console.WriteLine(
+                    "  Type 'help' to see all" +
+                    " commands.");
+                Console.ResetColor();
+                Console.WriteLine();
             }
         }
 
         // ═════════════════════════════════════════
-        // PARSE INPUT LINE (interactive mode)
-        // Splits a command line string into args
-        // respecting quoted paths with spaces.
-        // Accepts any tool name prefix or none.
+        // PARSE INPUT LINE
         // ═════════════════════════════════════════
         static string[] ParseInput(string input)
         {
             input = input.Trim();
 
-            // ── Split input into tokens first ─────────────────────
             var tokens =
-                new System.Collections.Generic.List<string>();
+                new System.Collections.Generic
+                    .List<string>();
             bool inQuotes = false;
-            var current = new System.Text.StringBuilder();
+            var current =
+                new System.Text.StringBuilder();
 
             for (int i = 0; i < input.Length; i++)
             {
@@ -821,17 +1182,15 @@ namespace HMSTHModdingTool
             if (tokens.Count == 0)
                 return new string[0];
 
-            // ── If the first token looks like an .exe or tool name
-            // (does NOT start with "-" and is NOT a known command),
-            // skip it.
-            // ──────────────────────────────────────────────────────
             string first = tokens[0].ToLower();
 
-            // Known commands (without "-" prefix)
             var knownCommands =
-                new System.Collections.Generic.HashSet<string>
+                new System.Collections.Generic
+                    .HashSet<string>
             {
                 "xhda",     "chda",
+                "raw",      "uncomp",
+                "comp",
                 "compress", "uncompress",
                 "xtxt",     "ctxt",
                 "fixelf",
@@ -852,15 +1211,13 @@ namespace HMSTHModdingTool
                 first.StartsWith("-") ||
                 knownCommands.Contains(first);
 
-            // ── Extra guard: if second token is "all", the first
-            // token MUST be the command — never strip it.
-            // This prevents "XVAGS ALL ..." from stripping "XVAGS"
-            // and treating "ALL" as the command.
-            // ──────────────────────────────────────────────────────
-            bool secondIsAll = tokens.Count >= 2 &&
-                               tokens[1].ToLower() == "all";
+            bool secondIsAll =
+                tokens.Count >= 2 &&
+                tokens[1].ToLower() == "all";
 
-            if (!firstIsCommand && !secondIsAll && tokens.Count > 1)
+            if (!firstIsCommand &&
+                !secondIsAll &&
+                tokens.Count > 1)
             {
                 tokens.RemoveAt(0);
             }
@@ -914,6 +1271,9 @@ namespace HMSTHModdingTool
             Console.WriteLine(
                 "      if compressed > raw  → literal stream" +
                 " used instead (flag=1)");
+            Console.WriteLine(
+                "  -chda raw    / chda raw" +
+                "    <in_folder> <file.hda>");
             Console.WriteLine(
                 "  -chda uncomp / chda uncomp" +
                 " <in_folder> <file.hda>");
@@ -1337,7 +1697,7 @@ namespace HMSTHModdingTool
                 "  tool.exe xhda game.hda ./output");
             Console.WriteLine();
             Console.WriteLine(
-                "  tool.exe -chda uncomp HAYATO HAYATONEW.HDA");
+                "  tool.exe -chda raw HAYATO HAYATONEW.HDA");
             Console.WriteLine(
                 "    → Packs HAYATO folder into HAYATONEW.HDA (uncompressed)");
             Console.WriteLine();
