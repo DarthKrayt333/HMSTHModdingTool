@@ -1,29 +1,16 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using HMSTHModdingTool.IO.Compression;
 
 namespace HMSTHModdingTool.IO
 {
-    /// <summary>
-    ///     Handles the HDA format from Harvest Moon: Save the Homeland.
-    ///
-    ///     Supports:
-    ///       -xhda        : extract (decompress if needed)
-    ///       -chda uncomp : pack uncompressed
-    ///       -chda        : smart pack
-    ///
-    ///     Smart pack rules:
-    ///       - files <= 64 bytes are stored RAW (flag=0)
-    ///       - all other files are compressed (flag=1)
-    ///       - if normal compression expands, use single-literal
-    ///         compressed stream (still flag=1)
-    /// </summary>
     class HarvestDataArchive
     {
-        // ═══════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
         // MAGIC BYTES
-        // ═══════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
 
         private static readonly byte[] MAGIC_RDTB =
             { 0x52, 0x44, 0x54, 0x42 };
@@ -48,9 +35,9 @@ namespace HMSTHModdingTool.IO
         private static readonly byte[] MAGIC_SQ_LINE2 =
             { 0x49, 0x45, 0x43, 0x53, 0x75, 0x71, 0x65, 0x53 };
 
-        // ═══════════════════════════════════════════════════════
-        // UNPACK
-        // ═══════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
+        // UNPACK — PUBLIC ENTRY POINTS
+        // ═══════════════════════════════════════════════════════════
 
         public static void Unpack(string Data, string OutputFolder)
         {
@@ -58,7 +45,8 @@ namespace HMSTHModdingTool.IO
                 new FileStream(Data, FileMode.Open))
             {
                 string archiveName =
-                    Path.GetFileNameWithoutExtension(Data).ToUpper();
+                    Path.GetFileNameWithoutExtension(Data)
+                        .ToUpper();
                 Unpack(Input, OutputFolder, archiveName);
             }
         }
@@ -73,50 +61,425 @@ namespace HMSTHModdingTool.IO
 
             BinaryReader Reader = new BinaryReader(Data);
 
+            // ── Step 1: Read file header ────────────────────────
             uint BaseOffset = Reader.ReadUInt32();
-            var buffers = new List<byte[]>();
 
-            Data.Seek(BaseOffset, SeekOrigin.Begin);
-            uint Offset = Reader.ReadUInt32();
-            uint FirstOffset = BaseOffset + Offset;
-
-            while (Data.Position < FirstOffset + 4)
+            if (BaseOffset == 0 || BaseOffset > 0x1000)
             {
-                long Position = Data.Position;
-                Data.Seek(BaseOffset + Offset, SeekOrigin.Begin);
-
-                bool IsCompressed = Reader.ReadUInt32() == 1;
-                uint DecompressedLength = Reader.ReadUInt32();
-                uint CompressedLength = Reader.ReadUInt32();
-                uint Padding = Reader.ReadUInt32();
-
-                byte[] Buffer = new byte[CompressedLength];
-                Data.Read(Buffer, 0, Buffer.Length);
-
-                if (IsCompressed)
-                    Buffer = HarvestCompression.Decompress(Buffer);
-
-                buffers.Add(Buffer);
-
-                Data.Seek(Position, SeekOrigin.Begin);
-                Offset = Reader.ReadUInt32();
-
-                if (Offset == 0 &&
-                    Data.Position - 4 > BaseOffset)
-                    break;
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine(
+                    "  [WARN] Unexpected BaseOffset = 0x" +
+                    BaseOffset.ToString("X") +
+                    ". Expected 0x10. Proceeding anyway.");
+                Console.ResetColor();
             }
 
-            bool isAudioHDA = DetectAudioHDA(buffers);
+            Data.Seek(BaseOffset, SeekOrigin.Begin);
 
-            if (isAudioHDA)
-                WriteAudioFiles(buffers, OutputFolder, archiveName);
-            else
-                WriteDataFiles(buffers, OutputFolder, archiveName);
+            // ── Step 2: Read first offset to find table size ───
+            uint firstRelOffset = Reader.ReadUInt32();
+
+            if (firstRelOffset == 0)
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine(
+                    "  [WARN] HDA first entry offset is zero." +
+                    " Archive may be empty.");
+                Console.ResetColor();
+                return;
+            }
+
+            int maxPossibleSlots = (int)(firstRelOffset / 4);
+            uint[] tempTable = new uint[maxPossibleSlots];
+            tempTable[0] = firstRelOffset;
+
+            for (int i = 1; i < maxPossibleSlots; i++)
+                tempTable[i] = Reader.ReadUInt32();
+
+            // ── Step 3: Trim trailing padding zeros ────────────
+            int lastRealSlot = 0;
+            for (int i = 0; i < maxPossibleSlots; i++)
+                if (tempTable[i] != 0) lastRealSlot = i;
+
+            int tableSlots = lastRealSlot + 1;
+
+            int realFileCount = 0;
+            for (int i = 0; i < tableSlots; i++)
+                if (tempTable[i] != 0) realFileCount++;
+
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine(
+                "  HDA: " + tableSlots +
+                " table slot(s), " +
+                realFileCount + " real file(s).");
+            Console.ResetColor();
+            Console.WriteLine();
+
+            // ── Step 4: Read each entry ─────────────────────────
+            var buffers = new List<byte[]>();
+            string[] slotMap = new string[tableSlots];
+            int fileIndex = 0;
+
+            for (int i = 0; i < tableSlots; i++)
+            {
+                uint relOffset = tempTable[i];
+
+                // ── Empty gap slot ─────────────────────────────
+                if (relOffset == 0)
+                {
+                    slotMap[i] = null;
+
+                    Console.ForegroundColor =
+                        ConsoleColor.Cyan;
+                    Console.WriteLine(
+                        "  [SKIP] Table slot " + i +
+                        " is an empty gap.");
+                    Console.ResetColor();
+                    continue;
+                }
+
+                long entryAbsPos =
+                    (long)BaseOffset + (long)relOffset;
+
+                if (entryAbsPos >= Data.Length)
+                {
+                    slotMap[i] = null;
+
+                    Console.ForegroundColor =
+                        ConsoleColor.Red;
+                    Console.WriteLine(
+                        "  [ERROR] Entry " + i +
+                        " offset 0x" +
+                        entryAbsPos.ToString("X") +
+                        " beyond file end. Skipping.");
+                    Console.ResetColor();
+                    continue;
+                }
+
+                Data.Seek(entryAbsPos, SeekOrigin.Begin);
+
+                // ── Read 16-byte entry header ──────────────────
+                uint compressedFlag = Reader.ReadUInt32();
+                uint decompressedSize = Reader.ReadUInt32();
+                uint storedSize = Reader.ReadUInt32();
+                uint entryPadding = Reader.ReadUInt32();
+
+                bool isCompressed = (compressedFlag == 1);
+
+                if (storedSize == 0)
+                {
+                    slotMap[i] = null;
+
+                    Console.ForegroundColor =
+                        ConsoleColor.Yellow;
+                    Console.WriteLine(
+                        "  [WARN] Entry " + i +
+                        " has storedSize=0, skipping.");
+                    Console.ResetColor();
+                    continue;
+                }
+
+                long dataEnd =
+                    entryAbsPos + 0x10 + storedSize;
+
+                if (dataEnd > Data.Length)
+                {
+                    slotMap[i] = null;
+
+                    Console.ForegroundColor =
+                        ConsoleColor.Red;
+                    Console.WriteLine(
+                        "  [ERROR] Entry " + i +
+                        " data past end of file. Skipping.");
+                    Console.ResetColor();
+                    continue;
+                }
+
+                // ── Read file data ─────────────────────────────
+                byte[] buffer = new byte[storedSize];
+                int totalRead = 0;
+                while (totalRead < (int)storedSize)
+                {
+                    int n = Data.Read(
+                        buffer, totalRead,
+                        (int)storedSize - totalRead);
+                    if (n <= 0) break;
+                    totalRead += n;
+                }
+
+                // ── Decompress if needed ───────────────────────
+                if (isCompressed)
+                {
+                    try
+                    {
+                        byte[] decompressed =
+                            HarvestCompression.Decompress(
+                                buffer);
+
+                        if (decompressed.Length !=
+                            (int)decompressedSize)
+                        {
+                            Console.ForegroundColor =
+                                ConsoleColor.Yellow;
+                            Console.WriteLine(
+                                string.Format(
+                                    "  [WARN] Entry {0}:" +
+                                    " expected {1:N0} decomp," +
+                                    " got {2:N0}.",
+                                    i,
+                                    decompressedSize,
+                                    decompressed.Length));
+                            Console.ResetColor();
+                        }
+
+                        buffer = decompressed;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.ForegroundColor =
+                            ConsoleColor.Red;
+                        Console.WriteLine(
+                            "  [ERROR] Decompress failed" +
+                            " entry " + i +
+                            ": " + ex.Message);
+                        Console.ResetColor();
+                    }
+                }
+
+                buffers.Add(buffer);
+
+                // ── Build filename ─────────────────────────────
+                string detectedExt = DetectExtension(buffer);
+                string fileName;
+
+                if (detectedExt == ".HDA")
+                    fileName = string.Format(
+                        "{0}_{1:D2}{2}",
+                        archiveName,
+                        fileIndex,
+                        detectedExt);
+                else
+                    fileName = string.Format(
+                        "{0}_{1:D5}{2}",
+                        archiveName,
+                        fileIndex,
+                        detectedExt);
+
+                slotMap[i] = fileName;
+                fileIndex++;
+
+                // ── Write file ─────────────────────────────────
+                string filePath =
+                    Path.Combine(OutputFolder, fileName);
+                File.WriteAllBytes(filePath, buffer);
+
+                // [ext ] in Magenta
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.Write(
+                    "  [" +
+                    detectedExt.TrimStart('.')
+                               .PadRight(4) +
+                    "] ");
+
+                // Slot N in Cyan
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.Write("Slot " + i + " ");
+
+                // → in Green
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.Write("→ ");
+
+                // Filename in White
+                Console.ForegroundColor = ConsoleColor.White;
+                Console.Write(fileName + "  ");
+
+                // (stored=... decomp=... comp=...) in Yellow
+                Console.ForegroundColor = ConsoleColor.Blue;
+                Console.WriteLine(
+                    string.Format(
+                        "(stored={0:N0}" +
+                        "  decomp={1:N0}" +
+                        "  comp={2})",
+                        storedSize,
+                        isCompressed
+                            ? buffer.Length
+                            : (int)storedSize,
+                        isCompressed ? "YES" : "NO "));
+
+                Console.ResetColor();
+            }
+
+            // ── Blank line after file list ──────────────────────
+            Console.WriteLine();
+
+            // ── Step 5: Write manifest ONLY if there are gaps ───
+            bool hasEmptyGaps = false;
+            for (int i = 0; i < tableSlots; i++)
+            {
+                if (slotMap[i] == null)
+                {
+                    hasEmptyGaps = true;
+                    break;
+                }
+            }
+
+            if (hasEmptyGaps)
+            {
+                string manifestName = string.Format(
+                    "{0}_{1:D5}.bin",
+                    archiveName,
+                    fileIndex);
+
+                WriteManifest(
+                    OutputFolder,
+                    manifestName,
+                    tableSlots,
+                    slotMap);
+
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.WriteLine(
+                    "  Manifest saved: " + manifestName);
+                Console.WriteLine(
+                    "  Keep this file in the folder" +
+                    " for repacking!");
+                Console.ResetColor();
+                Console.WriteLine();
+            }
         }
 
-        // ═══════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
+        // MANIFEST — WRITE
+        // ═══════════════════════════════════════════════════════════
+
+        private static void WriteManifest(
+            string folder,
+            string manifestName,
+            int totalSlots,
+            string[] slotMap)
+        {
+            string path =
+                Path.Combine(folder, manifestName);
+
+            using (StreamWriter sw = new StreamWriter(path))
+            {
+                sw.WriteLine("SLOTS=" + totalSlots);
+
+                for (int i = 0; i < totalSlots; i++)
+                {
+                    if (string.IsNullOrEmpty(slotMap[i]))
+                        sw.WriteLine(i + "=EMPTY");
+                    else
+                        sw.WriteLine(i + "=" + slotMap[i]);
+                }
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // MANIFEST — DETECT BY CONTENT
+        // ═══════════════════════════════════════════════════════════
+
+        private static bool IsManifestFile(string filePath)
+        {
+            try
+            {
+                string firstLine =
+                    File.ReadLines(filePath)
+                        .FirstOrDefault();
+
+                return firstLine != null &&
+                       firstLine.Trim()
+                                .StartsWith("SLOTS=");
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // MANIFEST — READ
+        // ═══════════════════════════════════════════════════════════
+
+        private static bool ReadManifest(
+            string folder,
+            out int totalSlots,
+            out string[] slotFiles)
+        {
+            totalSlots = 0;
+            slotFiles = null;
+
+            string manifestPath = null;
+            foreach (string f in Directory.GetFiles(folder))
+            {
+                if (IsManifestFile(f))
+                {
+                    manifestPath = f;
+                    break;
+                }
+            }
+
+            if (manifestPath == null)
+                return false;
+
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine(
+                "  Manifest found: " +
+                Path.GetFileName(manifestPath));
+            Console.ResetColor();
+
+            string[] lines =
+                File.ReadAllLines(manifestPath);
+
+            if (lines.Length == 0)
+                return false;
+
+            string firstLine = lines[0].Trim();
+            if (!firstLine.StartsWith("SLOTS="))
+                return false;
+
+            if (!int.TryParse(
+                    firstLine.Substring(6),
+                    out totalSlots))
+                return false;
+
+            if (totalSlots <= 0)
+                return false;
+
+            slotFiles = new string[totalSlots];
+
+            for (int i = 1; i < lines.Length; i++)
+            {
+                string line = lines[i].Trim();
+                if (string.IsNullOrEmpty(line)) continue;
+
+                int eq = line.IndexOf('=');
+                if (eq < 0) continue;
+
+                int slotIdx;
+                if (!int.TryParse(
+                        line.Substring(0, eq),
+                        out slotIdx))
+                    continue;
+
+                if (slotIdx < 0 || slotIdx >= totalSlots)
+                    continue;
+
+                string val =
+                    line.Substring(eq + 1).Trim();
+
+                slotFiles[slotIdx] =
+                    (val == "EMPTY" ||
+                     string.IsNullOrEmpty(val))
+                        ? null
+                        : val;
+            }
+
+            return true;
+        }
+
+        // ═══════════════════════════════════════════════════════════
         // PACK — UNCOMPRESSED
-        // ═══════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
 
         public static void Pack(string Data, string InputFolder)
         {
@@ -129,42 +492,420 @@ namespace HMSTHModdingTool.IO
 
         public static void Pack(Stream Data, string InputFolder)
         {
+            int totalSlots;
+            string[] slotFiles;
+            bool hasManifest = ReadManifest(
+                InputFolder,
+                out totalSlots,
+                out slotFiles);
+
+            if (hasManifest)
+            {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine(
+                    "  Using original table layout (" +
+                    totalSlots + " slots).");
+                Console.ResetColor();
+
+                PackWithManifest(
+                    Data, InputFolder,
+                    totalSlots, slotFiles,
+                    false);
+            }
+            else
+            {
+                PackLegacy(Data, InputFolder);
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // PACK — SMART COMPRESSED
+        // ═══════════════════════════════════════════════════════════
+
+        public static void PackCompressed(
+            string outputHda,
+            string inputFolder)
+        {
+            int totalSlots;
+            string[] slotFiles;
+            bool hasManifest = ReadManifest(
+                inputFolder,
+                out totalSlots,
+                out slotFiles);
+
+            if (hasManifest)
+            {
+                Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine(
+                    "  Using original table layout (" +
+                    totalSlots + " slots).");
+                Console.ResetColor();
+
+                using (FileStream fs =
+                    new FileStream(
+                        outputHda, FileMode.Create))
+                {
+                    PackWithManifest(
+                        fs, inputFolder,
+                        totalSlots, slotFiles,
+                        true);
+                }
+            }
+            else
+            {
+                PackCompressedLegacy(
+                    outputHda, inputFolder);
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // PACK WITH MANIFEST
+        // ═══════════════════════════════════════════════════════════
+
+        private static void PackWithManifest(
+            Stream Data,
+            string inputFolder,
+            int totalSlots,
+            string[] slotFiles,
+            bool compress)
+        {
+            BinaryWriter wr = new BinaryWriter(Data);
+
+            int realCount = 0;
+            foreach (string s in slotFiles)
+                if (!string.IsNullOrEmpty(s)) realCount++;
+
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine(
+                "  Packing " + realCount +
+                " file(s) into " + totalSlots +
+                " slot(s)" +
+                (compress
+                    ? " (Smart Compressed)"
+                    : " (Uncompressed)"));
+            Console.ResetColor();
+            Console.WriteLine();
+
+            int indexWidth =
+                Math.Max(2, realCount.ToString().Length);
+
+            // ── Phase 1: Load and compress ──────────────────────
+            byte[][] rawDatas = new byte[totalSlots][];
+            byte[][] storedDatas = new byte[totalSlots][];
+            bool[] compFlags = new bool[totalSlots];
+
+            long totalRaw = 0;
+            long totalStored = 0;
+            int compCount = 0;
+            int rawCount = 0;
+            int fileNum = 0;
+
+            for (int slot = 0; slot < totalSlots; slot++)
+            {
+                if (string.IsNullOrEmpty(slotFiles[slot]))
+                {
+                    rawDatas[slot] = null;
+                    storedDatas[slot] = null;
+                    compFlags[slot] = false;
+
+                    Console.ForegroundColor =
+                        ConsoleColor.Cyan;
+                    Console.WriteLine(
+                        "  [SKIP] Slot " + slot +
+                        " is an empty gap.");
+                    Console.ResetColor();
+                    continue;
+                }
+
+                string fname = slotFiles[slot];
+                string fpath =
+                    Path.Combine(inputFolder, fname);
+
+                if (!File.Exists(fpath))
+                {
+                    Console.ForegroundColor =
+                        ConsoleColor.Red;
+                    Console.WriteLine(
+                        "  [ERROR] File not found: " +
+                        fname);
+                    Console.ResetColor();
+
+                    rawDatas[slot] = null;
+                    storedDatas[slot] = null;
+                    compFlags[slot] = false;
+                    continue;
+                }
+
+                rawDatas[slot] =
+                    File.ReadAllBytes(fpath);
+                int rawLen = rawDatas[slot].Length;
+                totalRaw += rawLen;
+                fileNum++;
+
+                string currentText =
+                    fileNum.ToString("D" + indexWidth);
+                string totalText =
+                    realCount.ToString("D" + indexWidth);
+
+                Console.ForegroundColor =
+                    ConsoleColor.White;
+                Console.Write(
+                    "  [{0}/{1}] Slot {2}: {3,-28}  ",
+                    currentText,
+                    totalText,
+                    slot,
+                    fname.Length > 28
+                        ? fname.Substring(0, 25) + "..."
+                        : fname);
+                Console.ResetColor();
+
+                if (!compress || rawLen <= 64)
+                {
+                    storedDatas[slot] = rawDatas[slot];
+                    compFlags[slot] = false;
+                    totalStored += rawLen;
+                    rawCount++;
+
+                    Console.ForegroundColor =
+                        ConsoleColor.Green;
+                    Console.WriteLine(
+                        rawLen <= 64
+                            ? "OK RAW (<= 64 bytes)"
+                            : "OK RAW (uncompressed mode)");
+                    Console.ResetColor();
+                }
+                else
+                {
+                    byte[] comp =
+                        HarvestCompression.Compress(
+                            rawDatas[slot]);
+                    bool verified =
+                        HarvestCompression.VerifyRoundTrip(
+                            rawDatas[slot], comp);
+
+                    if (!verified || comp.Length > rawLen)
+                    {
+                        comp =
+                            HarvestCompression
+                                .CompressAsLiterals(
+                                    rawDatas[slot]);
+                        verified =
+                            HarvestCompression
+                                .VerifyRoundTrip(
+                                    rawDatas[slot], comp);
+                    }
+
+                    storedDatas[slot] = comp;
+                    compFlags[slot] = true;
+                    totalStored += comp.Length;
+                    compCount++;
+
+                    double ratio = rawLen == 0
+                        ? 0
+                        : (double)comp.Length /
+                          rawLen * 100.0;
+
+                    Console.ForegroundColor =
+                        ratio <= 100.1
+                            ? ConsoleColor.Green
+                            : ConsoleColor.Yellow;
+
+                    Console.WriteLine(
+                        "OK {0:N0} → {1:N0} bytes ({2:F1}%)",
+                        rawLen, comp.Length, ratio);
+                    Console.ResetColor();
+                }
+            }
+
+            // ── Phase 2: Calculate offsets ───────────────────────
+            int tableSize = totalSlots * 4;
+            int dataAreaStart = Align(tableSize);
+
+            uint[] entryRelOffsets = new uint[totalSlots];
+            int cursor = dataAreaStart;
+
+            for (int slot = 0; slot < totalSlots; slot++)
+            {
+                if (storedDatas[slot] == null)
+                {
+                    entryRelOffsets[slot] = 0;
+                }
+                else
+                {
+                    entryRelOffsets[slot] = (uint)cursor;
+                    cursor += Align(
+                        0x10 + storedDatas[slot].Length);
+                }
+            }
+
+            // ── Phase 3: Write HDA ──────────────────────────────
+            wr.Write(0x10u);
+            wr.Write(0u);
+            wr.Write(0u);
+            wr.Write(0u);
+
+            Data.Seek(0x10, SeekOrigin.Begin);
+            for (int slot = 0; slot < totalSlots; slot++)
+                wr.Write(entryRelOffsets[slot]);
+
+            for (int slot = 0; slot < totalSlots; slot++)
+            {
+                if (storedDatas[slot] == null)
+                    continue;
+
+                long absPos =
+                    0x10L + entryRelOffsets[slot];
+                Data.Seek(absPos, SeekOrigin.Begin);
+
+                wr.Write(compFlags[slot] ? 1u : 0u);
+                wr.Write((uint)rawDatas[slot].Length);
+                wr.Write((uint)storedDatas[slot].Length);
+                wr.Write(0u);
+
+                Data.Write(
+                    storedDatas[slot], 0,
+                    storedDatas[slot].Length);
+
+                while ((Data.Position & 0xF) != 0)
+                    Data.WriteByte(0);
+            }
+
+            // ── Summary ────────────────────────────────────────
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine(
+                "  ── Summary ──────────────────────────────");
+            Console.WriteLine(
+                "  Total slots    : " + totalSlots);
+            Console.WriteLine(
+                "  Files packed   : " + realCount);
+            Console.WriteLine(
+                "  Empty slots    : " +
+                (totalSlots - realCount));
+
+            if (compress)
+            {
+                Console.WriteLine(
+                    "  Compressed     : " + compCount);
+                Console.WriteLine(
+                    "  Stored RAW     : " + rawCount);
+
+                double overallRatio = totalRaw == 0
+                    ? 0
+                    : (double)totalStored /
+                      totalRaw * 100.0;
+
+                Console.WriteLine(
+                    string.Format(
+                        "  Overall ratio  : {0:F1}%",
+                        overallRatio));
+            }
+
+            Console.WriteLine(
+                "  ─────────────────────────────────────────");
+            Console.ResetColor();
+
+            // ── Show offset table layout ───────────────────────
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.White;
+            Console.WriteLine("  Offset table layout:");
+            Console.ResetColor();
+
+            for (int slot = 0; slot < totalSlots; slot++)
+            {
+                if (entryRelOffsets[slot] == 0)
+                {
+                    Console.ForegroundColor =
+                        ConsoleColor.Cyan;
+                    Console.WriteLine(
+                        "    Slot " + slot +
+                        ": 00 00 00 00  (EMPTY GAP)");
+                }
+                else
+                {
+                    byte[] offBytes =
+                        BitConverter.GetBytes(
+                            entryRelOffsets[slot]);
+
+                    Console.ForegroundColor =
+                        ConsoleColor.Green;
+                    Console.WriteLine(
+                        string.Format(
+                            "    Slot {0}:" +
+                            " {1:X2} {2:X2} {3:X2} {4:X2}" +
+                            "  → abs 0x{5:X8}  ({6})",
+                            slot,
+                            offBytes[0], offBytes[1],
+                            offBytes[2], offBytes[3],
+                            0x10 + entryRelOffsets[slot],
+                            slotFiles[slot] ?? "?"));
+                }
+
+                Console.ResetColor();
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // LEGACY PACK — UNCOMPRESSED (no manifest)
+        // ═══════════════════════════════════════════════════════════
+
+        private static void PackLegacy(
+            Stream Data,
+            string InputFolder)
+        {
             string[] Files = GetSortedFiles(InputFolder);
             BinaryWriter Writer = new BinaryWriter(Data);
 
             Writer.Write(0x10u);
-            Data.Seek(0xc, SeekOrigin.Current);
+            Writer.Write(0u);
+            Writer.Write(0u);
+            Writer.Write(0u);
 
-            int DataOffset = Align(Files.Length * 4);
+            int tableSize = Files.Length * 4;
+            int dataAreaStart = Align(tableSize);
+
+            var entryRelOffsets = new int[Files.Length];
+            int cursor = dataAreaStart;
 
             for (int i = 0; i < Files.Length; i++)
             {
-                Data.Seek(0x10 + i * 4, SeekOrigin.Begin);
-                Writer.Write(DataOffset);
-
-                byte[] Buffer = File.ReadAllBytes(Files[i]);
-
-                Data.Seek(DataOffset + 0x10, SeekOrigin.Begin);
-                DataOffset += Buffer.Length + 0x10;
-                DataOffset = Align(DataOffset);
-
-                Writer.Write(0u);               // uncompressed flag
-                Writer.Write(Buffer.Length);    // decompressed size
-                Writer.Write(Buffer.Length);    // stored size
-                Writer.Write(0u);               // padding
-
-                Data.Write(Buffer, 0, Buffer.Length);
+                entryRelOffsets[i] = cursor;
+                byte[] raw = File.ReadAllBytes(Files[i]);
+                cursor += Align(0x10 + raw.Length);
             }
 
-            while ((Data.Position & 0xf) != 0)
-                Data.WriteByte(0);
+            Data.Seek(0x10, SeekOrigin.Begin);
+            for (int i = 0; i < Files.Length; i++)
+                Writer.Write((uint)entryRelOffsets[i]);
+
+            for (int i = 0; i < Files.Length; i++)
+            {
+                byte[] Buffer =
+                    File.ReadAllBytes(Files[i]);
+
+                Data.Seek(
+                    0x10 + entryRelOffsets[i],
+                    SeekOrigin.Begin);
+
+                Writer.Write(0u);
+                Writer.Write((uint)Buffer.Length);
+                Writer.Write((uint)Buffer.Length);
+                Writer.Write(0u);
+
+                Data.Write(Buffer, 0, Buffer.Length);
+
+                while ((Data.Position & 0xF) != 0)
+                    Data.WriteByte(0);
+            }
         }
 
-        // ═══════════════════════════════════════════════════════
-        // PACK — SMART COMPRESSED
-        // ═══════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
+        // LEGACY PACK — COMPRESSED (no manifest)
+        // ═══════════════════════════════════════════════════════════
 
-        public static void PackCompressed(
+        private static void PackCompressedLegacy(
             string outputHda,
             string inputFolder)
         {
@@ -176,10 +917,6 @@ namespace HMSTHModdingTool.IO
                 "  Packing " + files.Length +
                 " file(s) with Smart Compression → " +
                 Path.GetFileName(outputHda));
-            Console.WriteLine(
-                "  Rule: files <= 64 bytes = RAW (flag=0). All others = Compressed (flag=1).");
-            Console.WriteLine(
-                "  If compression expands data, use single-literal compressed stream (minimal overhead).");
             Console.ResetColor();
             Console.WriteLine();
 
@@ -192,30 +929,33 @@ namespace HMSTHModdingTool.IO
             int compCount = 0;
             int rawCount = 0;
 
-            // ── Pretty counter width: [01/50], [002/150], etc. ──
-            int indexWidth = Math.Max(2, files.Length.ToString().Length);
-            string totalText = files.Length.ToString("D" + indexWidth);
+            int indexWidth =
+                Math.Max(2, files.Length.ToString().Length);
+            string totalText =
+                files.Length.ToString("D" + indexWidth);
 
             for (int i = 0; i < files.Length; i++)
             {
-                string fname = Path.GetFileName(files[i]);
-                rawDatas[i] = File.ReadAllBytes(files[i]);
+                string fname =
+                    Path.GetFileName(files[i]);
+                rawDatas[i] =
+                    File.ReadAllBytes(files[i]);
                 int rawLen = rawDatas[i].Length;
                 totalRaw += rawLen;
 
-                string currentText = (i + 1).ToString("D" + indexWidth);
+                string currentText =
+                    (i + 1).ToString("D" + indexWidth);
 
-                Console.ForegroundColor = ConsoleColor.White;
+                Console.ForegroundColor =
+                    ConsoleColor.White;
                 Console.Write(
                     "  [{0}/{1}] {2,-30}  ",
-                    currentText,
-                    totalText,
+                    currentText, totalText,
                     fname.Length > 30
                         ? fname.Substring(0, 27) + "..."
                         : fname);
                 Console.ResetColor();
 
-                // ── Only <= 64 bytes are RAW ───────────────────
                 if (rawLen <= 64)
                 {
                     storedDatas[i] = rawDatas[i];
@@ -223,48 +963,53 @@ namespace HMSTHModdingTool.IO
                     totalStored += rawLen;
                     rawCount++;
 
-                    Console.ForegroundColor = ConsoleColor.Green;
-                    Console.WriteLine("OK RAW (<= 64 bytes)");
+                    Console.ForegroundColor =
+                        ConsoleColor.Green;
+                    Console.WriteLine(
+                        "OK RAW (<= 64 bytes)");
                     Console.ResetColor();
                     continue;
                 }
 
-                // ── Try normal compression first ────────────────
-                byte[] comp = HarvestCompression.Compress(rawDatas[i]);
-                bool verified = HarvestCompression.VerifyRoundTrip(
-                    rawDatas[i], comp);
+                byte[] comp =
+                    HarvestCompression.Compress(
+                        rawDatas[i]);
+                bool verified =
+                    HarvestCompression.VerifyRoundTrip(
+                        rawDatas[i], comp);
 
-                // ── If compression fails or expands, use single-literal compressed stream
                 if (!verified || comp.Length > rawLen)
                 {
-                    comp = HarvestCompression.CompressAsLiterals(rawDatas[i]);
-                    verified = HarvestCompression.VerifyRoundTrip(
-                        rawDatas[i], comp);
+                    comp =
+                        HarvestCompression
+                            .CompressAsLiterals(
+                                rawDatas[i]);
+                    verified =
+                        HarvestCompression.VerifyRoundTrip(
+                            rawDatas[i], comp);
                 }
 
                 storedDatas[i] = comp;
-                compressedFlags[i] = true; // everything > 64 bytes stays compressed flag=1
+                compressedFlags[i] = true;
                 totalStored += comp.Length;
                 compCount++;
 
                 double ratio = rawLen == 0
                     ? 0
-                    : (double)comp.Length / rawLen * 100.0;
+                    : (double)comp.Length /
+                      rawLen * 100.0;
 
-                if (ratio <= 100.1)
-                    Console.ForegroundColor = ConsoleColor.Green;
-                else
-                    Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.ForegroundColor =
+                    ratio <= 100.1
+                        ? ConsoleColor.Green
+                        : ConsoleColor.Yellow;
 
                 Console.WriteLine(
                     "OK {0:N0} → {1:N0} bytes ({2:F1}%)",
-                    rawLen,
-                    comp.Length,
-                    ratio);
+                    rawLen, comp.Length, ratio);
                 Console.ResetColor();
             }
 
-            // ── Write HDA ──────────────────────────────────────
             using (FileStream fs =
                 new FileStream(outputHda, FileMode.Create))
             using (BinaryWriter wr = new BinaryWriter(fs))
@@ -274,45 +1019,50 @@ namespace HMSTHModdingTool.IO
                 wr.Write(0u);
                 wr.Write(0u);
 
-                int dataStart = Align(files.Length * 4);
-                var entryOffsets = new int[files.Length];
+                int dataStart =
+                    Align(files.Length * 4);
+                var entryOffsets =
+                    new int[files.Length];
                 int cursor = dataStart;
 
                 for (int i = 0; i < files.Length; i++)
                 {
                     entryOffsets[i] = cursor;
-                    cursor += Align(0x10 + storedDatas[i].Length);
+                    cursor += Align(
+                        0x10 + storedDatas[i].Length);
                 }
 
-                // offset table
+                fs.Seek(0x10, SeekOrigin.Begin);
                 for (int i = 0; i < files.Length; i++)
-                {
-                    fs.Seek(0x10 + i * 4, SeekOrigin.Begin);
                     wr.Write((uint)entryOffsets[i]);
-                }
 
-                // entries
                 for (int i = 0; i < files.Length; i++)
                 {
-                    fs.Seek(entryOffsets[i] + 0x10, SeekOrigin.Begin);
+                    long absPos =
+                        0x10L + entryOffsets[i];
+                    fs.Seek(absPos, SeekOrigin.Begin);
 
-                    wr.Write(compressedFlags[i] ? 1u : 0u);
-                    wr.Write((uint)rawDatas[i].Length);
-                    wr.Write((uint)storedDatas[i].Length);
+                    wr.Write(
+                        compressedFlags[i] ? 1u : 0u);
+                    wr.Write(
+                        (uint)rawDatas[i].Length);
+                    wr.Write(
+                        (uint)storedDatas[i].Length);
                     wr.Write(0u);
 
-                    fs.Write(storedDatas[i], 0, storedDatas[i].Length);
+                    fs.Write(
+                        storedDatas[i], 0,
+                        storedDatas[i].Length);
 
                     while ((fs.Position & 0xF) != 0)
                         fs.WriteByte(0);
                 }
             }
 
-            // ── Summary ────────────────────────────────────────
             Console.WriteLine();
             Console.ForegroundColor = ConsoleColor.Cyan;
             Console.WriteLine(
-                "  ── Summary ─────────────────────────────");
+                "  ── Summary ──────────────────────────────");
             Console.WriteLine(
                 "  Files packed   : " + files.Length);
             Console.WriteLine(
@@ -322,7 +1072,8 @@ namespace HMSTHModdingTool.IO
 
             double overallRatio = totalRaw == 0
                 ? 0
-                : (double)totalStored / totalRaw * 100.0;
+                : (double)totalStored /
+                  totalRaw * 100.0;
 
             Console.WriteLine(
                 string.Format(
@@ -335,23 +1086,25 @@ namespace HMSTHModdingTool.IO
             Console.ResetColor();
         }
 
-        // ═══════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
         // AUDIO HDA DETECTION
-        // ═══════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
 
-        private static bool DetectAudioHDA(List<byte[]> buffers)
+        private static bool DetectAudioHDA(
+            List<byte[]> buffers)
         {
             if (buffers.Count < 2 || buffers.Count > 3)
                 return false;
             if (!IsHDFile(buffers[1])) return false;
-            if (buffers.Count == 3 && !IsSQFile(buffers[2]))
+            if (buffers.Count == 3 &&
+                !IsSQFile(buffers[2]))
                 return false;
             return true;
         }
 
-        // ═══════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
         // WRITE HELPERS
-        // ═══════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
 
         private static void WriteAudioFiles(
             List<byte[]> buffers,
@@ -367,12 +1120,14 @@ namespace HMSTHModdingTool.IO
                     : string.Format("_{0:D5}.bin", i);
 
                 string fileName = archiveName + ext;
-                string filePath = Path.Combine(outputFolder, fileName);
+                string filePath =
+                    Path.Combine(outputFolder, fileName);
 
                 File.WriteAllBytes(filePath, buffers[i]);
 
-                Console.ForegroundColor = ConsoleColor.Cyan;
-                Console.WriteLine("  [AUDIO] " + fileName);
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine(
+                    "  [AUDIO] " + fileName);
                 Console.ResetColor();
             }
         }
@@ -384,7 +1139,8 @@ namespace HMSTHModdingTool.IO
         {
             for (int i = 0; i < buffers.Count; i++)
             {
-                string detectedExt = DetectExtension(buffers[i]);
+                string detectedExt =
+                    DetectExtension(buffers[i]);
 
                 string fileName = (detectedExt == ".HDA")
                     ? string.Format("{0}_{1:D2}{2}",
@@ -392,31 +1148,24 @@ namespace HMSTHModdingTool.IO
                     : string.Format("{0}_{1:D5}{2}",
                         archiveName, i, detectedExt);
 
-                string filePath = Path.Combine(outputFolder, fileName);
+                string filePath =
+                    Path.Combine(outputFolder, fileName);
 
                 File.WriteAllBytes(filePath, buffers[i]);
 
-                if (detectedExt == ".bin")
-                {
-                    Console.ForegroundColor = ConsoleColor.DarkGray;
-                    Console.WriteLine("  [???]   " + fileName);
-                }
-                else
-                {
-                    Console.ForegroundColor = ConsoleColor.Green;
-                    Console.WriteLine(
-                        "  [" +
-                        detectedExt.TrimStart('.').PadRight(4) +
-                        "] " + fileName);
-                }
-
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine(
+                    "  [" +
+                    detectedExt.TrimStart('.')
+                               .PadRight(4) +
+                    "] " + fileName);
                 Console.ResetColor();
             }
         }
 
-        // ═══════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
         // EXTENSION DETECTION
-        // ═══════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
 
         private static string DetectExtension(byte[] data)
         {
@@ -427,7 +1176,8 @@ namespace HMSTHModdingTool.IO
             if (StartsWith(data, MAGIC_RDTB)) return ".rdtb";
             if (StartsWith(data, MAGIC_SRDB)) return ".srdb";
 
-            if (data.Length >= 16 && StartsWith(data, MAGIC_HDA))
+            if (data.Length >= 16 &&
+                StartsWith(data, MAGIC_HDA))
                 return ".HDA";
 
             if (IsSQFile(data)) return ".SQ";
@@ -438,16 +1188,20 @@ namespace HMSTHModdingTool.IO
 
         private static bool IsHDFile(byte[] data)
         {
-            if (data == null || data.Length < 8) return false;
-            if (!StartsWith(data, MAGIC_HD_START)) return false;
+            if (data == null || data.Length < 8)
+                return false;
+            if (!StartsWith(data, MAGIC_HD_START))
+                return false;
             if (IsSQFile(data)) return false;
             return true;
         }
 
         private static bool IsSQFile(byte[] data)
         {
-            if (data == null || data.Length < 0x18) return false;
-            if (!StartsWith(data, MAGIC_HD_START)) return false;
+            if (data == null || data.Length < 0x18)
+                return false;
+            if (!StartsWith(data, MAGIC_HD_START))
+                return false;
 
             for (int i = 0; i < MAGIC_SQ_LINE2.Length; i++)
                 if (data[0x10 + i] != MAGIC_SQ_LINE2[i])
@@ -456,54 +1210,72 @@ namespace HMSTHModdingTool.IO
             return true;
         }
 
-        private static bool StartsWith(byte[] data, byte[] magic)
+        private static bool StartsWith(
+            byte[] data, byte[] magic)
         {
             if (data.Length < magic.Length) return false;
-
             for (int i = 0; i < magic.Length; i++)
                 if (data[i] != magic[i]) return false;
-
             return true;
         }
 
-        // ═══════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
         // SORTED FILE LISTING
-        // ═══════════════════════════════════════════════════════
+        // Manifest identified by CONTENT and never packed
+        // ═══════════════════════════════════════════════════════════
 
-        private static string[] GetSortedFiles(string inputFolder)
+        private static string[] GetSortedFiles(
+            string inputFolder)
         {
-            string[] files = Directory.GetFiles(inputFolder);
+            string[] allFiles =
+                Directory.GetFiles(inputFolder);
+
+            var filtered = new List<string>();
+            foreach (string f in allFiles)
+            {
+                if (IsManifestFile(f))
+                    continue;
+
+                filtered.Add(f);
+            }
+
+            string[] files = filtered.ToArray();
 
             Array.Sort(files, (a, b) =>
             {
-                int ia = ExtractFileIndex(Path.GetFileName(a));
-                int ib = ExtractFileIndex(Path.GetFileName(b));
+                int ia =
+                    ExtractFileIndex(Path.GetFileName(a));
+                int ib =
+                    ExtractFileIndex(Path.GetFileName(b));
                 return ia.CompareTo(ib);
             });
 
             return files;
         }
 
-        private static int ExtractFileIndex(string fileName)
+        private static int ExtractFileIndex(
+            string fileName)
         {
-            string name = Path.GetFileNameWithoutExtension(fileName);
+            string name =
+                Path.GetFileNameWithoutExtension(fileName);
             int u = name.LastIndexOf('_');
             if (u < 0) return 0;
 
             int result;
-            return int.TryParse(name.Substring(u + 1), out result)
+            return int.TryParse(
+                    name.Substring(u + 1), out result)
                 ? result
                 : 0;
         }
 
-        // ═══════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
         // ALIGNMENT
-        // ═══════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
 
         private static int Align(int Value)
         {
-            if ((Value & 0xf) != 0)
-                Value = ((Value & ~0xf) + 0x10);
+            if ((Value & 0xF) != 0)
+                Value = ((Value & ~0xF) + 0x10);
             return Value;
         }
     }
