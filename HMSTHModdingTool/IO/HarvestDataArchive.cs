@@ -398,17 +398,21 @@ namespace HMSTHModdingTool.IO
 
         // ═══════════════════════════════════════════════════════════
         // MANIFEST — READ
+        // Returns the manifest file path via out parameter so
+        // callers can exclude it from directory scans.
         // ═══════════════════════════════════════════════════════════
 
         private static bool ReadManifest(
             string folder,
             out int totalSlots,
-            out string[] slotFiles)
+            out string[] slotFiles,
+            out string manifestPath)   // ← NEW out param
         {
             totalSlots = 0;
             slotFiles = null;
+            manifestPath = null;
 
-            string manifestPath = null;
+            // ── Find the manifest file ─────────────────────────
             foreach (string f in Directory.GetFiles(folder))
             {
                 if (IsManifestFile(f))
@@ -467,6 +471,8 @@ namespace HMSTHModdingTool.IO
                 string val =
                     line.Substring(eq + 1).Trim();
 
+                // null = empty gap, otherwise stores the
+                // original filename (informational only now)
                 slotFiles[slotIdx] =
                     (val == "EMPTY" ||
                      string.IsNullOrEmpty(val))
@@ -475,6 +481,99 @@ namespace HMSTHModdingTool.IO
             }
 
             return true;
+        }
+
+        // ── Backward-compat overload (no manifest path) ────────
+        private static bool ReadManifest(
+            string folder,
+            out int totalSlots,
+            out string[] slotFiles)
+        {
+            string manifestPath;
+            return ReadManifest(
+                folder,
+                out totalSlots,
+                out slotFiles,
+                out manifestPath);
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // RESOLVE SLOT FILES BY ORDER  ← KEY NEW METHOD
+        //
+        // Given:
+        //   • slotFiles[]  — the manifest layout (null = EMPTY)
+        //   • inputFolder  — the folder to scan
+        //   • manifestPath — excluded from file list
+        //
+        // Returns a new slotFiles[] where every non-null entry
+        // is replaced with the FULL PATH of the matching file
+        // from the folder, matched by ORDER (1st real file →
+        // 1st non-empty slot, 2nd real file → 2nd non-empty
+        // slot, etc.).
+        //
+        // This means it works even when the user has renamed
+        // files, or is repacking files from a different archive
+        // into the same HDA slot layout.
+        // ═══════════════════════════════════════════════════════════
+
+        private static string[] ResolveSlotFilesByOrder(
+            string[] slotFiles,
+            string inputFolder,
+            string manifestPath)
+        {
+            int totalSlots = slotFiles.Length;
+
+            // ── Get sorted non-manifest files in the folder ────
+            string[] folderFiles =
+                GetSortedFilesExcluding(
+                    inputFolder, manifestPath);
+
+            // ── Count how many non-empty slots the manifest has
+            int expectedFiles = 0;
+            for (int i = 0; i < totalSlots; i++)
+                if (slotFiles[i] != null) expectedFiles++;
+
+            // ── Warn if counts don't match ─────────────────────
+            if (folderFiles.Length != expectedFiles)
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine(
+                    "  [WARN] Manifest expects " +
+                    expectedFiles +
+                    " file(s) but folder contains " +
+                    folderFiles.Length + " file(s).");
+                Console.WriteLine(
+                    "  Will pack whichever is fewer.");
+                Console.ResetColor();
+            }
+
+            // ── Build resolved slot map ────────────────────────
+            // resolved[slot] = full path, or null for gaps
+            string[] resolved = new string[totalSlots];
+            int fileIdx = 0;
+
+            for (int slot = 0; slot < totalSlots; slot++)
+            {
+                if (slotFiles[slot] == null)
+                {
+                    // Empty gap — keep null
+                    resolved[slot] = null;
+                    continue;
+                }
+
+                if (fileIdx < folderFiles.Length)
+                {
+                    resolved[slot] = folderFiles[fileIdx];
+                    fileIdx++;
+                }
+                else
+                {
+                    // More slots than files — treat as missing
+                    resolved[slot] = null;
+                }
+            }
+
+            return resolved;
         }
 
         // ═══════════════════════════════════════════════════════════
@@ -494,10 +593,13 @@ namespace HMSTHModdingTool.IO
         {
             int totalSlots;
             string[] slotFiles;
+            string manifestPath;
+
             bool hasManifest = ReadManifest(
                 InputFolder,
                 out totalSlots,
-                out slotFiles);
+                out slotFiles,
+                out manifestPath);
 
             if (hasManifest)
             {
@@ -507,9 +609,16 @@ namespace HMSTHModdingTool.IO
                     totalSlots + " slots).");
                 Console.ResetColor();
 
+                // ── Resolve files by ORDER, not filename ───────
+                string[] resolvedPaths =
+                    ResolveSlotFilesByOrder(
+                        slotFiles,
+                        InputFolder,
+                        manifestPath);
+
                 PackWithManifest(
                     Data, InputFolder,
-                    totalSlots, slotFiles,
+                    totalSlots, resolvedPaths,
                     false);
             }
             else
@@ -528,10 +637,13 @@ namespace HMSTHModdingTool.IO
         {
             int totalSlots;
             string[] slotFiles;
+            string manifestPath;
+
             bool hasManifest = ReadManifest(
                 inputFolder,
                 out totalSlots,
-                out slotFiles);
+                out slotFiles,
+                out manifestPath);
 
             if (hasManifest)
             {
@@ -542,13 +654,20 @@ namespace HMSTHModdingTool.IO
                     totalSlots + " slots).");
                 Console.ResetColor();
 
+                // ── Resolve files by ORDER, not filename ───────
+                string[] resolvedPaths =
+                    ResolveSlotFilesByOrder(
+                        slotFiles,
+                        inputFolder,
+                        manifestPath);
+
                 using (FileStream fs =
                     new FileStream(
                         outputHda, FileMode.Create))
                 {
                     PackWithManifest(
                         fs, inputFolder,
-                        totalSlots, slotFiles,
+                        totalSlots, resolvedPaths,
                         true);
                 }
             }
@@ -561,13 +680,17 @@ namespace HMSTHModdingTool.IO
 
         // ═══════════════════════════════════════════════════════════
         // PACK WITH MANIFEST
+        //
+        // slotFiles[] now contains FULL PATHS (or null for gaps),
+        // already resolved by ResolveSlotFilesByOrder.
+        // The inputFolder param is kept for the summary display.
         // ═══════════════════════════════════════════════════════════
 
         private static void PackWithManifest(
             Stream Data,
             string inputFolder,
             int totalSlots,
-            string[] slotFiles,
+            string[] slotFiles,   // full paths now
             bool compress)
         {
             BinaryWriter wr = new BinaryWriter(Data);
@@ -604,7 +727,10 @@ namespace HMSTHModdingTool.IO
 
             for (int slot = 0; slot < totalSlots; slot++)
             {
-                if (string.IsNullOrEmpty(slotFiles[slot]))
+                string fullPath = slotFiles[slot];
+
+                // ── Empty gap ──────────────────────────────────
+                if (string.IsNullOrEmpty(fullPath))
                 {
                     rawDatas[slot] = null;
                     storedDatas[slot] = null;
@@ -619,17 +745,14 @@ namespace HMSTHModdingTool.IO
                     continue;
                 }
 
-                string fname = slotFiles[slot];
-                string fpath =
-                    Path.Combine(inputFolder, fname);
-
-                if (!File.Exists(fpath))
+                // ── File missing from folder ───────────────────
+                if (!File.Exists(fullPath))
                 {
                     Console.ForegroundColor =
                         ConsoleColor.Red;
                     Console.WriteLine(
                         "  [ERROR] File not found: " +
-                        fname);
+                        Path.GetFileName(fullPath));
                     Console.ResetColor();
 
                     rawDatas[slot] = null;
@@ -639,11 +762,12 @@ namespace HMSTHModdingTool.IO
                 }
 
                 rawDatas[slot] =
-                    File.ReadAllBytes(fpath);
+                    File.ReadAllBytes(fullPath);
                 int rawLen = rawDatas[slot].Length;
                 totalRaw += rawLen;
                 fileNum++;
 
+                string fname = Path.GetFileName(fullPath);
                 string currentText =
                     fileNum.ToString("D" + indexWidth);
                 string totalText =
@@ -661,6 +785,7 @@ namespace HMSTHModdingTool.IO
                         : fname);
                 Console.ResetColor();
 
+                // ── RAW or compress ────────────────────────────
                 if (!compress || rawLen <= 64)
                 {
                     storedDatas[slot] = rawDatas[slot];
@@ -829,6 +954,11 @@ namespace HMSTHModdingTool.IO
                         BitConverter.GetBytes(
                             entryRelOffsets[slot]);
 
+                    string displayName =
+                        slotFiles[slot] != null
+                            ? Path.GetFileName(slotFiles[slot])
+                            : "?";
+
                     Console.ForegroundColor =
                         ConsoleColor.Green;
                     Console.WriteLine(
@@ -840,7 +970,7 @@ namespace HMSTHModdingTool.IO
                             offBytes[0], offBytes[1],
                             offBytes[2], offBytes[3],
                             0x10 + entryRelOffsets[slot],
-                            slotFiles[slot] ?? "?"));
+                            displayName));
                 }
 
                 Console.ResetColor();
@@ -1220,12 +1350,25 @@ namespace HMSTHModdingTool.IO
         }
 
         // ═══════════════════════════════════════════════════════════
-        // SORTED FILE LISTING
-        // Manifest identified by CONTENT and never packed
+        // SORTED FILE LISTING — excludes ALL manifests
         // ═══════════════════════════════════════════════════════════
 
         private static string[] GetSortedFiles(
             string inputFolder)
+        {
+            return GetSortedFilesExcluding(
+                inputFolder, null);
+        }
+
+        /// <summary>
+        /// Returns all non-manifest files in the folder,
+        /// sorted by the numeric index in their filename.
+        /// Optionally excludes a specific file by full path
+        /// (the manifest, already located by ReadManifest).
+        /// </summary>
+        private static string[] GetSortedFilesExcluding(
+            string inputFolder,
+            string excludeFullPath)
         {
             string[] allFiles =
                 Directory.GetFiles(inputFolder);
@@ -1233,7 +1376,16 @@ namespace HMSTHModdingTool.IO
             var filtered = new List<string>();
             foreach (string f in allFiles)
             {
+                // Skip by content (manifest detection)
                 if (IsManifestFile(f))
+                    continue;
+
+                // Skip by explicit path if provided
+                if (excludeFullPath != null &&
+                    string.Equals(
+                        Path.GetFullPath(f),
+                        Path.GetFullPath(excludeFullPath),
+                        StringComparison.OrdinalIgnoreCase))
                     continue;
 
                 filtered.Add(f);
