@@ -35,6 +35,20 @@ new features to allow deep modding of the game's assets including textures, audi
 
 ---
 
+### Version v1.4.3-Beta
+- **Added** BOY Advanced Bone Scaler & Height Tool (`-boyscale`)
+- **Added** BOY Mod Presets - apply pre-made skeleton mods instantly
+- **Added** BoyModV2 - Taller Player Mod - Default Farmer Version (`-boymodv2`)
+- **Added** BoyModV3 - Taller Player Mod - Uptight Farmer Version (`-boymodv3`)
+- **Added** BoyOriginal / BoyBack / BoyOrig / BoyRestore - restore BOY to original vanilla skeleton
+- **Added** Auto file-type detection for BOY mod commands (detects `.rdtb` or `.bin` automatically)
+- **Added** Individual bone XYZ scaling - scale any bone without affecting anything else
+- **Added** Bone safety system - warns when scaling bones that would move hair or face
+- **Added** Full group scaling support (spine, neck, arms, legs, ankles, feet etc.)
+- **Added** Pair aliases (both sides at once: ankles, arms, legs, thighs etc.)
+
+---
+
 ## Known Bugs & Workarounds
 
 ### File Size / Memory Limit
@@ -381,6 +395,254 @@ The closer to the original size — the safer it is!
 
 ---
 
+---
+
+### BOY Advanced Bone Scaler & Height Tool
+> BOY 3D Tools by DarthKrayt333
+
+The BOY Bone Scaler allows you to scale any individual bone of the
+BOY player character by X, Y, and Z axes independently, without
+affecting any other bones or any other part of the model.
+
+**Bone 0 Y = 64.0 (hex: 00 00 80 42) is always locked.**
+This value controls horse mounting and world placement.
+It is never changed by any BOY tool command.
+
+---
+
+#### How it works
+
+Each bone can be scaled on its own.
+No chain compensation. No cross-effects between bones.
+Only the bones you specify are changed.
+
+---
+
+#### Individual Bone Control
+
+-boyscale <00_skeleton.bin> --b<N> <value> Scale bone N on all axes
+
+-boyscale <00_skeleton.bin> --b<N>x <value> Scale bone N X axis only
+
+-boyscale <00_skeleton.bin> --b<N>y <value> Scale bone N Y axis only
+
+-boyscale <00_skeleton.bin> --b<N>z <value> Scale bone N Z axis only
+
+
+N = bone number (0 to 67)
+
+Values:
+- `1.0` = original (no change)
+- 
+- `> 1.0` = bigger / longer / fatter
+- 
+- `< 1.0` = smaller / shorter / thinner
+
+---
+
+#### Group Control
+
+Scale multiple bones at once using group names:
+
+-boyscale <00_skeleton.bin> --<group> <value> All axes
+
+-boyscale <00_skeleton.bin> --<group>x <value> X axis only
+
+-boyscale <00_skeleton.bin> --<group>y <value> Y axis only
+
+-boyscale <00_skeleton.bin> --<group>z <value> Z axis only
+
+
+Available groups:
+
+| Group | Bones |
+|-------|-------|
+| `spine` | 2, 3, 4 |
+| `neck` | 5 |
+| `rarm` | 16, 17, 18 |
+| `larm` | 33, 34, 35 |
+| `rhand` | 19, 20 |
+| `lhand` | 36, 37 |
+| `rhip` | 50 |
+| `lhip` | 59 |
+| `rthigh` | 51 |
+| `lthigh` | 60 |
+| `rshin` | 52 |
+| `lshin` | 61 |
+| `rankle` | 53 |
+| `lankle` | 62 |
+| `rfoot` | 54 |
+| `lfoot` | 63 |
+| `rtoe` | 56 |
+| `ltoe` | 65 |
+
+Pair aliases (both sides at once):
+
+| Alias | Groups |
+|-------|--------|
+| `arms` | larm + rarm |
+| `hands` | lhand + rhand |
+| `shoulders` | lshldr + rshldr |
+| `hips` | lhip + rhip |
+| `thighs` | lthigh + rthigh |
+| `shins` | lshin + rshin |
+| `ankles` | lankle + rankle |
+| `feet` | lfoot + rfoot |
+| `toes` | ltoe + rtoe |
+| `legs` | all leg bones both sides |
+| `torso` | spine |
+
+---
+
+#### Safe Bones (will NOT move hair or face)
+
+Spine: --b2 --b3 --b4
+
+Neck: --b5
+
+Shoulder: --b15 --b32
+
+Upper arm: --b17 (R) --b34 (L)
+
+Elbow: --b18 (R) --b35 (L)
+
+Lower arm: --b19 (R) --b36 (L)
+
+Hand: --b20 (R) --b37 (L)
+
+Legs: --b50 to --b67
+
+
+#### DANGER - Will move hair and head
+
+Chest anchors: --b12 --b13 --b14
+
+Face / Eyes: --b6 to --b11
+
+
+Use `--b4x` and `--b4z` for wider chest instead of chest anchors.
+
+Use `--b15x` and `--b32x` for wider shoulders.
+
+---
+
+#### BOY Bone Quick Reference
+
+| Bone | Name | Notes |
+|------|------|-------|
+| 0 | ROOT | Y locked at 64.0 always |
+| 2 | SPINE_BASE | Lower back / waist |
+| 3 | SPINE_MID | Stomach |
+| 4 | SPINE_TOP | Upper chest |
+| 5 | NECK | Neck height and width |
+| 15 | SHOULDER_R | Right shoulder socket |
+| 17 | UPPER_ARM_R | Right upper arm |
+| 18 | ELBOW_R | Right elbow |
+| 19 | LOWER_ARM_R | Right lower arm |
+| 20 | HAND_R | Right hand |
+| 32 | SHOULDER_L | Left shoulder socket |
+| 34 | UPPER_ARM_L | Left upper arm |
+| 35 | ELBOW_L | Left elbow |
+| 36 | LOWER_ARM_L | Left lower arm |
+| 37 | HAND_L | Left hand |
+| 50 | HIP_R | Right hip |
+| 51 | THIGH_R | Right thigh |
+| 52 | SHIN_R | Right shin |
+| 53 | ANKLE_R | Right ankle |
+| 54 | FOOT_R | Right foot |
+| 59 | HIP_L | Left hip |
+| 60 | THIGH_L | Left thigh |
+| 61 | SHIN_L | Left shin |
+| 62 | ANKLE_L | Left ankle |
+| 63 | FOOT_L | Left foot |
+
+---
+
+#### BOY Scaler Examples
+
+Taller spine (20%):
+boyscale 00_skeleton.bin --b2y 1.20 --b3y 1.20 --b4y 1.20
+
+Longer ankles:
+boyscale 00_skeleton.bin --b53y 1.30 --b62y 1.30
+
+Taller legs + fat arms:
+boyscale 00_skeleton.bin --legsy 1.25 --armsy 2.00
+
+Short thick neck:
+boyscale 00_skeleton.bin --b5y 0.80 --b5x 1.40 --b5z 1.40
+
+Wider waist:
+boyscale 00_skeleton.bin --b2x 1.20 --b2z 1.20 --b3x 1.20 --b3z 1.20
+
+Bigger hands:
+boyscale 00_skeleton.bin --b20 1.40 --b37 1.40
+
+Bigger feet:
+boyscale 00_skeleton.bin --b54 1.30 --b63 1.30
+
+
+Full bodybuilder example:
+
+boyscale 00_skeleton.bin --b2y 1.10 --b3y 1.10 --b4y 1.10 --b5y 0.75 --b5x 1.60 --b5z 1.60 --b17y 2.20 --b17z 2.20 --b34y 2.20 --b34z 2.20 --b51x 1.30 --b51z 1.30 --b60x 1.30 --b60z 1.30 --b54 1.20 --b63 1.20
+
+
+---
+
+#### BOY Mod Presets
+
+Pre-made skeleton mods that can be applied instantly to
+
+`00_skeleton.bin` or directly to `BOY_00000.rdtb`.
+
+Both commands auto-detect the file type from the extension.
+
+---
+
+##### BoyModV2 — Taller Player Mod - Default Farmer Version
+
+boymodv2 00_skeleton.bin
+
+boymodv2 BOY_00000.rdtb
+
+---
+
+##### BoyModV3 — Taller Player Mod - Uptight Farmer Version
+
+boymodv3 00_skeleton.bin
+
+boymodv3 BOY_00000.rdtb
+
+---
+
+##### BoyOriginal — Restore BOY to Original Vanilla Skeleton
+
+All of the following commands do the same thing:
+
+boyoriginal BOY_00000.rdtb
+
+boyorig BOY_00000.rdtb
+
+boyback BOY_00000.rdtb
+
+boyrestore BOY_00000.rdtb
+
+---
+
+#### After applying any BOY mod
+
+If you applied to `00_skeleton.bin`:
+
+tool.exe -crdtb <extracted_folder> BOY_00000.rdtb
+
+tool.exe -chda BOY BOY.HDA
+
+If you applied directly to `BOY_00000.rdtb`:
+
+tool.exe -chda BOY BOY.HDA
+
+---
+
 ## Examples
 
 ### Extract and repack BOY.HDA (Player textures)
@@ -569,6 +831,12 @@ HMSTHModdingTool> -xgdtb BOY_00000.GDTB ./textures
 HMSTHModdingTool> -xvag all SE.BD SE.HD ./sfx
 
 HMSTHModdingTool> -rvag 5 new.vag SE.BD SE.HD
+
+HMSTHModdingTool> boymodv3 BOY_00000.rdtb
+
+HMSTHModdingTool> boyback BOY_00000.rdtb
+
+HMSTHModdingTool> boyscale 00_skeleton.bin --b2y 1.20 --b3y 1.20
 
 HMSTHModdingTool> help
 
