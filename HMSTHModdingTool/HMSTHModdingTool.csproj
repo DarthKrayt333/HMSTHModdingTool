@@ -48,6 +48,8 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="BMP\BMPPalette.cs" />
+    <Compile Include="BoyMods\BoyModPresets.cs" />
+    <Compile Include="BoyMods\BoyScaler.cs" />
     <Compile Include="IO\AudioBank.cs" />
     <Compile Include="IO\AudioConverter.cs" />
     <Compile Include="IO\Compression\HarvestCompression.cs" />
