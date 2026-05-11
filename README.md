@@ -17,20 +17,41 @@ new features to allow deep modding of the game's assets including textures, audi
 
 ## Changelog
 
-### Version v1.4.2-Beta
-- **Renamed** HDATextTool -> HMSTHModdingTool
-- **Fixed** File compressor to handle game memory limits - Now it's available, usage by Default -chda or chda to make Compressed files inside .HDA
-- **Fixed** a bug where NPC text was not exporting and importing correctly
-- **Fixed** a bug where SHOP Text had empty [end] character inside text, which wasn't importing into BODY File correctly.
-- **Added** double-click interactive mode (tool now opens when double clicked in Windows)
-- **Added** full .GDTB texture archive support (export, import, replace, info)
-- **Added** PS2 BMP converter (PS2 <-> Windows format)
-- **Added** BMP raw palette extractor and importer
-- **Added** smart .HDA file recognition (GDTB, RDTB, SRDB, BD, HD, SQ auto-detected)
-- **Added** commands now work with or without "-" prefix
-- **Known Bug** SHOP.HDA text export has a remaining issue, workaround below
-- **Known Bug** No compressor yet, some files may exceed game memory limit
-- **Working On** .RDTB 3D model archive exporter (BOY.HDA player model, NPC models)
+### Version v1.4.4-Beta
+- **Fixed** Hex codes going to wrong positions when translating text
+- **Fixed** Hex codes appearing inside translated sentences instead of correct positions
+- **Fixed** Hex codes after [dialog] tag being placed incorrectly on rebuild
+- **Fixed** [end] bug when removing trailing empty rows from .txt files
+- **Added** Hex mode as default text export — all tokens visible inline as [varNN] / [hexNN_MM]
+- **Added** Dat/Clean mode for text export — hidden tokens stored in companion .dat file
+- **Added** Smart anchor system for hidden hex codes (ControlIndex + LineIndex)
+- **Added** Backward compatibility with old .dat files
+- **Changed** Default `-xtxt` / `-ctxt` now exports/imports in hex mode (no .dat needed)
+- **Changed** Use `-xtxt -dat` or `-xtxt -clean` for .dat mode
+- - **Fixed** Tools/items 3D models now properly centered
+  at world origin when exported (no longer crossing
+  through each other or off-center in Blender)
+- **Fixed** Tools/items spacing now bounds-aware
+  (items separated by their actual width + gap,
+  not a fixed offset)
+- **Added** 3D Model Extractor (`-x3d`)
+- **Added** 3D Model Creator (`-c3d`)
+- **Added** Per-texture model files
+- **Added** Combined model files (body + tools separate)
+- **Added** Skeleton extraction to CSV on RDTB extract
+- **Added** RDTB manifest JSON for rebuild tracking
+- **Added** RDTB diagnostic tools (diag through diag19)
+- **Added** SLUS LBA table analyzer (`-slus`)
+- **Added** SLUS LBA updater (`-lbaupdate`)
+- **Added** Cross-character mesh wrap (`-x3d_dual`) experimental
+- **Added** Native layout mode (`-x3dnative`)
+- **Added** Single chunk extractor (`-x3dchunk`)
+- **Known Issue** Body 3D model positions still corrupted
+- **Known Issue** Some NPC models appear as tube/cylinder shape
+- **Known Issue** Cross-character mesh transplant not yet working
+- **Working On** Correct world-space vertex positions
+- **Working On** Skeleton export with mesh for Blender rigging
+- **Working On** Full mesh replacement into game
 - **Working On** .SRDB map model archive exporter
 
 ---
@@ -49,12 +70,48 @@ new features to allow deep modding of the game's assets including textures, audi
 
 ---
 
+### Version v1.4.2-Beta
+- **Renamed** HDATextTool -> HMSTHModdingTool
+- **Fixed** File compressor to handle game memory limits - Now it's available, usage by Default -chda or chda to make Compressed files inside .HDA
+- **Fixed** a bug where NPC text was not exporting and importing correctly
+- **Fixed** a bug where SHOP Text had empty [end] character inside text, which wasn't importing into BODY File correctly.
+- **Added** double-click interactive mode (tool now opens when double clicked in Windows)
+- **Added** full .GDTB texture archive support (export, import, replace, info)
+- **Added** PS2 BMP converter (PS2 <-> Windows format)
+- **Added** BMP raw palette extractor and importer
+- **Added** smart .HDA file recognition (GDTB, RDTB, SRDB, BD, HD, SQ auto-detected)
+- **Added** commands now work with or without "-" prefix
+- **Known Bug** SHOP.HDA text export has a remaining issue, workaround below
+- **Known Bug** No compressor yet, some files may exceed game memory limit
+- **Working On** .RDTB 3D model archive exporter (BOY.HDA player model, NPC models)
+- **Working On** .SRDB map model archive exporter
+
+---
+
 ## Known Bugs & Workarounds
 
 ### File Size / Memory Limit
 Some edited files may become too large for the game's memory limit.
 A compressor is now available. Usage to make compressed files inside .HDA is by Default
 -chda <folder_name> <new_file_name.hda> or chda <folder_name> <new_file_name.hda>.
+
+### 3D Model Export Positions
+Body 3D model vertices are currently exported with
+incorrect world-space positions. The geometry shape
+is extracted correctly but positions of body parts
+relative to each other are not yet correct.
+This is caused by PS2 VIF bone transform data
+not yet being fully decoded.
+
+Tools/items (model_05) are exported correctly and
+centered at the world origin with proper separation.
+
+### Cross-Character Mesh
+Transplanting a mesh from one character to another
+does not work yet. The game uses per-character
+vertex counts and bone bindings that differ between
+characters. Editing vertices of the same character
+works correctly.
 
 ---
 
@@ -131,7 +188,60 @@ The `.RDTB` format is a 3D model archive. It works together with `.GDTB`:
 - `.GDTB` contains the BMP textures
 - `.RDTB` tells `.GDTB` how the textures are applied to the models
 
-**Status:** Exporter is currently being worked on.
+**RDTB Internal Structure:**
+
+| Chunk | Label | Contents |
+|-------|-------|----------|
+| 0 | skeleton | Bone pointer array + bone records |
+| 1 | mesh_idx | Index buffer + sub-pointers |
+| 2 | mesh_main | Main vertex/normal/UV data |
+| 3-6 | mesh_grp1-4 | Mesh groups (LOD/body parts) |
+| 7-10 | idx_tbl_0-3 | Small index/lookup tables |
+| 11 | weight_uv | maybe Skin weights + texture coords |
+| 12 | unknown_0 | still not confirmed |
+| 13 | unknown_1 | still not confirmed |
+
+**Texture to body part map (BOY):**
+
+| Texture | Body Part |
+|---------|-----------|
+| texture_00 | Legs, hands, backpack |
+| texture_01 | Torso, arms, forearms |
+| texture_02 | Head, cap, hair, ears, neck |
+| texture_03 | Eyes (animated, 4-bit) |
+| texture_04 | Mouth |
+| texture_05 | Tools and items (separate file) |
+| texture_06 | Shoes and ankles |
+
+**Status:** Basic extraction working.
+Vertex positions still being researched.
+Skeleton export with mesh in progress.
+
+---
+
+### 3D Model Tools
+> 3D Mesh by DarthKrayt333
+
+-x3d <file.rdtb> <file.gdtb> <base_name>
+    Extract 3D models with textures.
+    Creates 4 output folders:
+      <base_name>_obj/       per-texture OBJ files
+      <base_name>_dae/       per-texture DAE files
+      <base_name>_all_obj/   body + tools OBJ
+      <base_name>_all_dae/   combined DAE
+
+-c3d <models_folder> <output_folder>
+    Rebuild RDTB + GDTB from edited model files.
+    Reads model_NN.obj OR model_NN.dae files.
+    OBJ takes priority if both exist.
+
+What works:
+  ✅ Texture replacement
+  ✅ Skeleton scaling (boyscale etc.)
+  ✅ Editing existing vertices of same character
+  ✅ Tools/items exported centered and separated
+  ⚠️  Body part positions still approximate
+  ❌ Cross-character mesh transplant not yet working
 
 ---
 
@@ -195,7 +305,22 @@ It is believed to be responsible for:
 - Scene management
 - Running and coordinating all game systems and files
 
+**File size:** 1,472,560 bytes
+**Developer:** Victor Interactive Software
+**Publisher:** Natsume / TOYBOX
+
+**SLUS LBA Table (USA):** `0x162460 - 0x162D30`
+
+**Important:** If you change the size of any .HDA
+file you must update the LBA table in SLUS_202.51
+or the game will crash on load.
+
+Use `-slus SLUS_202.51` to analyze the LBA table.
+Use `-lbaupdate` to update an entry safely.
+
+
 ---
+
 
 ## Installation
 
@@ -228,15 +353,111 @@ Both work exactly the same.
 
 
 ### Text Commands
+
 -xtxt <text.bin> <ptr.bin> <out.txt> Export text to .txt file
 
 -ctxt <in.txt> <text.bin> <ptr.bin> Import text from .txt file
 
 
+---
+
+
+### Text Modes Explained
+
+#### Hex Mode (Default)
+
+[hex0B_06][hex09_10]Hey, you don't look
+familiar. You can't
+possibly be here on[roll]
+vacation...Um...[roll][dialog]
+[hex0B_00][hex09_51][hex0B_06][hex0C_04][hex03_78]...Oh, so you're that
+old farmer guy's
+grandson.[end]
+
+
+Everything is visible. You can translate freely without worrying
+about hidden codes — they stay where they are in the text.
+
+#### Dat/Clean Mode
+
+Hey, you don't look
+familiar. You can't
+possibly be here on[roll]
+vacation...Um...[roll][dialog]
+...Oh, so you're that
+old farmer guy's
+grandson.[end]
+
+
+Hidden codes are stored in a companion `.dat` file.
+The .txt looks cleaner but you must keep the .dat file.
+The tool automatically places hidden codes at the correct
+positions when rebuilding, even if you change the text length.
+
+
+---
+
+
+#### Default Mode (Hex — recommended for translation)
+All hidden tokens are visible inline in the .txt as `[varNN]` / `[hexNN_MM]` tags.
+No companion .dat file needed. What you see is what you get.
+
+-xtxt <text.bin> <ptr.bin> <out.txt> Export text (hex mode, default)
+
+xtxt <text.bin> <ptr.bin> <out.txt> Same without dash
+
+-ctxt <in.txt> <text.bin> <ptr.bin> Import text (hex mode, default)
+
+ctxt <in.txt> <text.bin> <ptr.bin> Same without dash
+
+---
+
+
+#### Dat/Clean Mode (experimental — hidden hex tokens in .dat file)
+Hidden tokens are stripped from the .txt and stored in a companion .dat file.
+The .dat file must stay next to the .txt with the same base name.
+
+-xtxt -dat <text.bin> <ptr.bin> <out.txt> Export text + .dat file
+
+-xtxt -clean <text.bin> <ptr.bin> <out.txt> Same as -dat
+
+xtxt dat <text.bin> <ptr.bin> <out.txt> Same without dashes
+
+xtxt clean <text.bin> <ptr.bin> <out.txt> Same without dashes
+
+-ctxt -dat <in.txt> <text.bin> <ptr.bin> Import text using .dat file
+
+-ctxt -clean <in.txt> <text.bin> <ptr.bin> Same as -dat
+
+ctxt dat <in.txt> <text.bin> <ptr.bin> Same without dashes
+
+ctxt clean <in.txt> <text.bin> <ptr.bin> Same without dashes
+
+
+#### Important Notes
+- **Hex mode** (default) is recommended for translation work —
+  you can see all control codes directly in the text
+- **Dat/Clean mode** gives cleaner .txt files but requires keeping
+  the .dat file — if you lose the .dat, you cannot rebuild
+- After switching modes, always **re-export** with `-xtxt` before editing
+- Trailing empty rows at the end of .txt files are no longer required
+
+
+---
+
 
 ### ELF Commands
 -fixelf SLUS_202.51 (lba) (size in decimal) Fix PS2 EXE entry after modding
 
+
+### SLUS / LBA Tools
+
+-slus <SLUS_202.51> [jp]
+    Analyze LBA table in PS2 executable.
+    USA default. Add 'jp' for Japanese version.
+
+-lbaupdate <SLUS_202.51> <index> <new_size> [jp]
+    Update a single LBA entry after file size change.
 
 
 
@@ -673,6 +894,36 @@ Repack BOY.HDA
 -chda BOY BOY.HDA
 
 
+### Experimental - Extract BOY 3D Models
+-x3d BOY_00000.rdtb BOY_00001.gdtb BOY
+
+Output folders:
+  BOY_obj/       per-texture OBJ files
+  
+  BOY_dae/       per-texture DAE files
+  
+  BOY_all_obj/   body + tools OBJ (2 files)
+  
+  BOY_all_dae/   combined DAE
+
+Edit models in Blender then rebuild:
+-c3d BOY_obj BOY_NEW
+
+-chda BOY BOY.HDA
+
+### Extract Kurt (HAYATO) NPC Models
+-xhda HAYATO.HDA HAYATO
+
+-x3d HAYATO_00000.rdtb HAYATO_00001.gdtb KURT
+
+### Analyze SLUS LBA Table
+-slus SLUS_202.51
+
+-slus SLUS_202.51 jp
+
+-lbaupdate SLUS_202.51 42 2097152
+
+
 
 ### Export and edit Pause Menu Texture
 Extract COMMON.HDA first
@@ -691,14 +942,25 @@ palette inside the .bmp file and the other 2 until the next update.
 Extract EVTMSG12.HDA first
 -xhda EVTMSG12.HDA EVTMSG12
 
-Export text
+Export text (default hex mode — all codes visible)
+
 -xtxt EVTMSG12_00001.bin EVTMSG12_00002.bin output.txt
+
+Or export with dat/clean mode (codes hidden in .dat file)
+
+-xtxt -dat EVTMSG12_00001.bin EVTMSG12_00002.bin output.txt
+
+-xtxt -clean EVTMSG12_00001.bin EVTMSG12_00002.bin output.txt
 
 Edit output.txt in any text editor
 
-Import text back
+Import text back (must match the mode you exported with)
 
 -ctxt output.txt EVTMSG12_00001new.bin EVTMSG12_00002new.bin
+
+Or if you used dat/clean mode:
+
+-ctxt -dat output.txt EVTMSG12_00001new.bin EVTMSG12_00002new.bin
 
 Repack
 -chda EVTMSG12 EVTMSG12.HDA
@@ -715,6 +977,8 @@ Edit output.txt in any text editor
 Import NPC text back
 
 -ctxt output.txt HAYATO_02_00001new.bin HAYATO_02_00000new.bin
+
+
 
 ### Replace a single texture
 -rgdtb 3 my_new_texture.bmp textures.gdtb
@@ -843,6 +1107,12 @@ HMSTHModdingTool> help
 HMSTHModdingTool> cls
 
 HMSTHModdingTool> exit
+
+HMSTHModdingTool> -x3d BOY_00000.rdtb BOY_00001.gdtb BOY
+
+HMSTHModdingTool> -c3d BOY_obj BOY_NEW
+
+HMSTHModdingTool> slus SLUS_202.51
 
 
 
