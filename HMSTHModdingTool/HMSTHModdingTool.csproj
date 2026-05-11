@@ -60,6 +60,9 @@
     <Compile Include="IO\HarvestDataArchive.cs" />
     <Compile Include="IO\HarvestElf.cs" />
     <Compile Include="IO\HarvestText.cs" />
+    <Compile Include="RDTB3D\RDTB3DCreator.cs" />
+    <Compile Include="RDTB3D\RDTB3DDiagnostic.cs" />
+    <Compile Include="RDTB3D\RDTB3DExtractor.cs" />
     <Compile Include="RDTB\RDTBArchive.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
