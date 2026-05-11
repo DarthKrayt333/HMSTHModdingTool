@@ -223,16 +223,25 @@ Skeleton export with mesh in progress.
 > 3D Mesh by DarthKrayt333
 
 -x3d <file.rdtb> <file.gdtb> <base_name>
+
     Extract 3D models with textures.
+    
     Creates 4 output folders:
+    
       <base_name>_obj/       per-texture OBJ files
+      
       <base_name>_dae/       per-texture DAE files
+      
       <base_name>_all_obj/   body + tools OBJ
+      
       <base_name>_all_dae/   combined DAE
 
 -c3d <models_folder> <output_folder>
+
     Rebuild RDTB + GDTB from edited model files.
+    
     Reads model_NN.obj OR model_NN.dae files.
+    
     OBJ takes priority if both exist.
 
 What works:
