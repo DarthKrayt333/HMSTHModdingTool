@@ -2301,9 +2301,9 @@ namespace HMSTHModdingTool.RDTB
                 case 0: return "skeleton";
                 case 1: return "mesh_idx";
                 case 2: return "mesh_main";
-                case 11: return "weight_uv";
-                case 12: return "unknown_0";
-                case 13: return "unknown_1";
+                case 11: return "mesh_lod0";
+                case 12: return "mesh_lod1";
+                case 13: return "mesh_lod2";
                 default:
                     if (idx >= 3 && idx <= 6)
                         return
