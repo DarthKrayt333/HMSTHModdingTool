@@ -28,7 +28,7 @@ new features to allow deep modding of the game's assets including textures, audi
 - **Added** Backward compatibility with old .dat files
 - **Changed** Default `-xtxt` / `-ctxt` now exports/imports in hex mode (no .dat needed)
 - **Changed** Use `-xtxt -dat` or `-xtxt -clean` for .dat mode
-- - **Fixed** Tools/items 3D models now properly centered
+- **Fixed** Tools/items 3D models now properly centered
   at world origin when exported (no longer crossing
   through each other or off-center in Blender)
 - **Fixed** Tools/items spacing now bounds-aware
@@ -236,11 +236,17 @@ Skeleton export with mesh in progress.
     OBJ takes priority if both exist.
 
 What works:
+
   ✅ Texture replacement
+  
   ✅ Skeleton scaling (boyscale etc.)
+  
   ✅ Editing existing vertices of same character
+  
   ✅ Tools/items exported centered and separated
+  
   ⚠️  Body part positions still approximate
+  
   ❌ Cross-character mesh transplant not yet working
 
 ---
@@ -367,11 +373,17 @@ Both work exactly the same.
 #### Hex Mode (Default)
 
 [hex0B_06][hex09_10]Hey, you don't look
+
 familiar. You can't
+
 possibly be here on[roll]
+
 vacation...Um...[roll][dialog]
+
 [hex0B_00][hex09_51][hex0B_06][hex0C_04][hex03_78]...Oh, so you're that
+
 old farmer guy's
+
 grandson.[end]
 
 
@@ -381,11 +393,17 @@ about hidden codes — they stay where they are in the text.
 #### Dat/Clean Mode
 
 Hey, you don't look
+
 familiar. You can't
+
 possibly be here on[roll]
+
 vacation...Um...[roll][dialog]
+
 ...Oh, so you're that
+
 old farmer guy's
+
 grandson.[end]
 
 
