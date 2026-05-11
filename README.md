@@ -197,9 +197,9 @@ The `.RDTB` format is a 3D model archive. It works together with `.GDTB`:
 | 2 | mesh_main | Main vertex/normal/UV data |
 | 3-6 | mesh_grp1-4 | Mesh groups (LOD/body parts) |
 | 7-10 | idx_tbl_0-3 | Small index/lookup tables |
-| 11 | weight_uv | maybe Skin weights + texture coords |
-| 12 | unknown_0 | still not confirmed |
-| 13 | unknown_1 | still not confirmed |
+| 11 | mesh_lod0 | VIF mesh - highest detail (1066 VIF blocks in BOY) |
+| 12 | mesh_lod1 | VIF mesh - medium detail  (774 VIF blocks in BOY)  |
+| 13 | mesh_lod2 | VIF mesh - lowest detail  (612 VIF blocks in BOY)  |
 
 **Texture to body part map (BOY):**
 
