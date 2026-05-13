@@ -330,8 +330,7 @@ It is believed to be responsible for:
 file you must update the LBA table in SLUS_202.51
 or the game will crash on load.
 
-Use `-slus SLUS_202.51` to analyze the LBA table.
-Use `-lbaupdate` to update an entry safely.
+-fixelf SLUS_202.51 (lba) (size in decimal) Fix PS2 EXE entry after modding
 
 
 ---
@@ -477,15 +476,7 @@ ctxt clean <in.txt> <text.bin> <ptr.bin> Same without dashes
 -fixelf SLUS_202.51 (lba) (size in decimal) Fix PS2 EXE entry after modding
 
 
-### SLUS / LBA Tools
-
--slus <SLUS_202.51> [jp]
-    Analyze LBA table in PS2 executable.
-    USA default. Add 'jp' for Japanese version.
-
--lbaupdate <SLUS_202.51> <index> <new_size> [jp]
-    Update a single LBA entry after file size change.
-
+---
 
 
 ### GDTB Texture Archive
@@ -1138,8 +1129,6 @@ HMSTHModdingTool> exit
 HMSTHModdingTool> -x3d BOY_00000.rdtb BOY_00001.gdtb BOY
 
 HMSTHModdingTool> -c3d BOY_obj BOY_NEW
-
-HMSTHModdingTool> slus SLUS_202.51
 
 
 
