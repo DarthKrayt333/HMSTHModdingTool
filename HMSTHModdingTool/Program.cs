@@ -922,125 +922,8 @@ namespace HMSTHModdingTool
                             " <output_folder>");
                         RDTB3DCreator.Create(
                             args[1], args[2]);
-                        break;
-
-                    case "x3d_dual":
-                    case "xdual":
-                    case "x3ddual":
-                        {
-                            // ── Validate arg count ────────────
-                            // Format:
-                            //   x3d_dual <map1> [map2 ...]
-                            //     <target.rdtb> <target.gdtb>
-                            //     <donor.rdtb>  <donor.gdtb>
-                            //     <output_name>
-                            //
-                            // Minimum = 1 mapping + 5 fixed
-                            //         = 6 args after command
-                            //         = args.Length >= 7
-                            if (args.Length < 7)
-                            {
-                                Console.WriteLine();
-                                Console.ForegroundColor =
-                                    ConsoleColor.Cyan;
-                                Console.WriteLine(
-                                    "  [!] x3d_dual needs at" +
-                                    " least 6 arguments");
-                                Console.WriteLine();
-                                Console.WriteLine(
-                                    "  Format:");
-                                Console.WriteLine(
-                                    "    x3d_dual <map1>" +
-                                    " [map2 ...]");
-                                Console.WriteLine(
-                                    "             <target.rdtb>" +
-                                    " <target.gdtb>");
-                                Console.WriteLine(
-                                    "             <donor.rdtb>" +
-                                    "  <donor.gdtb>");
-                                Console.WriteLine(
-                                    "             <output_name>");
-                                Console.WriteLine();
-                                Console.WriteLine(
-                                    "  Mapping format:" +
-                                    " target_model:donor_model");
-                                Console.WriteLine();
-                                Console.WriteLine(
-                                    "  Example (Boy's head" +
-                                    " ← Kurt's head):");
-                                Console.WriteLine(
-                                    "    x3d_dual 2:4");
-                                Console.WriteLine(
-                                    "             BOY_00000.rdtb" +
-                                    " BOY_00001.gdtb");
-                                Console.WriteLine(
-                                    "             HAYATO_00000" +
-                                    ".rdtb HAYATO_00001.gdtb");
-                                Console.WriteLine(
-                                    "             BOY_AS_KURT");
-                                Console.WriteLine();
-                                Console.WriteLine(
-                                    "  Example (multiple parts):");
-                                Console.WriteLine(
-                                    "    x3d_dual 0:1 1:2 2:4");
-                                Console.WriteLine(
-                                    "             BOY_00000.rdtb" +
-                                    " BOY_00001.gdtb");
-                                Console.WriteLine(
-                                    "             HAYATO_00000" +
-                                    ".rdtb HAYATO_00001.gdtb");
-                                Console.WriteLine(
-                                    "             BOY_AS_KURT");
-                                Console.ResetColor();
-                                Console.WriteLine();
-                                customFinish = true;
-                                break;
-                            }
-
-                            // ── Last 5 args are file paths ────
-                            // and output name (fixed)
-                            int fixedArgsStart =
-                                args.Length - 5;
-
-                            // ── Mappings live between args[1] ─
-                            // and args[fixedArgsStart - 1]
-                            var mapList =
-                                new System.Collections.Generic
-                                    .List<string>();
-                            for (int i = 1;
-                                 i < fixedArgsStart; i++)
-                            {
-                                mapList.Add(args[i]);
-                            }
-
-                            if (mapList.Count == 0)
-                            {
-                                Console.ForegroundColor =
-                                    ConsoleColor.Yellow;
-                                Console.WriteLine(
-                                    "  [!] No mappings" +
-                                    " specified");
-                                Console.ResetColor();
-                                customFinish = true;
-                                break;
-                            }
-
-
-                            // ── Extract the 5 fixed args ──────
-                            string targetRdtb =
-                                args[fixedArgsStart + 0];
-                            string targetGdtb =
-                                args[fixedArgsStart + 1];
-                            string donorRdtb =
-                                args[fixedArgsStart + 2];
-                            string donorGdtb =
-                                args[fixedArgsStart + 3];
-                            string outputName =
-                                args[fixedArgsStart + 4];
-
-                        }
-                        break;
-
+                        break;              
+                
 
                     case "x3dnative":
                     case "x3dn":
@@ -2023,11 +1906,9 @@ namespace HMSTHModdingTool
                 "boyoriginal","boyrestore",
                 "boyback",    "boyorig",
                 "x3d",        "c3d",
-                "x3d_dual",   "xdual",
-                "x3ddual",    "diag",
-                "d3d",        "diag2",
-                "d3d2",       "diag3",
-                "d3d3",       
+                "diag",       "d3d",        
+                "diag2",      "d3d2",      
+                "diag3",      "d3d3",       
                    
                 // ═══ NEW v1.4.4 ENTRIES ═══
                 "diag6",      "d3d6",
@@ -2361,96 +2242,6 @@ namespace HMSTHModdingTool
             Console.ResetColor();
             Console.WriteLine();
 
-            // ── Cross-Character Mesh Wrap ─────────
-            Console.ForegroundColor =
-                ConsoleColor.Magenta;
-            Console.WriteLine(
-                "=== Cross-Character Mesh Wrap ===");
-            Console.ResetColor();
-            Console.ForegroundColor =
-                ConsoleColor.Cyan;
-            Console.WriteLine(
-                "  By DarthKrayt333");
-            Console.ResetColor();
-            Console.WriteLine(
-                "  -x3d_dual / x3d_dual" +
-                " <map1> [map2 ...]");
-            Console.WriteLine(
-                "                        " +
-                " <target.rdtb> <target.gdtb>");
-            Console.WriteLine(
-                "                        " +
-                " <donor.rdtb>  <donor.gdtb>");
-            Console.WriteLine(
-                "                        " +
-                " <output_name>");
-            Console.WriteLine();
-            Console.WriteLine(
-                "    Mappings format:" +
-                " target_model:donor_model");
-            Console.WriteLine(
-                "    Each character has different" +
-                " model_NN to texture_NN");
-            Console.WriteLine(
-                "    layout, so you must specify" +
-                " which target model");
-            Console.WriteLine(
-                "    receives which donor model.");
-            Console.WriteLine();
-            Console.ForegroundColor =
-                ConsoleColor.DarkYellow;
-            Console.WriteLine(
-                "  Examples:");
-            Console.ForegroundColor =
-                ConsoleColor.DarkGray;
-            Console.WriteLine();
-            Console.WriteLine(
-                "  Boy's head (model_02) ← Kurt's" +
-                " head (model_04):");
-            Console.WriteLine(
-                "    tool.exe x3d_dual 2:4");
-            Console.WriteLine(
-                "             BOY_00000.rdtb" +
-                " BOY_00001.gdtb");
-            Console.WriteLine(
-                "             HAYATO_00000.rdtb" +
-                " HAYATO_00001.gdtb");
-            Console.WriteLine(
-                "             BOY_AS_KURT");
-            Console.WriteLine();
-            Console.WriteLine(
-                "  Multiple swaps at once:");
-            Console.WriteLine(
-                "    tool.exe x3d_dual 0:1 2:4" +
-                " 5:3");
-            Console.WriteLine(
-                "             BOY_00000.rdtb" +
-                " BOY_00001.gdtb");
-            Console.WriteLine(
-                "             HAYATO_00000.rdtb" +
-                " HAYATO_00001.gdtb");
-            Console.WriteLine(
-                "             BOY_AS_KURT");
-            Console.ResetColor();
-            Console.WriteLine();
-            Console.ForegroundColor =
-                ConsoleColor.DarkYellow;
-            Console.WriteLine(
-                "  Workflow after running x3d_dual:");
-            Console.ForegroundColor =
-                ConsoleColor.DarkGray;
-            Console.WriteLine(
-                "    1. Open Blender → Scripting" +
-                " tab → Run wrap_script.py");
-            Console.WriteLine(
-                "    2. tool.exe c3d BOY_AS_KURT" +
-                " BOY_AS_KURT_FINAL");
-            Console.WriteLine(
-                "    3. tool.exe chda" +
-                " BOY_AS_KURT_FINAL BOY.HDA");
-            Console.ResetColor();
-            Console.WriteLine();
-
             // ── 3D Diagnostics ─────────
 
             Console.WriteLine();
@@ -2501,37 +2292,6 @@ namespace HMSTHModdingTool
                 "    tool.exe nodemap HAYATO_00000.rdtb");
 
             Console.WriteLine();
-            Console.WriteLine(
-                "=== SLUS Executable Tools ===");
-            Console.WriteLine(
-                "  SLUS LBA tools by DarthKrayt333");
-            Console.WriteLine();
-            Console.WriteLine(
-                "  -slus / slus / lba <SLUS_202.51> [jp]");
-            Console.WriteLine(
-                "    Analyzes the file LBA (Logical Block Addr)");
-            Console.WriteLine(
-                "    table inside the PS2 game executable.");
-            Console.WriteLine(
-                "    Lists every file on the disc with offset");
-            Console.WriteLine(
-                "    and size. Critical for safe modding!");
-            Console.WriteLine();
-            Console.WriteLine(
-                "    Without 'jp' = USA SLUS_202.51");
-            Console.WriteLine(
-                "      LBA table: 0x162460 - 0x162D30");
-            Console.WriteLine(
-                "    With 'jp'   = Japanese version");
-            Console.WriteLine(
-                "      LBA table: 0x162360 - 0x162C30");
-            Console.WriteLine();
-            Console.WriteLine(
-                "    tool.exe -slus SLUS_202.51");
-            Console.WriteLine(
-                "    tool.exe slus SLUS_202.51 jp");
-            Console.WriteLine(
-                "    tool.exe lba SLUS_202.51");
 
             // ── Audio ─────────────────────────────
             Console.ForegroundColor =
