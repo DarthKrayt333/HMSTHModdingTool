@@ -736,6 +736,23 @@ namespace HMSTHModdingTool
                             break;
                         }
 
+                    // ═════════════════════════════════════════════
+                    // SLUS LBA TABLE ANALYZER
+                    // HMSTH USA: 0x162460 - 0x162D30
+                    // HMSTH JPN: 0x162360 - 0x162C30
+                    // Decodes the disc file directory inside SLUS
+                    // Critical for safe modding (file size changes
+                    // require LBA updates or game crashes!)
+                    // ═════════════════════════════════════════════
+                    case "fixelf":
+                        RequireArgs(args, 4,
+                            "-fixelf <SLUS> <lba> <size>");
+                        HarvestElf.Fix(
+                            args[1],
+                            uint.Parse(args[2]),
+                            uint.Parse(args[3]));
+                        break;
+
                     // ════════════════════════════
                     // RDTB COMMANDS
                     // ════════════════════════════
@@ -1118,7 +1135,8 @@ namespace HMSTHModdingTool
                     // Decodes the disc file directory inside SLUS
                     // Critical for safe modding (file size changes
                     // require LBA updates or game crashes!)
-                    // ═════════════════════════════════════════════
+                    // ═════════════════════════════════════════════                
+
                     case "slus":
                     case "slusdiag":
                     case "lba":
@@ -1133,8 +1151,9 @@ namespace HMSTHModdingTool
                                 .RDTB3DDiagnostic
                                 .AnalyzeSlusLba(args[1], isJp);
                         }
-                        break;
+                        break;         
 
+                    
                     case "diag7":
                     case "scenegraph":
                         RequireArgs(args, 2,
