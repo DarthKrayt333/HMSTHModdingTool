@@ -219,7 +219,7 @@ Skeleton export with mesh in progress.
 
 ---
 
-### 3D Model Tools
+### Experimental - 3D Model Tools
 > 3D Mesh by DarthKrayt333
 
 -x3d <file.rdtb> <file.gdtb> <base_name>
