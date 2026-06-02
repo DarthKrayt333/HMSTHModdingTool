@@ -249,9 +249,139 @@ namespace HMSTHModdingTool.IO
                 buffers.Add(buffer);
 
                 // ── Build filename ─────────────────────────────
-                string detectedExt = DetectExtension(buffer);
-                string fileName;
 
+                // ADDITIVE: pre-scan ALL future
+                // slots in this archive for an
+                // .HD file so .BD slots that
+                // appear BEFORE the HD in the
+                // table still get detected.
+                bool archiveHasHD = false;
+                foreach (var b2 in buffers)
+                {
+                    if (IsHDFile(b2))
+                    {
+                        archiveHasHD = true;
+                        break;
+                    }
+                }
+                if (!archiveHasHD)
+                {
+                    // Look-ahead: peek remaining
+                    // entries in the offset table
+                    long savedPos = Data.Position;
+                    for (int j = i + 1;
+                         j < tableSlots; j++)
+                    {
+                        uint peekOff = tempTable[j];
+                        if (peekOff == 0) continue;
+                        long peekAbs =
+                            (long)BaseOffset
+                            + (long)peekOff;
+                        if (peekAbs + 0x10
+                            > Data.Length)
+                            continue;
+                        Data.Seek(peekAbs,
+                            SeekOrigin.Begin);
+                        uint pkComp =
+                            Reader.ReadUInt32();
+                        uint pkDecomp =
+                            Reader.ReadUInt32();
+                        uint pkStored =
+                            Reader.ReadUInt32();
+                        Reader.ReadUInt32();
+                        if (pkStored == 0)
+                            continue;
+                        if (peekAbs + 0x10
+                            + pkStored
+                            > Data.Length)
+                            continue;
+
+                        // Read just enough to
+                        // check HD magic (8 bytes
+                        // is enough — IECSsreV)
+                        int sniffLen =
+                            (int)Math.Min(
+                                64u, pkStored);
+                        byte[] sniff =
+                            new byte[sniffLen];
+                        int sread = 0;
+                        while (sread < sniffLen)
+                        {
+                            int rd = Data.Read(
+                                sniff, sread,
+                                sniffLen - sread);
+                            if (rd <= 0) break;
+                            sread += rd;
+                        }
+
+                        // If this entry is
+                        // compressed, we can't
+                        // cheaply sniff without
+                        // decompressing. So just
+                        // try magic on raw — if
+                        // it doesn't match,
+                        // decompress the small
+                        // header portion to check.
+                        bool isHd =
+                            sniff.Length >= 8
+                            && StartsWith(
+                                sniff,
+                                MAGIC_HD_START);
+
+                        if (!isHd && pkComp == 1)
+                        {
+                            // Read full entry &
+                            // decompress to check
+                            try
+                            {
+                                Data.Seek(
+                                    peekAbs + 0x10,
+                                    SeekOrigin
+                                        .Begin);
+                                byte[] full =
+                                    new byte[
+                                        pkStored];
+                                int fr = 0;
+                                while (fr
+                                    < pkStored)
+                                {
+                                    int rr =
+                                        Data.Read(
+                                            full,
+                                            fr,
+                                            (int)
+                                            pkStored
+                                            - fr);
+                                    if (rr <= 0)
+                                        break;
+                                    fr += rr;
+                                }
+                                byte[] dec =
+                                    HarvestCompression
+                                        .Decompress(
+                                            full);
+                                if (IsHDFile(dec))
+                                    isHd = true;
+                            }
+                            catch { }
+                        }
+
+                        if (isHd)
+                        {
+                            archiveHasHD = true;
+                            break;
+                        }
+                    }
+                    Data.Seek(savedPos,
+                        SeekOrigin.Begin);
+                }
+
+                // ── Build filename ─────────────────────────────
+                string detectedExt =
+                    DetectExtension(
+                        buffer, archiveHasHD);
+
+                string fileName;
                 if (detectedExt == ".HDA")
                     fileName = string.Format(
                         "{0}_{1:D2}{2}",
@@ -283,7 +413,7 @@ namespace HMSTHModdingTool.IO
 
                 // Slot N in Cyan
                 Console.ForegroundColor = ConsoleColor.Cyan;
-                Console.Write("Slot " + i + " ");
+                Console.Write("Slot " + i.ToString("D2").PadRight(4) + " ");
 
                 // → in Green
                 Console.ForegroundColor = ConsoleColor.Green;
@@ -291,7 +421,7 @@ namespace HMSTHModdingTool.IO
 
                 // Filename in White
                 Console.ForegroundColor = ConsoleColor.White;
-                Console.Write(fileName + "  ");
+                Console.Write(fileName.PadRight(26) + "  ");
 
                 // (stored=... decomp=... comp=...) in Yellow
                 Console.ForegroundColor = ConsoleColor.Blue;
@@ -1313,7 +1443,74 @@ namespace HMSTHModdingTool.IO
             if (IsSQFile(data)) return ".SQ";
             if (IsHDFile(data)) return ".HD";
 
+            // ADDITIVE: detect .BD (PS2 ADPCM
+            // audio body). No magic header, so
+            // we use structural heuristics:
+            //   - size is multiple of 16
+            //   - starts with 16 zero bytes
+            //     (silent first block)
+            //   - contains valid ADPCM block
+            //     structure (every 16-byte
+            //     block has a predictor/shift
+            //     byte in range 0x00-0xFF and
+            //     a flag byte 0x00-0x07)
+            if (IsBDFile(data)) return ".BD";
+
             return ".bin";
+        }
+
+        // ADDITIVE: overload that accepts
+        // archive context. When archiveHasHD
+        // is true, unidentified 16-byte
+        // aligned binary files are treated
+        // as .BD audio bodies.
+        private static string DetectExtension(
+            byte[] data, bool archiveHasHD)
+        {
+            string ext = DetectExtension(data);
+            if (ext == ".bin"
+                && archiveHasHD
+                && IsLikelyBD(data))
+            {
+                return ".BD";
+            }
+            return ext;
+        }
+
+        // ADDITIVE: relaxed .BD detection
+        // (used when archive context confirms
+        // an .HD file is present)
+        private static bool IsLikelyBD(
+            byte[] data)
+        {
+            if (data == null) return false;
+            if (data.Length < 32) return false;
+            if ((data.Length & 0xF) != 0)
+                return false;
+
+            int totalBlocks = data.Length / 16;
+            int validFlags = 0;
+            int sampledBlocks = 0;
+            int step = totalBlocks / 200;
+            if (step < 1) step = 1;
+
+            for (int b = 0; b < totalBlocks;
+                 b += step)
+            {
+                int off = b * 16;
+                byte flag = data[off + 1];
+                sampledBlocks++;
+                if (flag <= 0x07)
+                    validFlags++;
+            }
+
+            if (sampledBlocks == 0)
+                return false;
+
+            double validRatio =
+                (double)validFlags /
+                sampledBlocks;
+            return validRatio >= 0.50;
         }
 
         private static bool IsHDFile(byte[] data)
@@ -1340,6 +1537,91 @@ namespace HMSTHModdingTool.IO
             return true;
         }
 
+        // ADDITIVE: PS2 ADPCM .BD detection
+        // (audio body file with no magic).
+        //
+        // PS2 ADPCM format (a.k.a. VAG body):
+        //   - Block-aligned to 16 bytes
+        //   - Each 16-byte block:
+        //       byte 0 = predictor/shift
+        //                (upper 4 bits = filter
+        //                 index 0-4, lower 4 =
+        //                 shift 0-12)
+        //       byte 1 = flag (0x00-0x07)
+        //       bytes 2-15 = nibble pairs
+        //
+        // Detection rules (no magic header):
+        //   - File size >= 256 bytes
+        //   - File size is multiple of 16
+        //   - High percentage of blocks have
+        //     valid predictor byte (filter 0-4)
+        //   - High percentage of blocks have
+        //     valid flag byte (0x00-0x07)
+        //   - Must NOT look like any other
+        //     known format (HD, SQ, etc.
+        //     already checked earlier)
+        private static bool IsBDFile(byte[] data)
+        {
+            if (data == null) return false;
+            if (data.Length < 256) return false;
+            if ((data.Length & 0xF) != 0)
+                return false;
+
+            int totalBlocks = data.Length / 16;
+            int validFlags = 0;
+            int validPredictors = 0;
+            int sampledBlocks = 0;
+
+            // Sample evenly across the file
+            // (max ~500 blocks scanned even
+            // for very large files)
+            int step = totalBlocks / 500;
+            if (step < 1) step = 1;
+
+            for (int b = 0; b < totalBlocks;
+                 b += step)
+            {
+                int off = b * 16;
+
+                // Predictor byte (byte 0):
+                //   - Upper nibble = filter
+                //     index, valid range 0-4
+                //   - Lower nibble = shift,
+                //     valid range 0-12
+                byte pred = data[off];
+                int filter = (pred >> 4) & 0xF;
+                int shift = pred & 0xF;
+                if (filter <= 4 && shift <= 12)
+                    validPredictors++;
+
+                // Flag byte (byte 1):
+                //   - Valid range 0x00-0x07
+                byte flag = data[off + 1];
+                if (flag <= 0x07)
+                    validFlags++;
+
+                sampledBlocks++;
+            }
+
+            if (sampledBlocks == 0) return false;
+
+            double flagRatio =
+                (double)validFlags /
+                sampledBlocks;
+            double predRatio =
+                (double)validPredictors /
+                sampledBlocks;
+
+            // Both ratios must be high.
+            // Real ADPCM data has nearly 100%
+            // valid bytes for both fields.
+            // Random binary data will have
+            // roughly 8/256 = 3% valid flags
+            // and roughly 65/256 = 25% valid
+            // predictors — far below threshold.
+            return flagRatio >= 0.85
+                && predRatio >= 0.85;
+        }
         private static bool StartsWith(
             byte[] data, byte[] magic)
         {
