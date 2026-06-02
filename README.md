@@ -1126,6 +1126,8 @@ and the other two files 00001 00002 are as well it's palettes.
 For now, you can only edit with hex editor this first
 palette inside the .bmp file and the other 2 until the next update. 
 
+
+
 ### Export and edit cutscenes game text
 Extract EVTMSG12.HDA first
 -xhda EVTMSG12.HDA EVTMSG12
@@ -1153,6 +1155,8 @@ Or if you used dat/clean mode:
 Repack
 -chda EVTMSG12 EVTMSG12.HDA
 
+
+
 ### Export and edit NPC text
 NPC text is located inside a .HDA file inside another .HDA file.
 
@@ -1166,6 +1170,81 @@ Import NPC text back
 
 -ctxt output.txt HAYATO_02_00001new.bin HAYATO_02_00000new.bin
 
+
+
+#### Why Hex Mode is Better for Modding
+
+The hex codes you see in text like `[hex0B_06]`,
+`[hex09_10]`, `[hexNN_MM]`, and `[varNN]` are NOT
+just text formatting codes — they are **animation
+and behavior control codes** for the player and NPCs
+during cutscenes and dialogues.
+
+Each hex code tells the game engine to do something,
+such as:
+- Play an animation on the speaker or listener
+- Change facial expressions
+- Trigger sound effects or pauses
+- Move characters or change camera angles
+- Show emotion bubbles
+- Substitute variables (player name, item names, etc.)
+- And many more behaviors
+
+**The exact meaning of each hex code is currently
+unknown / undocumented.** Modders are still
+researching what each `[hexNN_MM]` value does in
+different contexts. The effects vary by NPC, scene,
+and surrounding codes.
+
+#### Why this matters for modders
+
+Because hex codes control animations and behaviors,
+you can:
+- **Add new animations** to existing dialogue by
+  inserting hex codes you find in other lines
+- **Create custom cutscene sequences** by moving
+  and combining hex codes
+- **Make NPCs more expressive** by experimenting
+  with codes from other scenes
+- **Synchronize animations with translated text**
+  when localizing the game
+- **Discover what each code does** by testing
+  them in PCSX2 emulator
+- **Build a community knowledge base** of which
+  hex codes trigger which animations
+
+#### Recommendation: use Hex Mode for modding
+
+Dat/Clean mode hides these codes in a companion
+`.dat` file. While this looks cleaner for pure
+translation work, it's **much harder to mod
+animations and behaviors** because you can't see
+where the codes are.
+
+**Use Hex Mode (default) when:**
+- You want to experiment with animations
+- You want to add custom NPC behaviors
+- You want full control over cutscene flow
+- You want to discover what unknown hex codes do
+- You're modding more than just text
+
+**Use Dat/Clean Mode only when:**
+- You're doing pure translation with no animation changes
+- You want the cleanest possible text file
+- You will not lose the `.dat` companion file
+
+#### Experimenting safely
+
+When experimenting with hex codes:
+1. **Always back up** the original `.bin` files first
+2. **Test in PCSX2** (PS2 emulator) before burning to disc
+3. **Try one new hex code at a time** so you know what causes what
+4. **Note which codes work where** — keep a personal reference
+5. **Copy hex codes from one line to another** to see what they do
+6. **Try unused hex values** to discover hidden animations
+7. **Share your findings** with the HMSTH modding community
+   so we can build a knowledge base of what each
+   code does
 
 
 ### Replace a single texture
@@ -1260,6 +1339,78 @@ Output: 005.vag (auto-named)
 
 Repack SE.HDA:
 -chda SE SE.HDA
+
+---
+
+### Extract and edit a full map (SRDB)
+-xhda FRM_MAPZ.HDA FRM_MAPZ
+
+Extract all 3D models from SRDB:
+
+-x3d FRM_MAPZ_00000.srdb FRM_MAPZ_00001.gdtb mapz_test
+
+(auto-detects SRDB and routes to xsrdb3d)
+
+Output folders:
+
+mapz_test_embedded_rdtbs_obj/   per-embedded OBJ files with textures
+                                
+mapz_test_embedded_rdtbs_dae/   per-embedded DAE files
+
+mapz_test_all_obj/              combined OBJ (all models)
+
+mapz_test_all_dae/              combined DAE
+
+Edit models in Blender, then rebuild:
+
+-c3d mapz_test_embedded_rdtbs_obj mapz_modded
+
+(auto-detects SRDB folder and routes to csrdb3d)
+
+Repack HDA:
+
+-chda FRM_MAPZ FRM_MAPZ.HDA
+
+---
+
+### Verify SRDB byte-perfect roundtrip
+Extract and immediately rebuild without editing:
+
+-x3d FRM_MAPZ_00000.srdb FRM_MAPZ_00001.gdtb test
+
+-c3d test_embedded_rdtbs_obj test_out
+
+-vsrdb FRM_MAPZ_00000.srdb test_out\FRM_MAPZ_00000.srdb
+
+Should print: "IDENTICAL"
+
+This confirms the tool can extract, then rebuild
+the exact same bytes when no edits are made.
+
+---
+
+### Auto-scaling for huge items and map props
+Some items extract at huge sizes that are awkward
+to view in Blender. The tool automatically detects
+oversized models and scales them down to ~100 units:
+
+-x3d FRM_MAP_00000.srdb FRM_MAP_00001.gdtb FRM_MAP_TEST
+
+Console will show:
+
+    Auto-scale: 0.0625x (model was 1600 units, scaling to 100)
+
+When you rebuild, the scale is automatically inverted
+so your edits go back into the file at the correct
+original size:
+
+-c3d FRM_MAP_TEST_obj FRM_MAP_TEST_NEW
+
+(no flags needed — auto-restore happens automatically)
+
+Works for both RDTB items and SRDB embedded map props.
+Standard-sized models (under 250 units) are not
+affected and extract at their original size.
 
 ---
 
