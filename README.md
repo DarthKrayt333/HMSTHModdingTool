@@ -17,6 +17,60 @@ new features to allow deep modding of the game's assets including textures, audi
 
 ## Changelog
 
+### Version v1.4.5-Beta
+- **Added** Full SRDB extractor and creator
+  (`xsrdb3d` / `csrdb3d`) — extracts ALL embedded
+  RDTBs from SRDB archives with textures, supports
+  per-embedded OBJ/DAE output and combined output
+- **Added** 3D model editing now fully working —
+  you can edit vertex positions in Blender and
+  reimport with byte-perfect roundtrip when no
+  edits made
+- **Added** 3D model upscaling — use `--scale N`
+  on `c3d` to scale models up or down
+- **Added** Automatic 3D model size optimization
+  on extract — oversized items (blueberry,
+  large map props, etc.) automatically scale
+  down to ~100 units for comfortable Blender
+  viewing, then auto-restore to original game
+  size on rebuild
+- **Added** Smart `.BD` audio file detection —
+  recognizes PS2 ADPCM audio body files even
+  though they have no magic header, using
+  archive context (`.HD` presence) + structural
+  ADPCM validation
+- **Added** Embedded RDTB texture assignment
+  fix — small RDTBs inside SRDBs now get
+  proper per-batch texture mapping matching
+  SRDB extractor output
+- **Added** Single combined OBJ output for
+  embedded RDTBs (matches SRDB format with
+  per-batch `usemtl` references)
+- **Added** Auto-detect file type for `x3d`
+  command — automatically routes to SRDB or
+  RDTB extractor based on file magic
+- **Added** Auto-detect manifest type for `c3d`
+  command — routes to SRDB or RDTB creator
+  based on rebuild_manifest.json contents
+- **Fixed** `.BD` audio file recognition when
+  extracting `.HDA` archives (no longer
+  labeled `.bin`)
+- **Fixed** Texture assignment for embedded
+  RDTBs (dog house, small props) — batches
+  now correctly map to their assigned
+  textures instead of all using texture 0
+- **Fixed** SRDB byte-perfect roundtrip when
+  no edits made (was previously off by ~49KB
+  due to auto-scale not being reversed)
+- **Changed** Console output formatting —
+  slot numbers and filenames now nicely
+  aligned in extraction output
+- **Known Issue** Cannot yet change the
+  number of vertices in 3D models (must
+  keep same vertex count when editing)
+
+---
+
 ### Version v1.4.4-Beta
 - **Fixed** Hex codes going to wrong positions when translating text
 - **Fixed** Hex codes appearing inside translated sentences instead of correct positions
@@ -145,7 +199,7 @@ nested inside other `.HDA` files.
 | `.HDA` | `10 00 00 00...` | Nested HDA Archive |
 | `.HD` | `49 45 43 53 73 72 65 56` | PS2 Sound Bank Header |
 | `.SQ` | `49 45 43 53 75 71 65 53` | PS2 MIDI Sequence File |
-| `.BD` | (by position) | PS2 Sound Bank Body (VAG audio data) |
+| `.BD` | (auto-detected) | PS2 Sound Bank Body (VAG audio data) |
 | `.bin` | unknown | Unrecognized file (preserved in order) |
 
 ---
@@ -250,11 +304,21 @@ What works:
   
   ✅ Skeleton scaling (boyscale etc.)
   
-  ✅ Editing existing vertices of same character
+  ✅ Editing existing vertices of any character/model
   
   ✅ Tools/items exported centered and separated
   
-  ⚠️  Body part positions still approximate
+  ✅ Body part positions correctly placed in world space
+  
+  ✅ SRDB archive extraction with per-embedded textures
+  
+  ✅ Auto-scaling for oversized items and map props
+  
+  ✅ Byte-perfect roundtrip when no edits made
+  
+  ✅ Edit and reimport modified vertices to game
+  
+  ⚠️  Cannot yet change vertex count (must keep same)
   
   ❌ Cross-character mesh transplant not yet working
 
@@ -263,11 +327,83 @@ What works:
 ### .SRDB (Stage/Scene Render Data Binary)
 **Magic:** `53 52 44 42` ("SRDB")
 
-The `.SRDB` format contains 3D map models used for the game world stages
-and scenes. It is a separate format from `.RDTB` and is used specifically
-for the game world environment geometry.
+The `.SRDB` format is an **archive that contains multiple
+RDTB files inside it**. It is NOT only used for maps —
+SRDB archives bundle together multiple 3D models (props,
+items, terrain pieces, environment objects, characters,
+etc.) into a single file with shared GDTB textures.
 
-**Status:** Exporter is currently being worked on.
+Each embedded RDTB inside an SRDB has its own:
+- Vertex/UV/normal data
+- Material/texture assignments
+- Bone hierarchy
+- Mesh chunks
+
+The SRDB extractor extracts every embedded RDTB as a
+separate OBJ/DAE file (`embedded_NN.obj`) and also
+produces a combined `<base>_all.obj` containing all
+embedded models in one file.
+
+**Status:** Fully working — extraction, editing,
+and reimport all supported.
+
+#### SRDB Tools
+
+-xsrdb3d <file.srdb> <file.gdtb> <base_name>
+
+    Extract all 3D models from SRDB archive.
+    
+    Creates 4 output folders:
+    
+      <base_name>_embedded_rdtbs_obj/   per-embedded OBJ files
+      
+      <base_name>_embedded_rdtbs_dae/   per-embedded DAE files
+      
+      <base_name>_all_obj/              combined OBJ
+      
+      <base_name>_all_dae/              combined DAE
+    
+    Each embedded RDTB gets:
+    
+      embedded_00.obj  (with correct textures)
+      
+      embedded_01.obj
+      
+      embedded_NN.obj  ...
+    
+    Auto-scales oversized models for comfortable
+    viewing in Blender. Original scale is preserved
+    in the manifest for byte-perfect rebuild.
+
+-csrdb3d <models_folder> <output_folder>
+
+    Rebuild SRDB + GDTB from edited model files.
+    
+    Reads embedded_NN.obj files and writes back
+    to the original SRDB byte positions using the
+    .voff sidecar files for byte-perfect injection.
+    
+    Auto-restores extraction scale during rebuild
+    so vertices end up at original game-space
+    coordinates regardless of viewing scale.
+
+#### Auto-detection for x3d / c3d
+
+The `x3d` and `c3d` commands automatically detect
+whether you're working with a standalone RDTB or
+an SRDB archive:
+
+-x3d FRM_MAP_00000.srdb FRM_MAP_00001.gdtb FARMMAP
+    → automatically routes to xsrdb3d
+
+-x3d BOY_00000.rdtb BOY_00001.gdtb BOY
+    → automatically routes to standard RDTB extractor
+
+-c3d FARMMAP_embedded_rdtbs_obj FARMMAP_OUT
+    → automatically routes to csrdb3d
+
+-c3d BOY_obj BOY_OUT
+    → automatically routes to standard RDTB creator
 
 ---
 
@@ -309,6 +445,17 @@ The compressor had a few issues with .BD .HD .SQ Audio files.
 Now it's even better, the compressed Audio files must be bigger than the RAW format for now.
 
 But maybe if the file is too large, when making .HDA, try to use -chda uncomp <folder_name> <new_file.HDA> instead.
+
+**v1.4.5 update:** `.BD` audio body files are now
+automatically detected on `.HDA` extraction.
+Previously they were saved with `.bin` extension
+because they have no magic header. The tool now
+uses smart detection — if an `.HD` file is present
+in the same archive, any 16-byte-aligned binary
+file passing PS2 ADPCM structural validation is
+correctly labeled `.BD`. Standalone `.BD` files
+(without nearby `.HD`) are also detected via
+strict ADPCM block-pattern analysis.
 
 ---
 
@@ -362,6 +509,29 @@ Both work exactly the same.
 -xhda <file.hda> <out_folder> Extract HDA archive
 
 -chda <in_folder> <file.hda> Create HDA archive from folder
+
+
+
+
+### 3D Model Commands (SRDB + RDTB)
+
+-x3d <file.rdtb_or_srdb> <file.gdtb> <base_name>
+
+    Extract 3D models (auto-detects RDTB or SRDB)
+
+-c3d <models_folder> <output_folder> [--scale N]
+
+    Rebuild 3D models (auto-detects RDTB or SRDB)
+    
+    Use --scale N to upscale/downscale models
+
+-xsrdb3d <file.srdb> <file.gdtb> <base_name>
+
+    Extract all embedded RDTBs from SRDB archive
+
+-csrdb3d <models_folder> <output_folder>
+
+    Rebuild SRDB from edited embedded RDTB models
 
 
 
