@@ -1817,12 +1817,23 @@ namespace HMSTHModdingTool.RDTB
             _toolsTid = toolsTid;
 
             var yOffsets =
-                new Dictionary<int, float>
-                {
+               new Dictionary<int, float>
+               {
                     {0,  5f}, {1, 20f},
                     {2, 40f}, {3, 42f},
                     {4, 39f}, {6, -2f},
-                };
+               };
+
+            // Embedded RDTBs write raw verts
+            // with no spread. Skip offsets.
+            if (_isEmbedded)
+            {
+                foreach (var kv in groups)
+                    foreach (var b in kv.Value)
+                        b.SpreadOffset =
+                            Vec3.Zero;
+                return;
+            }
 
             foreach (var kv in groups)
             {
@@ -4519,8 +4530,169 @@ namespace HMSTHModdingTool.RDTB
                 }
             }
 
+            // 2b) Embedded single OBJ - any .obj that
+            // is NOT model_NN, NOT _body, NOT _all.
+            // Used by embedded/small RDTBs which write
+            // <baseName>.obj with all batches combined.
+            // Load it as tex_id 0 if not already loaded.
+            // Map batch groups by face index ranges.
+            if (!texObjs.ContainsKey(0))
+            {
+                foreach (var fp in allObjFiles)
+                {
+                    string fn =
+                        Path.GetFileNameWithoutExtension(
+                            fp).ToLower();
+                    // Skip already-handled patterns
+                    if (fn.StartsWith("model_"))
+                        continue;
+                    if (fn.EndsWith("_body"))
+                        continue;
+                    if (fn.EndsWith("_all"))
+                        continue;
+                    // This is a standalone named OBJ
+                    // (e.g. EBONY.obj, BLUEBERRY.obj)
+                    try
+                    {
+                        var obj = ObjParser.Parse(fp);
+                        if (obj.Verts.Count == 0)
+                            continue;
+                        
+
+                        // Load for ALL tex_ids used
+                        // in manifest that aren't
+                        // already loaded. For embedded
+                        // RDTBs all batches share one
+                        // OBJ so we point every tex_id
+                        // at the same parsed object.
+                        var usedTids =
+                            new HashSet<int>();
+                        foreach (var mb2 in
+                            _manifest.Batches)
+                            usedTids.Add(mb2.TexId);
+
+                        foreach (int tid in usedTids)
+                        {
+                            if (!texObjs.ContainsKey(tid))
+                            {
+                                texObjs[tid] = obj;
+                                Console.ForegroundColor =
+                                    ConsoleColor.Green;
+                                Console.WriteLine(
+                                    "    [embedded] " +
+                                    Path.GetFileName(fp) +
+                                    " -> tex_" +
+                                    tid.ToString("D2") +
+                                    " (" +
+                                    obj.Verts.Count +
+                                    "v, " +
+                                    obj.FacesByGroup
+                                        .Count +
+                                    " groups)");
+                                Console.ResetColor();
+                            }
+                        }
+                        // Only use the first matching
+                        // standalone OBJ found
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.ForegroundColor =
+                            ConsoleColor.Yellow;
+                        Console.WriteLine(
+                            "    [!] " +
+                            Path.GetFileName(fp) +
+                            ": " + ex.Message);
+                        Console.ResetColor();
+                    }
+                }
+            }
+
+            // ── EMBEDDED SINGLE OBJ ──────────
+            // Small/embedded RDTBs write one
+            // combined OBJ named after the
+            // base name (e.g. EBONY.obj).
+            // It has batch_XXXX groups but
+            // does NOT start with model_,
+            // end with _body or _all.
+            // Load it for every tex_id used
+            // in the manifest.
+            foreach (var fp in allObjFiles)
+            {
+                string fn =
+                    Path
+                    .GetFileNameWithoutExtension(
+                        fp).ToLower();
+                if (fn.StartsWith("model_"))
+                    continue;
+                if (fn.EndsWith("_body"))
+                    continue;
+                if (fn.EndsWith("_all"))
+                    continue;
+
+                ParsedObj embObj = null;
+                try
+                {
+                    embObj =
+                        ObjParser.Parse(fp);
+                }
+                catch (Exception ex)
+                {
+                    Console.ForegroundColor =
+                        ConsoleColor.Yellow;
+                    Console.WriteLine(
+                        "    [!] " +
+                        Path.GetFileName(fp) +
+                        ": " + ex.Message);
+                    Console.ResetColor();
+                    continue;
+                }
+
+                if (embObj.Verts.Count == 0)
+                    continue;
+                
+
+                // Register for every
+                // tex_id in manifest
+                var usedTids =
+                    new HashSet<int>();
+                foreach (var mb2 in
+                    _manifest.Batches)
+                    usedTids.Add(mb2.TexId);
+
+                bool anyLoaded = false;
+                foreach (int tid in usedTids)
+                {
+                    if (texObjs
+                            .ContainsKey(tid))
+                        continue;
+                    texObjs[tid] = embObj;
+                    anyLoaded = true;
+                    Console.ForegroundColor =
+                        ConsoleColor.Green;
+                    Console.WriteLine(
+                        "    [embedded] " +
+                        Path.GetFileName(fp) +
+                        " -> tex_" +
+                        tid.ToString("D2") +
+                        " (" +
+                        embObj.Verts.Count +
+                        "v " +
+                        embObj.FacesByGroup
+                            .Count +
+                        " groups)");
+                    Console.ResetColor();
+                }
+
+                // Only use first matching
+                // standalone OBJ
+                if (anyLoaded) break;
+            }
+
             // Find _body / _tools / _all
             string bodyPath = null;
+
             string allPath = null;
             foreach (var fp in allObjFiles)
             {
@@ -4999,7 +5171,7 @@ namespace HMSTHModdingTool.RDTB
                 chunkOffset =
                     _manifest.Chunk11Offset;
             int vi = 0;
-            const float EPS = 0.01f;
+            const float EPS = 0.0001f;
             foreach (var blk in mb.Blocks)
             {
                 int bs = chunkOffset +
@@ -5054,21 +5226,29 @@ namespace HMSTHModdingTool.RDTB
             byte[] data, int off,
             float v, float eps)
         {
-            // Compare against ORIGINAL file
-            // bytes (not current buffer)
-            // to avoid drift from previous
-            // writes in same session
             if (_originalRdtb != null &&
                 off + 4 <= _originalRdtb.Length)
             {
                 float originalVal =
                     BitConverter.ToSingle(
                         _originalRdtb, off);
+
+                // Use a tighter absolute
+                // epsilon AND a relative one
+                // so small values near zero
+                // are not falsely "changed"
+                float absEps = eps;
+                float relEps =
+                    Math.Abs(originalVal)
+                    * 0.001f;
+                float useEps =
+                    Math.Max(absEps, relEps);
+
                 if (Math.Abs(originalVal - v)
-                        < eps)
+                        < useEps)
                 {
-                    // No real edit -
-                    // restore original bytes
+                    // Restore original bytes
+                    // exactly - no drift
                     data[off] =
                         _originalRdtb[off];
                     data[off + 1] =
@@ -5080,7 +5260,6 @@ namespace HMSTHModdingTool.RDTB
                     return;
                 }
             }
-            // Real edit - write new value
             byte[] b =
                 BitConverter.GetBytes(v);
             data[off] = b[0];
