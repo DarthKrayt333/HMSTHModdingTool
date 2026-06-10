@@ -21,6 +21,9 @@ namespace HMSTHModdingTool.IO
         private static readonly byte[] MAGIC_SRDB =
             { 0x53, 0x52, 0x44, 0x42 };
 
+        private static readonly byte[] MAGIC_ELF =
+            { 0x7F, 0x45, 0x4C, 0x46 };
+
         private static readonly byte[] MAGIC_HDA =
         {
             0x10, 0x00, 0x00, 0x00,
@@ -207,6 +210,9 @@ namespace HMSTHModdingTool.IO
                     totalRead += n;
                 }
 
+                // ── Detect V2 before decompress ───────────────
+                bool isV2Compression = false;
+
                 // ── Decompress if needed ───────────────────────
                 if (isCompressed)
                 {
@@ -214,7 +220,9 @@ namespace HMSTHModdingTool.IO
                     {
                         byte[] decompressed =
                             HarvestCompression.Decompress(
-                                buffer);
+                                buffer,
+                                (int)decompressedSize,
+                                out isV2Compression);
 
                         if (decompressed.Length !=
                             (int)decompressedSize)
@@ -382,18 +390,31 @@ namespace HMSTHModdingTool.IO
                         buffer, archiveHasHD);
 
                 string fileName;
-                if (detectedExt == ".HDA")
+
+                // ── Audio files (.BD .HD .SQ) get clean names
+                // without index numbers, matching game style
+                if (detectedExt == ".BD" ||
+                    detectedExt == ".HD" ||
+                    detectedExt == ".SQ")
+                {
+                    fileName = archiveName + detectedExt;
+                }
+                else if (detectedExt == ".HDA")
+                {
                     fileName = string.Format(
                         "{0}_{1:D2}{2}",
                         archiveName,
                         fileIndex,
                         detectedExt);
+                }
                 else
+                {
                     fileName = string.Format(
                         "{0}_{1:D5}{2}",
                         archiveName,
                         fileIndex,
                         detectedExt);
+                }
 
                 slotMap[i] = fileName;
                 fileIndex++;
@@ -403,7 +424,7 @@ namespace HMSTHModdingTool.IO
                     Path.Combine(OutputFolder, fileName);
                 File.WriteAllBytes(filePath, buffer);
 
-                // [ext ] in Magenta
+                // (ext ) in Magenta
                 Console.ForegroundColor = ConsoleColor.Green;
                 Console.Write(
                     "  [" +
@@ -423,18 +444,23 @@ namespace HMSTHModdingTool.IO
                 Console.ForegroundColor = ConsoleColor.White;
                 Console.Write(fileName.PadRight(26) + "  ");
 
-                // (stored=... decomp=... comp=...) in Yellow
+                // (stored=... decomp=... comp=...) in Blue
+                // ── CHANGED: show comp_v2=YES when V2 detected ─
                 Console.ForegroundColor = ConsoleColor.Blue;
+                string compLabel =
+                    !isCompressed ? "comp=NO" :
+                    isV2Compression ? "comp_v2=YES" :
+                                      "comp=YES";
                 Console.WriteLine(
                     string.Format(
                         "(stored={0:N0}" +
                         "  decomp={1:N0}" +
-                        "  comp={2})",
+                        "  {2})",
                         storedSize,
                         isCompressed
                             ? buffer.Length
                             : (int)storedSize,
-                        isCompressed ? "YES" : "NO "));
+                        compLabel));
 
                 Console.ResetColor();
             }
@@ -940,42 +966,52 @@ namespace HMSTHModdingTool.IO
                         HarvestCompression.VerifyRoundTrip(
                             rawDatas[slot], comp);
 
-                    if (!verified || comp.Length > rawLen)
+                    // ── If compressed >= raw size,
+                    // store truly RAW like the game does
+                    // (compressedFlag = 0, no headers)
+                    if (!verified ||
+                        comp.Length >= rawLen)
                     {
-                        comp =
-                            HarvestCompression
-                                .CompressAsLiterals(
-                                    rawDatas[slot]);
-                        verified =
-                            HarvestCompression
-                                .VerifyRoundTrip(
-                                    rawDatas[slot], comp);
+                        storedDatas[slot] = rawDatas[slot];
+                        compFlags[slot] = false;
+                        totalStored += rawLen;
+                        rawCount++;
+
+                        Console.ForegroundColor =
+                            ConsoleColor.Green;
+                        Console.WriteLine(
+                            "OK RAW (comp >= raw," +
+                            " stored uncompressed" +
+                            " like game)");
+                        Console.ResetColor();
                     }
+                    else
+                    {
+                        storedDatas[slot] = comp;
+                        compFlags[slot] = true;
+                        totalStored += comp.Length;
+                        compCount++;
 
-                    storedDatas[slot] = comp;
-                    compFlags[slot] = true;
-                    totalStored += comp.Length;
-                    compCount++;
+                        double ratio = rawLen == 0
+                            ? 0
+                            : (double)comp.Length /
+                              rawLen * 100.0;
 
-                    double ratio = rawLen == 0
-                        ? 0
-                        : (double)comp.Length /
-                          rawLen * 100.0;
-
-                    Console.ForegroundColor =
-                        ratio <= 100.1
-                            ? ConsoleColor.Green
-                            : ConsoleColor.Yellow;
-
-                    Console.WriteLine(
-                        "OK {0:N0} → {1:N0} bytes ({2:F1}%)",
-                        rawLen, comp.Length, ratio);
-                    Console.ResetColor();
+                        Console.ForegroundColor =
+                            ConsoleColor.Green;
+                        Console.WriteLine(
+                            "OK {0:N0} → {1:N0}" +
+                            " bytes ({2:F1}%)",
+                            rawLen,
+                            comp.Length,
+                            ratio);
+                        Console.ResetColor();
+                    }
                 }
             }
 
-            // ── Phase 2: Calculate offsets ───────────────────────
-            int tableSize = totalSlots * 4;
+                // ── Phase 2: Calculate offsets ───────────────────────
+                int tableSize = totalSlots * 4;
             int dataAreaStart = Align(tableSize);
 
             uint[] entryRelOffsets = new uint[totalSlots];
@@ -1238,39 +1274,50 @@ namespace HMSTHModdingTool.IO
                     HarvestCompression.VerifyRoundTrip(
                         rawDatas[i], comp);
 
-                if (!verified || comp.Length > rawLen)
+                // ── If compressed >= raw size,
+                // store truly RAW like the game does
+                // (compressedFlag = 0, no headers)
+                if (!verified ||
+                    comp.Length >= rawLen)
                 {
-                    comp =
-                        HarvestCompression
-                            .CompressAsLiterals(
-                                rawDatas[i]);
-                    verified =
-                        HarvestCompression.VerifyRoundTrip(
-                            rawDatas[i], comp);
+                    storedDatas[i] = rawDatas[i];
+                    compressedFlags[i] = false;
+                    totalStored += rawLen;
+                    rawCount++;
+
+                    Console.ForegroundColor =
+                        ConsoleColor.Green;
+                    Console.WriteLine(
+                        "OK RAW (comp >= raw," +
+                        " stored uncompressed" +
+                        " like game)");
+                    Console.ResetColor();
                 }
+                else
+                {
+                    storedDatas[i] = comp;
+                    compressedFlags[i] = true;
+                    totalStored += comp.Length;
+                    compCount++;
 
-                storedDatas[i] = comp;
-                compressedFlags[i] = true;
-                totalStored += comp.Length;
-                compCount++;
+                    double ratio = rawLen == 0
+                        ? 0
+                        : (double)comp.Length /
+                          rawLen * 100.0;
 
-                double ratio = rawLen == 0
-                    ? 0
-                    : (double)comp.Length /
-                      rawLen * 100.0;
-
-                Console.ForegroundColor =
-                    ratio <= 100.1
-                        ? ConsoleColor.Green
-                        : ConsoleColor.Yellow;
-
-                Console.WriteLine(
-                    "OK {0:N0} → {1:N0} bytes ({2:F1}%)",
-                    rawLen, comp.Length, ratio);
-                Console.ResetColor();
+                    Console.ForegroundColor =
+                        ConsoleColor.Green;
+                    Console.WriteLine(
+                        "OK {0:N0} → {1:N0}" +
+                        " bytes ({2:F1}%)",
+                        rawLen,
+                        comp.Length,
+                        ratio);
+                    Console.ResetColor();
+                }
             }
 
-            using (FileStream fs =
+                using (FileStream fs =
                 new FileStream(outputHda, FileMode.Create))
             using (BinaryWriter wr = new BinaryWriter(fs))
             {
@@ -1435,6 +1482,7 @@ namespace HMSTHModdingTool.IO
             if (StartsWith(data, MAGIC_GDTB)) return ".gdtb";
             if (StartsWith(data, MAGIC_RDTB)) return ".rdtb";
             if (StartsWith(data, MAGIC_SRDB)) return ".srdb";
+            if (StartsWith(data, MAGIC_ELF))  return ".elf";
 
             if (data.Length >= 16 &&
                 StartsWith(data, MAGIC_HDA))
