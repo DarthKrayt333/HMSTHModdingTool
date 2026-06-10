@@ -132,12 +132,6 @@ namespace HMSTHModdingTool.IO
                 {
                     slotMap[i] = null;
 
-                    Console.ForegroundColor =
-                        ConsoleColor.Cyan;
-                    Console.WriteLine(
-                        "  [SKIP] Table slot " + i +
-                        " is an empty gap.");
-                    Console.ResetColor();
                     continue;
                 }
 
@@ -172,14 +166,6 @@ namespace HMSTHModdingTool.IO
                 if (storedSize == 0)
                 {
                     slotMap[i] = null;
-
-                    Console.ForegroundColor =
-                        ConsoleColor.Yellow;
-                    Console.WriteLine(
-                        "  [WARN] Entry " + i +
-                        " has storedSize=0, skipping.");
-                    Console.ResetColor();
-                    continue;
                 }
 
                 long dataEnd =
