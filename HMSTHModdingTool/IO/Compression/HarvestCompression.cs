@@ -10,9 +10,272 @@ namespace HMSTHModdingTool.IO.Compression
         private const int THRESH = 9;
 
         // ==================================================================
-        // DECOMPRESS - Exact original logic
+        // IS V2 COMPRESSION - Basic structural check only
+        // ==================================================================
+        public static bool IsV2(byte[] Data)
+        {
+            if (Data == null || Data.Length < 4)
+                return false;
+            int fb = Data[0];
+            if (fb <= 17 || fb > 240)
+                return false;
+            int litCount = fb - 17;
+            return Data.Length >= 1 + litCount + 3;
+        }
+
+        // ==================================================================
+        // DECOMPRESS - Simple overload without size hint (keeps existing
+        // callers working e.g. -uncompress command)
         // ==================================================================
         public static byte[] Decompress(byte[] Data)
+        {
+            bool isV2;
+            return Decompress(Data, 0, out isV2);
+        }
+
+        // ==================================================================
+        // DECOMPRESS - With expected size and out param telling caller
+        // which format was used. This is the definitive implementation.
+        // ==================================================================
+        public static byte[] Decompress(
+            byte[] Data,
+            int expectedDecompSize,
+            out bool usedV2)
+        {
+            usedV2 = false;
+
+            if (IsV2(Data))
+            {
+                usedV2 = true;
+                return DecompressV2(Data);
+            }
+
+            return DecompressV1(Data);
+        }
+
+
+        // ==================================================================
+        // DECOMPRESS V2 - Exact port of miniLZO lzo1x_decompress_safe
+        // ==================================================================
+        public static byte[] DecompressV2(byte[] src)
+        {
+            int ip = 0;
+            var o = new List<byte>(src.Length * 4);
+
+            int t = src[ip++];
+
+            if (t > 17)
+            {
+                int n = t - 17;
+                for (int i = 0; i < n; i++)
+                    o.Add(src[ip++]);
+                t = src[ip++];
+                if (t < 16)
+                {
+                    int mOff = 1 + (t >> 2) + (src[ip++] << 2);
+                    int mPos = o.Count - mOff;
+                    o.Add(o[mPos]);
+                    o.Add(o[mPos + 1]);
+                    o.Add(o[mPos + 2]);
+                    t = t & 3;
+                    if (t > 0)
+                    {
+                        for (int i = 0; i < t; i++)
+                            o.Add(src[ip++]);
+                        t = src[ip++];
+                    }
+                    else
+                    {
+                        t = src[ip++];
+                    }
+                }
+            }
+            else if (t < 16)
+            {
+                if (t == 0)
+                {
+                    while (src[ip] == 0) { t += 255; ip++; }
+                    t += 15 + src[ip++];
+                }
+                t += 3;
+                for (int i = 0; i < t; i++)
+                    o.Add(src[ip++]);
+                t = src[ip++];
+                if (t < 16)
+                {
+                    int mOff = 1 + (t >> 2) + (src[ip++] << 2);
+                    int mPos = o.Count - mOff;
+                    o.Add(o[mPos]);
+                    o.Add(o[mPos + 1]);
+                    o.Add(o[mPos + 2]);
+                    t = t & 3;
+                    if (t > 0)
+                    {
+                        for (int i = 0; i < t; i++)
+                            o.Add(src[ip++]);
+                        t = src[ip++];
+                    }
+                    else
+                    {
+                        t = src[ip++];
+                    }
+                }
+            }
+
+            string mode = "match";
+
+            while (ip < src.Length)
+            {
+                if (mode == "match")
+                {
+                    while (true)
+                    {
+                        if (t >= 64)
+                        {
+                            int mLen = (t >> 5) + 1;
+                            int mOff = 1 + ((t >> 2) & 7)
+                                + (src[ip++] << 3);
+                            int mPos = o.Count - mOff;
+                            for (int i = 0; i < mLen; i++)
+                            {
+                                o.Add(o[mPos]); mPos++;
+                            }
+                            t = t & 3;
+                        }
+                        else if (t >= 32)
+                        {
+                            int mLen = t & 31;
+                            if (mLen == 0)
+                            {
+                                while (src[ip] == 0)
+                                {
+                                    mLen += 255; ip++;
+                                }
+                                mLen += 31 + src[ip++];
+                            }
+                            mLen += 2;
+                            int b1 = src[ip++];
+                            int b2 = src[ip++];
+                            int mOff = 1 + (b1 >> 2)
+                                + (b2 << 6);
+                            int mPos = o.Count - mOff;
+                            for (int i = 0; i < mLen; i++)
+                            {
+                                o.Add(o[mPos]); mPos++;
+                            }
+                            t = b1 & 3;
+                        }
+                        else if (t >= 16)
+                        {
+                            int mOffHi = (t & 8) << 11;
+                            int mLen = t & 7;
+                            if (mLen == 0)
+                            {
+                                while (src[ip] == 0)
+                                {
+                                    mLen += 255; ip++;
+                                }
+                                mLen += 7 + src[ip++];
+                            }
+                            mLen += 2;
+                            int b1 = src[ip++];
+                            int b2 = src[ip++];
+                            int mOff = (b1 >> 2) + (b2 << 6)
+                                + mOffHi;
+                            if (mOff == 0)
+                                return o.ToArray();
+                            mOff += 0x4000;
+                            int mPos = o.Count - mOff;
+                            for (int i = 0; i < mLen; i++)
+                            {
+                                o.Add(o[mPos]); mPos++;
+                            }
+                            t = b1 & 3;
+                        }
+                        else
+                        {
+                            int mOff = 1 + (t >> 2)
+                                + (src[ip++] << 2);
+                            int mPos = o.Count - mOff;
+                            o.Add(o[mPos]);
+                            o.Add(o[mPos + 1]);
+                            t = t & 3;
+                        }
+
+                        if (t == 0)
+                            break;
+                        for (int i = 0; i < t; i++)
+                            o.Add(src[ip++]);
+                        t = src[ip++];
+                    }
+
+                    t = src[ip++];
+                    if (t >= 16)
+                    {
+                        mode = "match";
+                        continue;
+                    }
+                    mode = "outer_lit";
+                    continue;
+                }
+                else if (mode == "outer_lit")
+                {
+                    if (t == 0)
+                    {
+                        int x = 0;
+                        while (src[ip] == 0)
+                        {
+                            x += 255; ip++;
+                        }
+                        t = x + 15 + src[ip++];
+                    }
+                    t += 3;
+                    for (int i = 0; i < t; i++)
+                        o.Add(src[ip++]);
+
+                    t = src[ip++];
+                    if (t >= 16)
+                    {
+                        mode = "match";
+                        continue;
+                    }
+
+                    int mOff2 = 1 + 0x800 + (t >> 2)
+                        + (src[ip++] << 2);
+                    int mPos2 = o.Count - mOff2;
+                    o.Add(o[mPos2]);
+                    o.Add(o[mPos2 + 1]);
+                    o.Add(o[mPos2 + 2]);
+                    t = t & 3;
+
+                    if (t == 0)
+                    {
+                        t = src[ip++];
+                        if (t >= 16)
+                            mode = "match";
+                        else
+                            mode = "outer_lit";
+                        continue;
+                    }
+                    else
+                    {
+                        for (int i = 0; i < t; i++)
+                            o.Add(src[ip++]);
+                        t = src[ip++];
+                        mode = "match";
+                        continue;
+                    }
+                }
+            }
+
+            return o.ToArray();
+        }
+
+
+        // ==================================================================
+        // DECOMPRESS V1 - Exact original logic
+        // ==================================================================
+        public static byte[] DecompressV1(byte[] Data)
         {
             int DataOffset = 0;
             using (MemoryStream Output = new MemoryStream())
@@ -78,13 +341,16 @@ namespace HMSTHModdingTool.IO.Compression
                             Output.WriteByte((byte)Value);
                             Position++;
                         }
+
                         Output.Write(Data, DataOffset, DirectCopy);
                         DataOffset += DirectCopy;
                     }
                 }
+
                 return Output.ToArray();
             }
         }
+
 
         // ==================================================================
         // COMPRESS - Main compressor with fixed ChooseDc parameter name
