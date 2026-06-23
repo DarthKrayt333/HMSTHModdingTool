@@ -70,6 +70,10 @@
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
     <Compile Include="IO\TextOut.cs" />
+    <Compile Include="RDTB\RDTBBatchFolder.cs" />
+    <Compile Include="RDTB\RDTBBatchReplacer.cs" />
+    <Compile Include="RDTB\RDTBBatchTools.cs" />
+    <Compile Include="RDTB\RDTBConverter.cs" />
     <Compile Include="SRDB\SRDB3D.cs" />
     <Compile Include="SRDB\SRDBArchive.cs" />
   </ItemGroup>
