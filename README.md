@@ -15,7 +15,108 @@ new features to allow deep modding of the game's assets including textures, audi
 
 ---
 
+## Mods Showcase
+
+### v1.4.6-Beta: Shrek BOY Head Swap
+
+<img width="1020" height="548" alt="BOY with Shrek head — created using v1.4.6 head swap feature" src="https://github.com/user-attachments/assets/05ecbb49-693f-4de0-8c12-86447e4bab9a" />
+
+*Custom Shrek head replacing player character — created
+with the new `xbatches`/`cbatches` per-batch workflow.*
+
+---
+
+### v1.4.6-Beta: Custom Player Model v1
+
+<img width="1094" height="605" alt="Custom player model with swapped head and modded textures" src="https://github.com/user-attachments/assets/7f8d7107-b644-4e41-ba1d-c9e4c6034245" />
+
+*Custom player model — swapped head and modded textures.*
+
+---
+
 ## Changelog
+
+### Version v1.4.6-Beta
+
+- **Added** Per-batch 3D model swapping —
+  you can now swap individual 3D model batches
+  inside an RDTB instead of replacing the
+  entire model archive
+- **Added** Batch folder workflow (`xbatches` /
+  `cbatches`) — extracts every batch as its own
+  OBJ file organized by texture into model_NN
+  folders for clean Blender editing
+- **Added** Player head swap fully working —
+  you can now replace BOY's head (batch_0005)
+  with any custom 3D model (Shrek, Mario, custom
+  characters, anything) and it works correctly
+  in game with animations, lighting, and bone
+  attachment preserved
+- **Added** Auto-hide siblings option (`--all`) —
+  when replacing a batch, automatically hides
+  other batches in the same model group (useful
+  for head swaps to remove the original hair
+  and ponytail)
+- **Added** Normal copying modes (`--normals
+  match` default, `--normals zero`, `--normals
+  up`, `--normals-xyz X,Y,Z`) — preserves
+  original lighting by copying normals from the
+  closest original vertex
+- **Added** RDTB format converters:
+  - `big2small` — convert big RDTB (14 chunks,
+    3 LOD meshes) to small RDTB (10 chunks,
+    single mesh)
+  - `small2big` — convert small RDTB to big
+    RDTB with duplicated LOD data
+  - `big2mirror` — convert to mirrored format
+    (smaller file, works in big-RDTB slots)
+  - `mirror2big` — convert mirrored to full big
+  - `small2mirror` / `mirror2small` — convert
+    between small and mirrored
+  - `fmtrdtb` — detect and show RDTB format
+    (BIG / SMALL / MIRRORED / UNKNOWN)
+- **Added** Format flags for `c3d` and
+  `cbatches` commands — output as `--small`,
+  `--mirrored` (default), or `--big`
+- **Added** `scanbatch` command — find which
+  model group a batch belongs to and lists all
+  sibling batches
+- **Added** `xbatch` / `extractbatch` command —
+  extract a single batch as standalone OBJ
+- **Added** `xmodel` / `extractmodel` command —
+  extract all batches in a model group as
+  combined OBJ
+- **Added** Fixed small RDTB batch extraction
+  (FLAT, DAVID, animals, items, etc.) — now
+  correctly identifies mesh chunks vs material
+  chunks regardless of chunk count
+- **Added** Globally-sorted pointer lookup for
+  small RDTBs — handles unsorted pointer tables
+  where batch order doesn't match file order
+- **Added** Mesh chunk auto-detection by VIF
+  block scanning — finds the real mesh chunk
+  even when chunk indices vary between RDTB
+  types
+- **Changed** Default output format for `c3d`
+  and `cbatches` is now MIRRORED (smaller
+  files, works in any slot, easier to mod)
+- **Known Issue** Only player head batch
+  (batch_0005) is currently safe to swap for
+  3D model mods — other batches (animated hair,
+  tools, body parts) may render incorrectly
+  when swapped due to bone-skinning data still
+  being researched
+- **Known Issue** Menu icons in inventory still
+  show original 3D model when only the in-game
+  batch is swapped (items have separate menu
+  render path that's not yet identified)
+- **Working On** Universal batch swapping for
+  all batches (animated hair, tools, body
+  parts, NPC parts)
+- **Working On** Menu icon batch identification
+  for proper item icon swapping
+
+---
 
 ### Version v1.4.5-Beta
 - **Added** Full SRDB extractor and creator
@@ -149,16 +250,126 @@ Some edited files may become too large for the game's memory limit.
 A compressor is now available. Usage to make compressed files inside .HDA is by Default
 -chda <folder_name> <new_file_name.hda> or chda <folder_name> <new_file_name.hda>.
 
-### 3D Model Export Positions
+---
+
+### 3D Model Upscaling & Downscaling ✅ WORKING
+You CAN upscale or downscale 3D models freely
+and have them appear correctly in game:
+
+1. Extract with `x3d` (or `xbatches`)
+2. Open the OBJ in Blender or any 3D program
+3. Scale the model up or down (any size you want)
+4. Save the OBJ
+5. Rebuild with `c3d` (or `cbatches`)
+6. Repack with `chda`
+
+The upscaled/downscaled model will appear at
+the new size in game. This works for any
+character or item (BOY, NPCs, animals, props).
+
+You can also use the `--scale N` flag on `c3d`
+to scale during rebuild:
+
+-c3d BOY_obj BOY_NEW --scale 1.5    (50% bigger)
+
+-c3d BOY_obj BOY_NEW --scale 0.5    (half size)
+
+---
+
+### 3D Model Export Positions ⚠️ NOT YET CORRECT
 Body 3D model vertices are currently exported with
 incorrect world-space positions. The geometry shape
-is extracted correctly but positions of body parts
-relative to each other are not yet correct.
+is extracted correctly and you can edit vertex
+positions of the same character without issues,
+but the body part positions relative to each other
+in the extracted OBJ files are not yet matching
+their true world-space positions.
+
 This is caused by PS2 VIF bone transform data
 not yet being fully decoded.
 
 Tools/items (model_05) are exported correctly and
 centered at the world origin with proper separation.
+
+**What this means for modders:**
+- ✅ You CAN edit existing vertices (move, scale,
+  reshape any part of the model)
+- ✅ You CAN upscale/downscale entire models
+- ✅ You CAN replace textures freely
+- ✅ You CAN swap the player's head batch
+  (batch_0005) with a completely new mesh
+- ❌ Extracted body part positions don't match
+  the in-game positions (parts appear separated
+  in Blender but render correctly in game)
+
+---
+
+### 3D Model Skeleton & Animation Export ⚠️ IN PROGRESS
+Currently the tool extracts SOLID 3D models
+(geometry + UVs + normals + textures), which
+is enough for:
+
+- ✅ Texture editing
+- ✅ Vertex position editing
+- ✅ Model upscaling/downscaling
+- ✅ Player head swap
+
+What is NOT yet exported alongside the mesh:
+
+- ❌ Skeleton/bones (visible in 3D program for rigging)
+- ❌ Animation data (idle pose, walk, run, etc.)
+- ❌ Bone weights (which vertex belongs to which bone)
+
+**Working on:** Full skeleton + animation export
+so you can open the model in Blender already
+rigged and posed (idle style), see exactly how
+it animates in game, and edit animations.
+
+This is the next major feature being developed.
+Until then, you can still mod meshes — just
+without skeleton visibility in Blender.
+
+---
+
+### 3D Model Per-Batch Swapping
+As of v1.4.6, only the player head batch
+(batch_0005 in BOY.HDA) is safe to swap with
+a completely new 3D model. Other batches
+(animated hair 30-36, tools 49-99, body parts)
+will render incorrectly when swapped because
+the game's VU1 microprogram expects specific
+vertex layouts for animated batches that the
+current writer doesn't yet replicate.
+
+**What works for any batch:**
+- Editing existing vertex positions
+- Modifying UVs and textures
+- Scaling models with `--scale N`
+- Upscaling/downscaling for in-game changes
+- Replacing textures only
+
+**What only works for player head (batch_0005):**
+- Swapping with a completely new mesh
+- Changing vertex count
+
+**Workaround for other batches:**
+- Keep the same vertex count when editing
+- Modify positions/UVs only, don't replace
+  the entire mesh
+- Use `boyscale` for skeleton-level changes
+  that affect mesh proportions
+
+---
+
+### Menu Icons
+When you swap a batch that has an inventory
+menu icon (like tools in batch 49-99), the
+in-game 3D model updates but the menu icon
+still shows the original model. This is because
+items have a separate render path for menu
+display that hasn't been identified yet.
+
+---
 
 ### Cross-Character Mesh
 Transplanting a mesh from one character to another
@@ -318,7 +529,23 @@ What works:
   
   ✅ Edit and reimport modified vertices to game
   
-  ⚠️  Cannot yet change vertex count (must keep same)
+  ✅ **NEW**: Player head swap with custom 3D models (batch_0005)
+  
+  ✅ **NEW**: Per-batch extraction and editing workflow
+  
+  ✅ **NEW**: RDTB format conversion (big/small/mirrored)
+  
+  ✅ **NEW**: Auto-hide siblings when replacing batches
+  
+  ✅ **NEW**: Normal copying for preserved lighting
+  
+  ⚠️  Cannot yet change vertex count on standard `c3d` (must keep same)
+  
+  ⚠️  Only player head batch (batch_0005) safe to swap with new mesh
+  
+  ❌ Other batches (animated hair, tools, body parts) not yet swappable
+  
+  ❌ Menu icons not yet updated when item batches swapped
   
   ❌ Cross-character mesh transplant not yet working
 
@@ -534,6 +761,138 @@ Both work exactly the same.
     Rebuild SRDB from edited embedded RDTB models
 
 
+### Per-Batch 3D Model Commands (NEW v1.4.6)
+
+-xbatches <file.rdtb> <file.gdtb> <base_name>
+
+    Extract every batch in the RDTB as its own
+    OBJ file. Creates a folder structure:
+    
+      <base>_3d_batches_obj/
+        _source.rdtb         (original for rebuild)
+        _source.gdtb         (original textures)
+        _info.txt            (info about batches)
+        model_00/            (texture 0 group)
+          texture_00.bmp     (inline texture)
+          batch_0000.obj
+          batch_0001.obj
+          ...
+        model_01/            (texture 1 group)
+          texture_01.bmp
+          batch_0003.obj
+          ...
+        model_NN/            (additional texture groups)
+    
+    Each batch is a single OBJ ready for editing
+    in Blender. Edit any batch, delete batches
+    you want hidden, then rebuild with cbatches.
+
+
+-cbatches <folder> <out_folder> [flags]
+
+    Rebuild RDTB from per-batch folder. Reads
+    every batch_NNNN.obj from each model_XX
+    subfolder and writes back to the RDTB.
+    
+    Flags:
+      --normals MODE      match (default), zero,
+                          up, keep
+      --normals-xyz X,Y,Z custom normal vector
+      -all                hide siblings of edited
+                          batches in same model
+      --small             output as small RDTB
+      --mirrored          output as mirrored
+                          (DEFAULT)
+      --big               output as big RDTB
+    
+    All flag formats work: 'small', '-small',
+    '--small' are equivalent.
+
+
+-scanbatch <file.rdtb> <batch_index>
+
+    Show which model group a batch belongs to.
+    Lists all sibling batches in the same
+    texture group. Useful for knowing what to
+    hide with --all when replacing one batch.
+    
+    Example: scanbatch BOY_00000.rdtb 5
+    Output:
+      Texture ID: 2
+      Model name: model_02.obj
+      Total batches in this model: 8
+      Batch indices: [5, 30, 31, 32, 33, 34, 35, 36]
+
+
+-xbatch <file.rdtb> <batch_index> <out.obj>
+
+    Extract a single batch as a standalone OBJ
+    file (without the folder structure).
+    
+    Example: xbatch BOY_00000.rdtb 5 head.obj
+
+
+-xmodel <file.rdtb> <batch_index> <out.obj>
+
+    Extract all batches in the same model group
+    (sharing the same texture) as a combined
+    OBJ with batch_NNNN groups.
+    
+    Example: xmodel BOY_00000.rdtb 5 model_02.obj
+    (extracts all 8 batches that use texture 2)
+
+
+### RDTB Format Converters (NEW v1.4.6)
+
+The tool now supports three RDTB formats:
+- **BIG** — 14 active chunks with 3 separate
+  LOD meshes (high/medium/low quality)
+- **SMALL** — 10 active chunks with single
+  mesh, slots 9/10/12/13 = 0xFFFFFFFF
+- **MIRRORED** — 14 slots but 9/10 share
+  offset with 8, 12/13 share offset with 11
+  (smaller file size, works in big-RDTB slots)
+
+-fmtrdtb <file.rdtb>
+
+    Detect and show the RDTB format type
+    along with full slot table.
+
+-big2small <in.rdtb> <out.rdtb>
+
+    Convert big RDTB (14 chunks, 3 LODs) to
+    small RDTB (10 chunks, single mesh).
+    Clears bit 7 of chunk 8 flags to tell
+    the game "no external LOD chunks".
+
+-small2big <in.rdtb> <out.rdtb>
+
+    Convert small RDTB to big RDTB by
+    duplicating the mesh and lookup data
+    into chunks 9, 10, 12, 13.
+
+-big2mirror <in.rdtb> <out.rdtb>
+
+    Convert big RDTB to mirrored format
+    (smaller file, slots 9/10 point to 8
+    and slots 12/13 point to 11).
+
+-mirror2big <in.rdtb> <out.rdtb>
+
+    Convert mirrored RDTB to full big RDTB
+    with unique data in all 14 slots.
+
+-small2mirror <in.rdtb> <out.rdtb>
+
+    Convert small RDTB to mirrored format
+    (fills slots 9/10 and 12/13 to point at
+    existing chunk 8 and 11 data).
+
+-mirror2small <in.rdtb> <out.rdtb>
+
+    Convert mirrored RDTB back to small
+    format (sets slots 9/10/12/13 to
+    0xFFFFFFFF and fixes chunk 8 flags).
 
 
 ### Text Commands
@@ -1053,6 +1412,45 @@ tool.exe -chda BOY BOY.HDA
 ---
 
 ## Examples
+
+### Player Head Swap (NEW v1.4.6)
+
+**Step 1:** Extract BOY archive and convert to batches:
+
+-xhda BOY.HDA BOY
+
+-xbatches BOY\BOY_00000.RDTB BOY\BOY_00001.GDTB BOY
+
+This creates `BOY_3d_batches_obj/` folder with all batches.
+
+**Step 2:** Find which batch is the head:
+
+-scanbatch BOY\BOY_00000.RDTB 5
+
+Output shows: model_02, batches [5, 30, 31, 32, 33, 34, 35, 36]
+(batch 5 = head, batches 30-36 = hair/ponytail)
+
+**Step 3:** Open `BOY_3d_batches_obj/model_02/batch_0005.obj`
+in Blender, replace with your custom head mesh,
+edit `texture_02.bmp` if needed, save the OBJ.
+
+**Step 4:** Rebuild — use `-all` flag to hide the
+original hair batches (30-36) which would clash
+with your new head:
+
+-cbatches BOY_3d_batches_obj BOY_NEW -all
+
+**Step 5:** Repack the HDA:
+
+-chda BOY_NEW BOY.HDA
+
+Done! Your custom head is now in the game.
+
+**Note:** Currently ONLY batch_0005 (head) is safe
+to swap for 3D model mods. Other batches (hair,
+tools, body parts) work for vertex editing but
+not for full mesh swaps. Universal batch swapping
+is in development.
 
 ### Extract and repack BOY.HDA (Player textures)
 Extract BOY.HDA
