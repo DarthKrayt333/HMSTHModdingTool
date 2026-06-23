@@ -1156,16 +1156,31 @@ namespace HMSTHModdingTool.RDTB
                 if (v == -1) continue;
                 _chunkOffsets.Add(v);
             }
+
             _chunks.Clear();
             for (int i = 0;
                  i < _chunkOffsets.Count; i++)
             {
                 int s = _chunkOffsets[i];
-                int e = (i + 1 <
-                    _chunkOffsets.Count)
-                    ? _chunkOffsets[i + 1]
-                    : _data.Length;
+                // For mirrored RDTBs,
+                // find next DIFFERENT
+                // offset
+                int e = _data.Length;
+                for (int ci = i + 1;
+                     ci < _chunkOffsets
+                         .Count; ci++)
+                {
+                    if (_chunkOffsets[ci]
+                        != s)
+                    {
+                        e = _chunkOffsets[
+                            ci];
+                        break;
+                    }
+                }
+                if (e <= s) continue;
                 byte[] c = new byte[e - s];
+
                 Array.Copy(_data, s, c, 0, e - s);
                 _chunks.Add(c);
             }
@@ -6342,7 +6357,7 @@ namespace HMSTHModdingTool.RDTB
                 }
 
                 int lsi = bobj.IndexOf(
-    "\"lod_siblings\":");
+                    "\"lod_siblings\":");
                 if (lsi >= 0)
                 {
                     int lsa = bobj.IndexOf(
