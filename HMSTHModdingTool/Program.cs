@@ -20,7 +20,7 @@ namespace HMSTHModdingTool
             "HMSTHModdingTool original as" +
             " HDATextTool by gdkchan";
         const string TOOL_VERSION =
-            "v1.4.5-Beta";
+            "v1.4.6-Beta";
         const string TOOL_AUTHOR =
             "gdkchan + DarthKrayt333" +
             " & HMSTH Community";
@@ -991,6 +991,8 @@ namespace HMSTHModdingTool
                     // ════════════════════════
                     // SRDB COMMANDS
                     // ════════════════════════
+
+
                     // ════════════════════════
                     // XSRDB - Extract embedded
                     // RDTBs from SRDB (new)
@@ -1283,6 +1285,14 @@ namespace HMSTHModdingTool
                                             rem3d[0],
                                             rem3d[1],
                                             rem3d[2]);
+
+                                    // NEW: Also extract
+                                    // 5th batch folder
+                                    RDTBBatchFolder
+                                        .ExtractBatchFolder(
+                                            rem3d[0],
+                                            rem3d[1],
+                                            rem3d[2]);
                                 }
                             }
                             else
@@ -1297,18 +1307,24 @@ namespace HMSTHModdingTool
                     case "c3d":
                         {
                             float scaleC3d = 1.0f;
+                            string c3dNormals = "match";
+                            float[] c3dCustomNorm = null;
+                            bool c3dDeleteAll = false;
+                            string c3dFormat = "default";
                             var cleanC3d =
-                                new System.Collections.Generic
-                                    .List<string>();
+                                new System.Collections
+                                    .Generic.List<string>();
                             int ic3d = 1;
                             while (ic3d < args.Length)
                             {
                                 string a = args[ic3d];
-                                if (a.ToLower() == "--scale"
-                                    || a.ToLower() == "-scale"
-                                    || a.ToLower() == "-s")
+                                string al = a.ToLower();
+                                if (al == "--scale" ||
+                                    al == "-scale" ||
+                                    al == "-s")
                                 {
-                                    if (ic3d + 1 < args.Length)
+                                    if (ic3d + 1 <
+                                        args.Length)
                                     {
                                         float.TryParse(
                                             args[ic3d + 1],
@@ -1319,58 +1335,446 @@ namespace HMSTHModdingTool
                                         continue;
                                     }
                                 }
+                                else if (al == "--normals")
+                                {
+                                    if (ic3d + 1 <
+                                        args.Length)
+                                    {
+                                        c3dNormals =
+                                            args[ic3d + 1]
+                                            .ToLower();
+                                        ic3d += 2;
+                                        continue;
+                                    }
+                                }
+                                else if (al ==
+                                    "--normals-xyz")
+                                {
+                                    if (ic3d + 1 <
+                                        args.Length)
+                                    {
+                                        var parts =
+                                            args[ic3d + 1]
+                                            .Split(',');
+                                        if (parts.Length
+                                            >= 3)
+                                        {
+                                            c3dCustomNorm
+                                                = new
+                                                float[3];
+                                            float.TryParse(
+                                                parts[0],
+                                                out c3dCustomNorm[0]);
+                                            float.TryParse(
+                                                parts[1],
+                                                out c3dCustomNorm[1]);
+                                            float.TryParse(
+                                                parts[2],
+                                                out c3dCustomNorm[2]);
+                                            c3dNormals
+                                                = "custom";
+                                        }
+                                        ic3d += 2;
+                                        continue;
+                                    }
+                                }
+                                else if (al == "-all" ||
+                                    al == "--all")
+                                {
+                                    c3dDeleteAll = true;
+                                    ic3d++;
+                                    continue;
+                                }
+                                else if (al == "--small" ||
+                                    al == "-small")
+                                {
+                                    c3dFormat = "small";
+                                    ic3d++;
+                                    continue;
+                                }
+                                else if (al == "--mirrored"
+                                    || al == "-mirrored"
+                                    || al == "--mirror"
+                                    || al == "-mirror")
+                                {
+                                    c3dFormat = "mirrored";
+                                    ic3d++;
+                                    continue;
+                                }
+                                else if (al == "--big" ||
+                                    al == "-big")
+                                {
+                                    c3dFormat = "big";
+                                    ic3d++;
+                                    continue;
+                                }
                                 cleanC3d.Add(a);
                                 ic3d++;
                             }
+
                             if (cleanC3d.Count == 2)
                             {
-                                // Auto-detect by checking for
-                                // rebuild_manifest.json content
-                                // to determine if this is SRDB
-                                // or RDTB output folder
-                                string mfp = Path.Combine(
-                                    cleanC3d[0],
-                                    "rebuild_manifest.json");
-                                bool isSrdbFolder = false;
-                                if (File.Exists(mfp))
-                                {
-                                    string mfc =
-                                        File.ReadAllText(mfp);
-                                    // SRDB manifests have
-                                    // embedded_rdtbs key
-                                    isSrdbFolder = mfc.Contains(
-                                        "\"embedded_rdtbs\"");
-                                }
+                                string folder =
+                                    cleanC3d[0];
+                                string outFolder =
+                                    cleanC3d[1];
 
-                                if (isSrdbFolder)
+                                if (RDTBBatchFolder
+                                    .IsBatchFolder(
+                                        folder))
                                 {
-                                    Console.ForegroundColor =
+                                    Console
+                                        .ForegroundColor =
                                         ConsoleColor.Cyan;
                                     Console.WriteLine(
-                                        "[Auto-detect] SRDB" +
-                                        " folder detected" +
-                                        " -> csrdb3d");
+                                        "[Auto-detect]"
+                                        + " Batch folder"
+                                        + " format -> C#"
+                                        + " rebuild ("
+                                        + c3dFormat + ")");
                                     Console.ResetColor();
-                                    SRDBArchive.Create3D(
-                                        cleanC3d[0],
-                                        cleanC3d[1],
-                                        scaleC3d);
+                                    RDTBBatchFolder
+                                        .BuildFromBatchFolder(
+                                            folder,
+                                            outFolder,
+                                            c3dNormals,
+                                            c3dCustomNorm,
+                                            c3dDeleteAll,
+                                            c3dFormat);
                                 }
                                 else
                                 {
-                                    Model3D.Create(
-                                        cleanC3d[0],
-                                        cleanC3d[1],
-                                        scaleC3d);
+                                    string mfp =
+                                        Path.Combine(
+                                            folder,
+                                            "rebuild_manifest"
+                                            + ".json");
+                                    bool isSrdbFolder
+                                        = false;
+                                    if (File.Exists(mfp))
+                                    {
+                                        string mfc =
+                                            File
+                                                .ReadAllText(
+                                                    mfp);
+                                        isSrdbFolder =
+                                            mfc.Contains(
+                                            "\"embedded_rdtbs\"");
+                                    }
+                                    if (isSrdbFolder)
+                                    {
+                                        SRDBArchive
+                                            .Create3D(
+                                                folder,
+                                                outFolder,
+                                                scaleC3d);
+                                    }
+                                    else
+                                    {
+                                        Model3D.Create(
+                                            folder,
+                                            outFolder,
+                                            scaleC3d);
+                                    }
                                 }
                             }
                             else
                             {
                                 Console.WriteLine(
-                                    "Usage: c3d <folder>" +
-                                    " <output> [--scale N]");
+                                    "Usage: c3d "
+                                    + "<folder> "
+                                    + "<output> "
+                                    + "[--scale N] "
+                                    + "[--normals MODE] "
+                                    + "[--normals-xyz "
+                                    + "X,Y,Z] [-all] "
+                                    + "[--small] "
+                                    + "[--mirrored] "
+                                    + "[--big]");
                             }
                         }
+                        break;
+
+
+                    // ════════════════════════
+                    // BATCH TOOLS (NEW v1.4.6)
+                    // ════════════════════════
+                    case "scanbatch":
+                        RequireArgs(args, 3,
+                            "-scanbatch <file.rdtb>"
+                            + " <batch_index>");
+                        {
+                            int sbIdx;
+                            if (!int.TryParse(
+                                    args[2],
+                                    out sbIdx))
+                            {
+                                TextOut
+                                    .PrintError(
+                                    "Invalid"
+                                    + " index: "
+                                    + args[2]);
+                                return;
+                            }
+                            RDTBBatchTools
+                                .ScanBatch(
+                                    args[1],
+                                    sbIdx);
+                        }
+                        break;
+
+                    case "xbatch":
+                    case "extractbatch":
+                        RequireArgs(args, 4,
+                            "-xbatch <file.rdtb>"
+                            + " <batch_index>"
+                            + " <out.obj>");
+                        {
+                            int xbIdx;
+                            if (!int.TryParse(
+                                    args[2],
+                                    out xbIdx))
+                            {
+                                TextOut
+                                    .PrintError(
+                                    "Invalid"
+                                    + " index: "
+                                    + args[2]);
+                                return;
+                            }
+                            RDTBBatchTools
+                                .ExtractBatch(
+                                    args[1],
+                                    xbIdx,
+                                    args[3]);
+                        }
+                        break;
+
+                    case "xmodel":
+                    case "extractmodel":
+                        RequireArgs(args, 4,
+                            "-xmodel <file.rdtb>"
+                            + " <batch_index>"
+                            + " <out.obj>");
+                        {
+                            int xmIdx;
+                            if (!int.TryParse(
+                                    args[2],
+                                    out xmIdx))
+                            {
+                                TextOut
+                                    .PrintError(
+                                    "Invalid"
+                                    + " index: "
+                                    + args[2]);
+                                return;
+                            }
+                            RDTBBatchTools
+                                .ExtractModel(
+                                    args[1],
+                                    xmIdx,
+                                    args[3]);
+                        }
+                        break;
+
+                    // ════════════════════════
+                    // XBATCHES / CBATCHES
+                    // (Dedicated commands for
+                    // per-batch folder format)
+                    // ════════════════════════
+                    case "xbatches":
+                    case "extractbatches":
+                        RequireArgs(args, 4,
+                            "-xbatches <rdtb>"
+                            + " <gdtb> <base>");
+                        RDTBBatchFolder
+                            .ExtractBatchFolder(
+                                args[1],
+                                args[2],
+                                args[3]);
+                        break;
+
+                    case "cbatches":
+                    case "createbatches":
+                        {
+                            string cbNormals = "match";
+                            float[] cbCustom = null;
+                            bool cbDelAll = false;
+                            string cbFormat = "default";
+                            var cbClean =
+                                new System.Collections
+                                    .Generic.List<string>();
+                            int icb = 1;
+                            while (icb < args.Length)
+                            {
+                                string a = args[icb];
+                                string al = a.ToLower();
+                                if (al == "--normals"
+                                    && icb + 1
+                                    < args.Length)
+                                {
+                                    cbNormals =
+                                        args[icb + 1]
+                                        .ToLower();
+                                    icb += 2;
+                                    continue;
+                                }
+                                if (al ==
+                                    "--normals-xyz"
+                                    && icb + 1
+                                    < args.Length)
+                                {
+                                    var parts =
+                                        args[icb + 1]
+                                        .Split(',');
+                                    if (parts.Length
+                                        >= 3)
+                                    {
+                                        cbCustom
+                                            = new
+                                            float[3];
+                                        float.TryParse(
+                                            parts[0],
+                                            out cbCustom[0]);
+                                        float.TryParse(
+                                            parts[1],
+                                            out cbCustom[1]);
+                                        float.TryParse(
+                                            parts[2],
+                                            out cbCustom[2]);
+                                        cbNormals
+                                            = "custom";
+                                    }
+                                    icb += 2;
+                                    continue;
+                                }
+                                if (al == "-all" ||
+                                    al == "--all")
+                                {
+                                    cbDelAll = true;
+                                    icb++;
+                                    continue;
+                                }
+                                if (al == "--small" ||
+                                    al == "-small")
+                                {
+                                    cbFormat = "small";
+                                    icb++;
+                                    continue;
+                                }
+                                if (al == "--mirrored"
+                                    || al == "-mirrored"
+                                    || al == "--mirror"
+                                    || al == "-mirror")
+                                {
+                                    cbFormat = "mirrored";
+                                    icb++;
+                                    continue;
+                                }
+                                if (al == "--big" ||
+                                    al == "-big")
+                                {
+                                    cbFormat = "big";
+                                    icb++;
+                                    continue;
+                                }
+                                cbClean.Add(a);
+                                icb++;
+                            }
+                            if (cbClean.Count == 2)
+                            {
+                                RDTBBatchFolder
+                                    .BuildFromBatchFolder(
+                                        cbClean[0],
+                                        cbClean[1],
+                                        cbNormals,
+                                        cbCustom,
+                                        cbDelAll,
+                                        cbFormat);
+                            }
+                            else
+                            {
+                                Console.WriteLine(
+                                    "Usage: cbatches"
+                                    + " <folder>"
+                                    + " <out_folder>"
+                                    + " [--normals MODE]"
+                                    + " [--normals-xyz X,Y,Z]"
+                                    + " [-all]"
+                                    + " [--small]"
+                                    + " [--mirrored]"
+                                    + " [--big]");
+                            }
+                        }
+                        break;
+
+                    // ════════════════════════
+                    // RDTB FORMAT CONVERTERS
+                    // ════════════════════════
+                    case "fmtrdtb":
+                    case "formatrdtb":
+                        RequireArgs(args, 2,
+                            "-fmtrdtb <file.rdtb>");
+                        RDTBConverter.ShowFormat(
+                            args[1]);
+                        break;
+
+                    case "big2small":
+                    case "rdtbbig2small":
+                        RequireArgs(args, 3,
+                            "-big2small <in.rdtb>"
+                            + " <out.rdtb>");
+                        RDTBConverter.BigToSmall(
+                            args[1], args[2]);
+                        break;
+
+                    case "small2big":
+                    case "rdtbsmall2big":
+                        RequireArgs(args, 3,
+                            "-small2big <in.rdtb>"
+                            + " <out.rdtb>");
+                        RDTBConverter.SmallToBig(
+                            args[1], args[2]);
+                        break;
+
+                    case "small2mirror":
+                    case "small2mirrored":
+                    case "rdtbsmall2mirror":
+                        RequireArgs(args, 3,
+                            "-small2mirror <in.rdtb>"
+                            + " <out.rdtb>");
+                        RDTBConverter.SmallToMirrored(
+                            args[1], args[2]);
+                        break;
+
+                    case "mirror2small":
+                    case "mirrored2small":
+                    case "rdtbmirror2small":
+                        RequireArgs(args, 3,
+                            "-mirror2small <in.rdtb>"
+                            + " <out.rdtb>");
+                        RDTBConverter.MirroredToSmall(
+                            args[1], args[2]);
+                        break;
+
+                    case "big2mirror":
+                    case "big2mirrored":
+                    case "rdtbbig2mirror":
+                        RequireArgs(args, 3,
+                            "-big2mirror <in.rdtb>"
+                            + " <out.rdtb>");
+                        RDTBConverter.BigToMirrored(
+                            args[1], args[2]);
+                        break;
+
+                    case "mirror2big":
+                    case "mirrored2big":
+                    case "rdtbmirror2big":
+                        RequireArgs(args, 3,
+                            "-mirror2big <in.rdtb>"
+                            + " <out.rdtb>");
+                        RDTBConverter.MirroredToBig(
+                            args[1], args[2]);
                         break;
 
                     // ════════════════════════
@@ -1828,6 +2232,22 @@ namespace HMSTHModdingTool
                     "boyoriginal","boyrestore",
                     "boyback",    "boyorig",
                     "x3d",        "c3d",
+                    "scanbatch",
+                    "xbatch", "extractbatch",
+                    "xmodel", "extractmodel",
+                    "xbatches", "extractbatches",
+                    "cbatches", "createbatches",
+                    "fmtrdtb",      "formatrdtb",
+                    "big2small",    "rdtbbig2small",
+                    "small2big",    "rdtbsmall2big",
+                    "small2mirror", "small2mirrored",
+                    "rdtbsmall2mirror",
+                    "mirror2small", "mirrored2small",
+                    "rdtbmirror2small",
+                    "big2mirror",   "big2mirrored",
+                    "rdtbbig2mirror",
+                    "mirror2big",   "mirrored2big",
+                    "rdtbmirror2big",
                 };
 
             bool firstIsCommand =
@@ -2121,6 +2541,104 @@ namespace HMSTHModdingTool
             Console.WriteLine(
                 "    tool.exe c3d" +
                 " BOY_obj BOY_NEW");
+            Console.ResetColor();
+            Console.WriteLine();
+
+            Console.WriteLine(
+                "  -scanbatch <rdtb>"
+                + " <batch>  (find model"
+                + " group)");
+            Console.WriteLine(
+                "  -xbatch <rdtb>"
+                + " <batch> <out.obj>");
+            Console.WriteLine(
+                "  -xmodel <rdtb>"
+                + " <batch> <out.obj>"
+                + "  (all siblings)");
+
+            Console.WriteLine(
+                "  -xbatches <rdtb>"
+                + " <gdtb> <base>"
+                + "  (per-batch folder)");
+            Console.WriteLine(
+                "  -cbatches <folder>"
+                + " <out_folder>"
+                + " [--normals MODE]"
+                + " [--normals-xyz X,Y,Z]"
+                + " [-all]");
+
+            // ── RDTB FORMAT CONVERTERS ──
+            Console.ForegroundColor =
+                ConsoleColor.Magenta;
+            Console.WriteLine(
+                "=== RDTB Format Converters"
+                + " ===");
+            Console.ResetColor();
+            Console.WriteLine(
+                "  -fmtrdtb      <file.rdtb>"
+                + "  (detect format)");
+            Console.WriteLine(
+                "  -big2small    <in.rdtb>"
+                + " <out.rdtb>");
+            Console.WriteLine(
+                "  -small2big    <in.rdtb>"
+                + " <out.rdtb>");
+            Console.WriteLine(
+                "  -big2mirror   <in.rdtb>"
+                + " <out.rdtb>");
+            Console.WriteLine(
+                "  -mirror2big   <in.rdtb>"
+                + " <out.rdtb>");
+            Console.WriteLine(
+                "  -small2mirror <in.rdtb>"
+                + " <out.rdtb>");
+            Console.WriteLine(
+                "  -mirror2small <in.rdtb>"
+                + " <out.rdtb>");
+            Console.ForegroundColor =
+                ConsoleColor.DarkYellow;
+            Console.WriteLine(
+                "  Format flags for c3d /"
+                + " cbatches:");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    --small      output as"
+                + " small RDTB (single mesh)");
+            Console.WriteLine(
+                "    --mirrored   output as"
+                + " mirrored RDTB (slots"
+                + " 9/10=8, 12/13=11)");
+            Console.WriteLine(
+                "    --big        output as"
+                + " big RDTB (all 14 chunks)");
+            Console.ResetColor();
+            Console.WriteLine();
+            Console.ForegroundColor =
+                ConsoleColor.DarkYellow;
+            Console.WriteLine(
+                "  Examples:");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    tool.exe c3d"
+                + " FLAT_3d_batches_obj"
+                + " ./out --small");
+            Console.WriteLine(
+                "    tool.exe cbatches"
+                + " FLAT_3d_batches_obj"
+                + " ./out --mirrored");
+            Console.WriteLine(
+                "    tool.exe big2small"
+                + " BOY_00000.rdtb"
+                + " BOY_SMALL.rdtb");
+            Console.WriteLine(
+                "    tool.exe small2big"
+                + " FLAT_00000.rdtb"
+                + " FLAT_BIG.rdtb");
+            Console.WriteLine(
+                "    tool.exe fmtrdtb"
+                + " BOY_00000.rdtb");
             Console.ResetColor();
             Console.WriteLine();
 
