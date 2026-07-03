@@ -24,6 +24,14 @@ namespace HMSTHModdingTool.RDTB
     /// </summary>
     public static class RDTBBatchReplacer
     {
+        public enum TargetRdtbFormat
+        {
+            Mirror,    // default for cbatches
+            Big,
+            Small,
+            Match      // read from source
+        }
+
         // VIF constants
         const byte VIF_B0 = 0x00;
         const byte VIF_B1 = 0x80;
@@ -68,7 +76,8 @@ namespace HMSTHModdingTool.RDTB
             string normalsMode,
             float[] customNormal,
             bool deleteAll,
-            string targetFormat)
+            TargetRdtbFormat targetFormat
+                = TargetRdtbFormat.Mirror)
         {
             Console.WriteLine();
             Console.ForegroundColor =
@@ -225,14 +234,83 @@ namespace HMSTHModdingTool.RDTB
 
             // Chunk layout
             List<int> offs =
-                ReadChunkOffsets(
-                    rdtbData);
-            int meshChunkIdx;
-            if (offs.Count >= 14)
-                meshChunkIdx = 11;
-            else
+                ReadChunkOffsets(rdtbData);
+
+            // Read RAW slot values to
+            // detect source format
+            // regardless of offs count
+            uint[] rawSlots =
+                new uint[14];
+            for (int i = 0; i < 14; i++)
+            {
+                if (0x10 + i * 4 + 4 >
+                    rdtbData.Length)
+                    break;
+                rawSlots[i] =
+                    BitConverter.ToUInt32(
+                        rdtbData,
+                        0x10 + i * 4);
+            }
+
+            // Detect source format by
+            // looking at raw slot 9
+            bool sourceIsSmall =
+                rawSlots[9] == 0xFFFFFFFF;
+            bool sourceIsBig =
+                !sourceIsSmall
+                && rawSlots[9] != 0
+                && rawSlots[9] != rawSlots[8];
+
+            // Find mesh chunk: it's at
+            // raw slot 11. Locate its
+            // position in the offs list.
+            uint meshRawOffset =
+                rawSlots[11];
+            int meshChunkIdx = -1;
+            if (meshRawOffset != 0
+                && meshRawOffset != 0xFFFFFFFF)
+            {
+                meshChunkIdx =
+                    offs.IndexOf(
+                        (int)meshRawOffset);
+            }
+            if (meshChunkIdx < 0)
+            {
+                // Fallback to last active
+                // chunk in offs list
                 meshChunkIdx =
                     offs.Count - 1;
+            }
+
+            Console.WriteLine(
+                "    Source format: " +
+                (sourceIsBig ? "BIG" :
+                 sourceIsSmall ? "SMALL" :
+                 "MIRROR"));
+            Console.WriteLine(
+                "    Mesh chunk idx: " +
+                meshChunkIdx +
+                " (raw offset 0x" +
+                meshRawOffset.ToString("X") +
+                ")");
+
+            // Resolve target format
+            TargetRdtbFormat outFmt =
+                targetFormat;
+            if (outFmt ==
+                TargetRdtbFormat.Match)
+            {
+                outFmt = sourceIsBig
+                    ? TargetRdtbFormat.Big
+                    : sourceIsSmall
+                        ? TargetRdtbFormat
+                            .Small
+                        : TargetRdtbFormat
+                            .Mirror;
+            }
+            Console.WriteLine(
+                "    Output format: " +
+                outFmt);
 
             // Read mesh chunk
             int chunkStart =
@@ -304,9 +382,11 @@ namespace HMSTHModdingTool.RDTB
                 var normals = new List<float[]>();
                 var uvs = new List<float[]>();
                 var tris = new List<int[]>();
+                var vertFlags = new List<uint>();
                 ParseObj(objPath,
                     verts, normals,
-                    uvs, tris);
+                    uvs, tris,
+                    vertFlags);
 
 
                 // Apply normals
@@ -437,7 +517,8 @@ namespace HMSTHModdingTool.RDTB
                         CompilePureTri(
                             verts,
                             normals,
-                            uvs, tris);
+                            uvs, tris,
+                            vertFlags);
                     newBatchData[bi] =
                         vifData;
                     newCount++;
@@ -499,13 +580,37 @@ namespace HMSTHModdingTool.RDTB
                     newMeshChunk,
                     nPtrs);
 
-            Console.WriteLine(
-                "    Applying slot"
-                + " mirror...");
-
-            byte[] finalRdtb =
-                ApplySlotMirror(
-                    newRdtb);
+            byte[] finalRdtb;
+            switch (outFmt)
+            {
+                case TargetRdtbFormat.Big:
+                    Console.WriteLine(
+                        "    Building BIG"
+                        + " RDTB (3 LOD"
+                        + " chunks)...");
+                    finalRdtb =
+                        ApplyBigLayout(
+                            newRdtb);
+                    break;
+                case TargetRdtbFormat.Small:
+                    Console.WriteLine(
+                        "    Building SMALL"
+                        + " RDTB (single"
+                        + " mesh chunk)...");
+                    finalRdtb =
+                        ApplySmallLayout(
+                            newRdtb);
+                    break;
+                case TargetRdtbFormat.Mirror:
+                default:
+                    Console.WriteLine(
+                        "    Applying mirror"
+                        + " layout...");
+                    finalRdtb =
+                        ApplySlotMirror(
+                            newRdtb);
+                    break;
+            }
 
             File.WriteAllBytes(
                 outRdtb, finalRdtb);
@@ -544,6 +649,16 @@ namespace HMSTHModdingTool.RDTB
 
 
 
+        // ═════════════════════════════
+        // COUNT ORIG BATCH TRIS (FIXED)
+        // Counts only NON-DEGENERATE
+        // triangles in the original
+        // strip — matching the OBJ
+        // extractor's behavior. This
+        // ensures roundtrips report
+        // equal tri counts and skip
+        // the CompilePureTri path.
+        // ═════════════════════════════
         static int CountOrigBatchTris(
             byte[] chunk,
             int batchIdx,
@@ -554,34 +669,112 @@ namespace HMSTHModdingTool.RDTB
             uint bp = BitConverter
                 .ToUInt32(chunk,
                     batchIdx * 4);
-            uint np =
-                (batchIdx + 1 < nPtrs
-                ? BitConverter
-                    .ToUInt32(chunk,
-                        (batchIdx + 1)
-                        * 4)
-                : (uint)chunk.Length);
+            // Find next NON-NULL pointer
+            // (skip null sentinel slots
+            // at end of pointer table).
+            // If no real next pointer
+            // exists, use chunk end.
+            uint np = (uint)chunk.Length;
+            for (int nj = batchIdx + 1;
+                 nj < nPtrs; nj++)
+            {
+                uint candidate =
+                    BitConverter.ToUInt32(
+                        chunk, nj * 4);
+                if (candidate != 0 &&
+                    candidate > bp)
+                {
+                    np = candidate;
+                    break;
+                }
+            }
 
             int count = 0;
             int pos = (int)bp;
             int end = (int)np;
+
             while (pos + 16 <= end)
             {
-                if (chunk[pos] !=
-                    VIF_B0 ||
-                    chunk[pos + 1] !=
-                    VIF_B1 ||
-                    chunk[pos + 3] !=
-                    VIF_B3)
+                if (chunk[pos] != VIF_B0
+                    || chunk[pos + 1]
+                        != VIF_B1
+                    || chunk[pos + 3]
+                        != VIF_B3)
                 {
                     pos += 4;
                     continue;
                 }
                 int vc = chunk[pos + 4];
-                // Strip produces
-                // vc-2 triangles
-                if (vc >= 3)
-                    count += (vc - 2);
+
+                // Read vertex positions
+                // for this block so we
+                // can filter degenerates
+                int vStart = pos + 16;
+                var verts =
+                    new List<float[]>();
+                for (int i = 0;
+                     i < vc; i++)
+                {
+                    int vo = vStart
+                        + i * 16;
+                    if (vo + 16 > end)
+                        break;
+                    verts.Add(
+                        new float[]
+                        {
+                    BitConverter
+                        .ToSingle(
+                            chunk,
+                            vo + 4),
+                    BitConverter
+                        .ToSingle(
+                            chunk,
+                            vo + 8),
+                    BitConverter
+                        .ToSingle(
+                            chunk,
+                            vo + 12)
+                        });
+                }
+
+                // Walk the strip and
+                // count only non-
+                // degenerate triangles
+                for (int i = 0;
+                     i < verts.Count - 2;
+                     i++)
+                {
+                    int a, b, c;
+                    a = i;
+                    if (i % 2 == 0)
+                    {
+                        b = i + 1;
+                        c = i + 2;
+                    }
+                    else
+                    {
+                        b = i + 2;
+                        c = i + 1;
+                    }
+                    float[] v0 = verts[a];
+                    float[] v1 = verts[b];
+                    float[] v2 = verts[c];
+                    float ax = v1[0] - v0[0];
+                    float ay = v1[1] - v0[1];
+                    float az = v1[2] - v0[2];
+                    float bx = v2[0] - v0[0];
+                    float by = v2[1] - v0[1];
+                    float bz = v2[2] - v0[2];
+                    float cx =
+                        ay * bz - az * by;
+                    float cy =
+                        az * bx - ax * bz;
+                    float cz =
+                        ax * by - ay * bx;
+                    if (cx * cx + cy * cy
+                        + cz * cz > 1e-10f)
+                        count++;
+                }
 
                 int bSize = 16 +
                     3 * vc * 16 + 16;
@@ -594,8 +787,7 @@ namespace HMSTHModdingTool.RDTB
                                 chunk,
                                 pos +
                                 bSize);
-                    if (eof ==
-                        EOF_FLAG)
+                    if (eof == EOF_FLAG)
                     {
                         bSize += 16;
                         pos += bSize;
@@ -616,7 +808,8 @@ namespace HMSTHModdingTool.RDTB
             List<float[]> verts,
             List<float[]> normals,
             List<float[]> uvs,
-            List<int[]> tris)
+            List<int[]> tris,
+            List<uint> vertFlags)
         {
             var rawV =
                 new List<float[]>();
@@ -637,6 +830,23 @@ namespace HMSTHModdingTool.RDTB
                 File.ReadAllLines(path))
             {
                 string t = line.Trim();
+
+                // NEW: capture #vw flag comment
+                if (t.StartsWith("#vw "))
+                {
+                    string hex = t.Substring(4).Trim();
+                    uint flag;
+                    if (uint.TryParse(hex,
+                        System.Globalization
+                            .NumberStyles.HexNumber,
+                        System.Globalization
+                            .CultureInfo
+                            .InvariantCulture,
+                        out flag))
+                        vertFlags.Add(flag);
+                    continue;
+                }
+
                 if (string.IsNullOrEmpty(
                         t) ||
                     t[0] == '#')
@@ -790,30 +1000,86 @@ namespace HMSTHModdingTool.RDTB
                     uvs[i][0],
                     1f - uvs[i][1]
                 };
+
+            // Pad vertFlags to match verts count
+            while (vertFlags.Count < verts.Count)
+                vertFlags.Add(0);
         }
 
         // ═════════════════════════════
-        // COMPILE PURE-TRI VIF
-        // Each triangle = 1 block
+        // COMPILE STRIP VIF
+        // Builds triangle strips like
+        // the original PS2 format.
+        // Each block holds many verts
+        // (3 + strip extensions) so
+        // the VU1 microcode can DMA
+        // the whole batch in just a
+        // few blocks instead of one
+        // per triangle.
         // ═════════════════════════════
         static byte[] CompilePureTri(
             List<float[]> verts,
             List<float[]> normals,
             List<float[]> uvs,
-            List<int[]> tris)
+            List<int[]> tris,
+            List<uint> vertFlags)
         {
+            // Build vertex strips from
+            // the triangle list
+            List<List<int>> strips =
+                BuildStrips(tris);
+
+            // Split strips into blocks
+            // not larger than MAX_VC
+            const int MAX_VC = 29;
+            const int MIN_VC = 3;
+            List<List<int>> blocks =
+                new List<List<int>>();
+            foreach (var strip in strips)
+            {
+                if (strip.Count < MIN_VC)
+                    continue;
+                int i = 0;
+                while (i < strip.Count)
+                {
+                    int end =
+                        Math.Min(
+                            i + MAX_VC,
+                            strip.Count);
+                    int len = end - i;
+                    if (len >= MIN_VC)
+                    {
+                        var chunk =
+                            strip.GetRange(
+                                i, len);
+                        blocks.Add(chunk);
+                    }
+                    if (end < strip.Count)
+                        i = end - 2;
+                    else
+                        i = end;
+                }
+            }
+
+            if (blocks.Count == 0)
+                return new byte[0];
+
+            // Emit VIF blocks
             using (var ms =
                 new MemoryStream())
             {
-                int n = tris.Count;
+                int nBlocks = blocks.Count;
                 for (int bi = 0;
-                     bi < n; bi++)
+                     bi < nBlocks; bi++)
                 {
+                    List<int> blockVerts =
+                        blocks[bi];
                     bool isFirst =
                         (bi == 0);
                     bool isLast =
-                        (bi == n - 1);
-                    int[] tri = tris[bi];
+                        (bi == nBlocks - 1);
+                    int vc =
+                        blockVerts.Count;
 
                     // VIF header
                     byte[] hdr =
@@ -821,30 +1087,37 @@ namespace HMSTHModdingTool.RDTB
                     hdr[0] = VIF_B0;
                     hdr[1] = VIF_B1;
                     hdr[2] = (byte)(
-                        (3 * 3 + 1) &
-                        0xFF);
+                        (3 * vc + 1)
+                        & 0xFF);
                     hdr[3] = VIF_B3;
-                    hdr[4] = 3;
+                    hdr[4] = (byte)
+                        (vc & 0xFF);
                     hdr[5] = 0x80;
                     Array.Copy(HDR_TAIL,
                         0, hdr, 8, 8);
                     ms.Write(hdr, 0, 16);
 
-                    // 3 verts
+                    // Vertex rows
                     for (int j = 0;
-                         j < 3; j++)
+                         j < vc; j++)
                     {
-                        int vi = tri[j];
+                        int vi =
+                            blockVerts[j];
                         float[] v =
                             (vi < verts
                                 .Count)
                             ? verts[vi]
                             : new float[]
                               { 0, 0, 0 };
+                        uint vflag =
+                            (vi < vertFlags
+                                .Count)
+                            ? vertFlags[vi]
+                            : F_ZERO;
                         ms.Write(
                             BitConverter
                                 .GetBytes(
-                                    F_ZERO),
+                                    vflag),
                             0, 4);
                         ms.Write(
                             BitConverter
@@ -863,25 +1136,26 @@ namespace HMSTHModdingTool.RDTB
                             0, 4);
                     }
 
-                    // 3 normals
+                    // Normal rows
                     for (int j = 0;
-                         j < 3; j++)
+                         j < vc; j++)
                     {
-                        int vi = tri[j];
+                        int vi =
+                            blockVerts[j];
                         float[] nn =
                             (vi < normals
                                 .Count)
                             ? normals[vi]
                             : new float[]
                               { 0, 1, 0 };
-                        uint flag =
+                        uint nflag =
                             (j == 0)
                             ? F_ZERO
                             : F_ONE;
                         ms.Write(
                             BitConverter
                                 .GetBytes(
-                                    flag),
+                                    nflag),
                             0, 4);
                         ms.Write(
                             BitConverter
@@ -900,11 +1174,12 @@ namespace HMSTHModdingTool.RDTB
                             0, 4);
                     }
 
-                    // 3 UVs
+                    // UV rows
                     for (int j = 0;
-                         j < 3; j++)
+                         j < vc; j++)
                     {
-                        int vi = tri[j];
+                        int vi =
+                            blockVerts[j];
                         float[] uv =
                             (vi < uvs
                                 .Count)
@@ -939,15 +1214,186 @@ namespace HMSTHModdingTool.RDTB
                         ? GIF_FIRST
                         : GIF_NEXT,
                         0, 16);
-
                     if (isLast)
                         ms.Write(
                             EOF_TAG,
                             0, 16);
                 }
-
                 return ms.ToArray();
             }
+        }
+
+        // ═════════════════════════════
+        // BUILD STRIPS
+        // Greedy triangle strip builder.
+        // Walks triangles and chains
+        // them via shared edges to
+        // build long vertex strips.
+        // ═════════════════════════════
+        static List<List<int>> BuildStrips(
+            List<int[]> tris)
+        {
+            var result =
+                new List<List<int>>();
+            if (tris == null
+                || tris.Count == 0)
+                return result;
+
+            int n = tris.Count;
+
+            // Build edge -> tri list
+            var edgeMap =
+                new Dictionary<
+                    long,
+                    List<(int triIdx,
+                          int oppVert)>>();
+            for (int ti = 0;
+                 ti < n; ti++)
+            {
+                int a = tris[ti][0];
+                int b = tris[ti][1];
+                int c = tris[ti][2];
+                AddEdge(edgeMap,
+                    a, b, ti, c);
+                AddEdge(edgeMap,
+                    b, c, ti, a);
+                AddEdge(edgeMap,
+                    c, a, ti, b);
+            }
+
+            bool[] used =
+                new bool[n];
+
+            for (int seed = 0;
+                 seed < n; seed++)
+            {
+                if (used[seed])
+                    continue;
+                used[seed] = true;
+                int a = tris[seed][0];
+                int b = tris[seed][1];
+                int c = tris[seed][2];
+
+                var strip =
+                    new List<int>
+                    { a, b, c };
+
+                // Extend strip forward
+                int last2 = b;
+                int last1 = c;
+                bool flip = false;
+                while (true)
+                {
+                    int next =
+                        FindNextStripVert(
+                            edgeMap, used,
+                            tris,
+                            last2, last1,
+                            flip);
+                    if (next < 0)
+                        break;
+                    strip.Add(next);
+                    last2 = last1;
+                    last1 = next;
+                    flip = !flip;
+                }
+
+                result.Add(strip);
+            }
+            return result;
+        }
+
+        static void AddEdge(
+            Dictionary<long,
+                List<(int, int)>>
+                map,
+            int v0, int v1,
+            int triIdx,
+            int oppVert)
+        {
+            long key =
+                EdgeKey(v0, v1);
+            if (!map.ContainsKey(key))
+                map[key] =
+                    new List<(int, int)>();
+            map[key].Add(
+                (triIdx, oppVert));
+        }
+
+        static long EdgeKey(
+            int a, int b)
+        {
+            int lo =
+                Math.Min(a, b);
+            int hi =
+                Math.Max(a, b);
+            return ((long)lo << 32)
+                | (uint)hi;
+        }
+
+        static int FindNextStripVert(
+            Dictionary<long,
+                List<(int triIdx,
+                      int oppVert)>>
+                edgeMap,
+            bool[] used,
+            List<int[]> tris,
+            int v0, int v1,
+            bool flip)
+        {
+            long key =
+                EdgeKey(v0, v1);
+            if (!edgeMap.ContainsKey(
+                    key))
+                return -1;
+            foreach (var entry in
+                edgeMap[key])
+            {
+                if (used[entry.triIdx])
+                    continue;
+                // Verify orientation
+                int[] t =
+                    tris[entry.triIdx];
+                // Find which edge this
+                // is in t and check
+                // winding matches
+                bool winding =
+                    CheckWinding(
+                        t, v0, v1,
+                        flip);
+                if (!winding)
+                    continue;
+                used[entry.triIdx] =
+                    true;
+                return entry.oppVert;
+            }
+            return -1;
+        }
+
+        static bool CheckWinding(
+            int[] tri,
+            int v0, int v1,
+            bool flip)
+        {
+            // Strip winding alternates.
+            // For even position the
+            // shared edge should be in
+            // (v0, v1) order in the tri;
+            // for odd in (v1, v0) order.
+            int a = tri[0];
+            int b = tri[1];
+            int c = tri[2];
+            bool fwd =
+                (a == v0 && b == v1) ||
+                (b == v0 && c == v1) ||
+                (c == v0 && a == v1);
+            bool rev =
+                (a == v1 && b == v0) ||
+                (b == v1 && c == v0) ||
+                (c == v1 && a == v0);
+            if (flip)
+                return rev || fwd;
+            return fwd || rev;
         }
 
         // ═════════════════════════════
@@ -1184,7 +1630,15 @@ namespace HMSTHModdingTool.RDTB
         }
 
         // ═════════════════════════════
-        // REBUILD MESH CHUNK
+        // REBUILD MESH CHUNK (FIXED)
+        // Preserves NULL pointer slots
+        // at end of pointer table.
+        // Original RDTBs have N material
+        // batches but pad the pointer
+        // table with null entries
+        // (0x00000000) for alignment.
+        // These must remain null in the
+        // rebuild.
         // ═════════════════════════════
         static byte[] RebuildMeshChunk(
             byte[] origChunk,
@@ -1194,41 +1648,88 @@ namespace HMSTHModdingTool.RDTB
             List<int> hiddenBatches,
             byte[] hiddenVif)
         {
-            // Read all original
-            // batch data
-            var batchData =
-                new List<byte[]>();
-            for (int i = 0;
-                 i < nPtrs; i++)
+            // Read original pointer
+            // table to identify null
+            // slots
+            uint[] origPtrs =
+                new uint[nPtrs];
+            for (int i = 0; i < nPtrs;
+                 i++)
             {
-                uint bp = BitConverter
-                    .ToUInt32(
-                        origChunk,
-                        i * 4);
-                uint np =
-                    (i + 1 < nPtrs
-                    ? BitConverter
+                origPtrs[i] =
+                    BitConverter
                         .ToUInt32(
                             origChunk,
-                            (i + 1) * 4)
-                    : (uint)origChunk
-                        .Length);
+                            i * 4);
+            }
+
+            // Classify each slot:
+            // NULL = pointer is 0
+            //        (preserve as null)
+            // REAL = pointer is valid
+            bool[] isNull =
+                new bool[nPtrs];
+            for (int i = 0; i < nPtrs;
+                 i++)
+            {
+                if (origPtrs[i] == 0)
+                    isNull[i] = true;
+            }
+
+            // For computing batch sizes,
+            // we walk through real
+            // pointers in order. Each
+            // real batch ends at the
+            // NEXT real pointer (or end
+            // of chunk if it's the last
+            // real one).
+            var batchData =
+                new List<byte[]>();
+            for (int i = 0; i < nPtrs;
+                 i++)
+            {
+                if (isNull[i])
+                {
+                    batchData.Add(
+                        new byte[0]);
+                    continue;
+                }
+
+                uint bp = origPtrs[i];
+
+                // Find next non-null
+                // pointer to determine
+                // this batch's end
+                uint np = (uint)
+                    origChunk.Length;
+                for (int j = i + 1;
+                     j < nPtrs; j++)
+                {
+                    if (!isNull[j])
+                    {
+                        np = origPtrs[j];
+                        break;
+                    }
+                }
 
                 if (bp >= np ||
                     bp >= (uint)
-                        origChunk
-                            .Length ||
+                        origChunk.Length
+                    ||
                     np > (uint)
-                        origChunk
-                            .Length)
+                        origChunk.Length)
                 {
+                    // Treat as null if
+                    // computed span is
+                    // invalid
                     batchData.Add(
-                        BuildHiddenBatch());
+                        new byte[0]);
+                    isNull[i] = true;
                     continue;
                 }
-                byte[] bd = new byte[
-                    np - bp];
 
+                byte[] bd =
+                    new byte[np - bp];
                 Array.Copy(origChunk,
                     (int)bp, bd, 0,
                     bd.Length);
@@ -1236,54 +1737,88 @@ namespace HMSTHModdingTool.RDTB
             }
 
             // Replace modified batches
+            // (never touch null slots)
             foreach (var kv in
                 newBatches)
             {
-                if (kv.Key < nPtrs)
+                if (kv.Key < nPtrs &&
+                    !isNull[kv.Key])
+                {
                     batchData[kv.Key] =
                         kv.Value;
+                }
             }
 
             // Hide deleted batches
+            // (also skip null slots)
             foreach (int hb in
                 hiddenBatches)
             {
-                if (hb < nPtrs)
+                if (hb < nPtrs &&
+                    !isNull[hb])
+                {
                     batchData[hb] =
                         hiddenVif;
+                }
             }
 
-            // Rebuild with new
-            // pointer table
+            // Rebuild with new pointer
+            // table. NULL slots stay
+            // as 0x00000000.
             int tableSize = nPtrs * 4;
             using (var ms =
                 new MemoryStream())
             {
-                // Write pointer table
+                // Compute new offsets
+                // (only for real slots)
+                var newOffsets =
+                    new uint[nPtrs];
                 int cursor = tableSize;
-                for (int i = 0;
-                     i < nPtrs; i++)
+
+                for (int i = 0; i < nPtrs;
+                     i++)
+                {
+                    if (isNull[i])
+                    {
+                        newOffsets[i] = 0;
+                    }
+                    else
+                    {
+                        newOffsets[i] =
+                            (uint)cursor;
+                        cursor +=
+                            batchData[i]
+                                .Length;
+                    }
+                }
+
+                // Write pointer table
+                for (int i = 0; i < nPtrs;
+                     i++)
                 {
                     ms.Write(
                         BitConverter
                             .GetBytes(
-                                (uint)
-                                cursor),
+                                newOffsets[i]),
                         0, 4);
-                    cursor +=
-                        batchData[i]
-                            .Length;
                 }
 
                 // Write batch data
-                for (int i = 0;
-                     i < nPtrs; i++)
+                // (null slots write
+                // nothing)
+                for (int i = 0; i < nPtrs;
+                     i++)
                 {
-                    ms.Write(
-                        batchData[i],
-                        0,
+                    if (!isNull[i] &&
                         batchData[i]
-                            .Length);
+                            .Length > 0)
+                    {
+                        ms.Write(
+                            batchData[i],
+                            0,
+                            batchData[i]
+                                .Length);
+                    }
                 }
 
                 return ms.ToArray();
@@ -1300,7 +1835,20 @@ namespace HMSTHModdingTool.RDTB
             byte[] newMeshChunk,
             int nPtrs)
         {
-            // Read all chunks
+            // Read original raw slots so
+            // we know which were sentinels
+            uint[] rawSlots =
+                new uint[14];
+            for (int i = 0; i < 14; i++)
+            {
+                rawSlots[i] =
+                    BitConverter.ToUInt32(
+                        origData,
+                        0x10 + i * 4);
+            }
+
+            // Read all unique chunks in
+            // order from offs list
             var chunks =
                 new List<byte[]>();
             for (int i = 0;
@@ -1322,22 +1870,49 @@ namespace HMSTHModdingTool.RDTB
             chunks[meshChunkIdx] =
                 newMeshChunk;
 
-            // Update lookup chunks
-            // (8->11, 9->12, 10->13)
-            // For mirrored mode, all
-            // lookups point to same
-            // mesh chunk, so update
-            // all of them with the
-            // new QW counts
-            int[] lookupIndices =
-                { 8, 9, 10 };
-            foreach (int li in
-                lookupIndices)
+            // Map original raw slot ->
+            // which chunk index it
+            // pointed at (for sentinels
+            // map to -1)
+            int[] slotToChunkIdx =
+                new int[14];
+            for (int i = 0; i < 14; i++)
             {
-                if (li >= chunks.Count)
+                if (rawSlots[i] == 0
+                    || rawSlots[i] ==
+                        0xFFFFFFFF)
+                {
+                    slotToChunkIdx[i] = -1;
+                }
+                else
+                {
+                    slotToChunkIdx[i] =
+                        offs.IndexOf(
+                            (int)rawSlots[i]);
+                }
+            }
+
+            // Update lookup chunks if
+            // they exist (skip for SMALL
+            // sources where slots 9/10
+            // are sentinels)
+            int[] lookupRawSlots =
+                { 8, 9, 10 };
+            foreach (int rs in
+                lookupRawSlots)
+            {
+                if (rawSlots[rs] == 0
+                    || rawSlots[rs] ==
+                        0xFFFFFFFF)
                     continue;
+                int ci =
+                    slotToChunkIdx[rs];
+                if (ci < 0 ||
+                    ci >= chunks.Count)
+                    continue;
+
                 byte[] lookupChunk =
-                    chunks[li];
+                    chunks[ci];
                 if (lookupChunk.Length
                     < 4)
                     continue;
@@ -1350,9 +1925,6 @@ namespace HMSTHModdingTool.RDTB
                 int lookupN =
                     (int)(lFirst / 4);
 
-                // Calculate QW for
-                // each batch in new
-                // mesh chunk
                 uint mFirst =
                     BitConverter
                         .ToUInt32(
@@ -1385,28 +1957,44 @@ namespace HMSTHModdingTool.RDTB
                             .Length)
                         continue;
 
-                    // QW = (batch_span
-                    // / 16) - 1
                     uint batchPtr =
                         BitConverter
                             .ToUInt32(
                                 newMeshChunk,
                                 bi * 4);
+                    if (batchPtr == 0)
+                        continue;
+
                     uint nextPtr =
-                        (bi + 1 < mPtrs
-                        ? BitConverter
-                            .ToUInt32(
-                                newMeshChunk,
-                                (bi + 1)
-                                * 4)
-                        : (uint)
-                            newMeshChunk
-                                .Length);
+                        (uint)newMeshChunk
+                            .Length;
+                    for (int nj = bi + 1;
+                         nj < mPtrs;
+                         nj++)
+                    {
+                        uint np =
+                            BitConverter
+                                .ToUInt32(
+                                    newMeshChunk,
+                                    nj * 4);
+                        if (np != 0)
+                        {
+                            nextPtr = np;
+                            break;
+                        }
+                    }
+
                     int span =
                         (int)(nextPtr -
-                              batchPtr);
+                               batchPtr);
+                    if (span <= 0)
+                        continue;
+
                     int qw =
                         (span / 16) - 1;
+                    if (qw < 0)
+                        continue;
+
                     byte[] qwBytes =
                         BitConverter
                             .GetBytes(
@@ -1416,42 +2004,64 @@ namespace HMSTHModdingTool.RDTB
                         lookupChunk,
                         recOff, 4);
                 }
-
-                chunks[li] =
+                chunks[ci] =
                     lookupChunk;
             }
 
-            // Rebuild full RDTB
+            // Compute new positions for
+            // each unique chunk in file
+            int[] newChunkOffs =
+                new int[chunks.Count];
+            int cursor = 0x48;
+            for (int i = 0;
+                 i < chunks.Count; i++)
+            {
+                newChunkOffs[i] = cursor;
+                cursor +=
+                    chunks[i].Length;
+            }
+
+            // Build header preserving
+            // sentinels for slots that
+            // were sentinels in source
             byte[] header =
                 new byte[0x48];
             Array.Copy(origData, 0,
                 header, 0, 0x48);
 
-            int cursor = 0x48;
-            int[] newOffs =
-                new int[chunks.Count];
-            for (int i = 0;
-                 i < chunks.Count; i++)
-            {
-                newOffs[i] = cursor;
-                cursor +=
-                    chunks[i].Length;
-            }
-
-            // Update header offsets
-            for (int i = 0;
-                 i < newOffs.Length;
-                 i++)
+            for (int i = 0; i < 14; i++)
             {
                 int pos = 0x10 + i * 4;
+                uint newVal;
+                if (rawSlots[i] == 0)
+                {
+                    newVal = 0;
+                }
+                else if (rawSlots[i] ==
+                    0xFFFFFFFF)
+                {
+                    newVal = 0xFFFFFFFF;
+                }
+                else
+                {
+                    int ci =
+                        slotToChunkIdx[i];
+                    if (ci < 0 ||
+                        ci >= newChunkOffs
+                            .Length)
+                        newVal = 0xFFFFFFFF;
+                    else
+                        newVal = (uint)
+                            newChunkOffs[ci];
+                }
                 byte[] ob =
-                    BitConverter
-                        .GetBytes(
-                            newOffs[i]);
+                    BitConverter.GetBytes(
+                        newVal);
                 Array.Copy(ob, 0,
                     header, pos, 4);
             }
 
+            // Assemble final file
             byte[] result =
                 new byte[cursor];
             Array.Copy(header, 0,
@@ -1459,9 +2069,9 @@ namespace HMSTHModdingTool.RDTB
             for (int i = 0;
                  i < chunks.Count; i++)
             {
-                Array.Copy(chunks[i],
-                    0, result,
-                    newOffs[i],
+                Array.Copy(chunks[i], 0,
+                    result,
+                    newChunkOffs[i],
                     chunks[i].Length);
             }
 
@@ -1469,7 +2079,11 @@ namespace HMSTHModdingTool.RDTB
         }
 
         // ═════════════════════════════
-        // APPLY SLOT MIRROR
+        // APPLY SLOT MIRROR (FIXED)
+        // Handles BIG, SMALL, and MIRROR
+        // sources correctly. Reads mesh
+        // from the right raw slot for
+        // each format.
         // ═════════════════════════════
         static byte[] ApplySlotMirror(
             byte[] data)
@@ -1492,28 +2106,66 @@ namespace HMSTHModdingTool.RDTB
             int HDR = 0x48;
             uint c0 = rawSlots[0];
             uint c8 = rawSlots[8];
-            uint c9 = rawSlots[9];
             uint c11 = rawSlots[11];
-            uint c12 = rawSlots[12];
 
+            // Bail if essential slots
+            // are sentinels
+            if (c8 == 0xFFFFFFFF
+                || c8 == 0
+                || c11 == 0xFFFFFFFF
+                || c11 == 0)
+            {
+                return data;
+            }
+
+            // Compute chunk 8 end:
+            // next valid offset after
+            // c8 in the slot table
+            uint c8End = (uint)data.Length;
+            for (int i = 0; i < 14; i++)
+            {
+                uint v = rawSlots[i];
+                if (v > c8
+                    && v < c8End
+                    && v != 0xFFFFFFFF
+                    && v != 0)
+                    c8End = v;
+            }
+
+            // Compute chunk 11 end:
+            // next valid offset after
+            // c11, OR file end
+            uint c11End = (uint)data.Length;
+            for (int i = 0; i < 14; i++)
+            {
+                uint v = rawSlots[i];
+                if (v > c11
+                    && v < c11End
+                    && v != 0xFFFFFFFF
+                    && v != 0)
+                    c11End = v;
+            }
+
+            // Extract chunks
             byte[] chunks07 =
                 new byte[c8 - c0];
             Array.Copy(data,
                 (int)c0, chunks07,
                 0, chunks07.Length);
 
-            byte[] chunk8 =
-                new byte[c9 - c8];
+            byte[] chunk8 = new byte[
+                c8End - c8];
             Array.Copy(data,
                 (int)c8, chunk8,
                 0, chunk8.Length);
 
-            byte[] chunk11 =
-                new byte[c12 - c11];
+            byte[] chunk11 = new byte[
+                c11End - c11];
             Array.Copy(data,
                 (int)c11, chunk11,
                 0, chunk11.Length);
 
+            // Build new file
             using (var ms =
                 new MemoryStream())
             {
@@ -1534,11 +2186,10 @@ namespace HMSTHModdingTool.RDTB
                 byte[] result =
                     ms.ToArray();
 
-                // Copy original header
                 Array.Copy(data, 0,
                     result, 0, HDR);
 
-                // Patch offsets 0-7
+                // Patch slots 0-7
                 for (int i = 0;
                      i < 8; i++)
                 {
@@ -1552,11 +2203,11 @@ namespace HMSTHModdingTool.RDTB
                         4);
                 }
 
-                // Patch 8,9,10 -> newC8
+                // Slots 8, 9, 10 ->
+                // new chunk 8 offset
                 byte[] c8b =
                     BitConverter
-                        .GetBytes(
-                            newC8);
+                        .GetBytes(newC8);
                 for (int i = 8;
                      i <= 10; i++)
                     Array.Copy(c8b, 0,
@@ -1564,12 +2215,11 @@ namespace HMSTHModdingTool.RDTB
                         0x10 + i * 4,
                         4);
 
-                // Patch 11,12,13
-                // -> newC11
+                // Slots 11, 12, 13 ->
+                // new chunk 11 offset
                 byte[] c11b =
                     BitConverter
-                        .GetBytes(
-                            newC11);
+                        .GetBytes(newC11);
                 for (int i = 11;
                      i <= 13; i++)
                     Array.Copy(c11b, 0,
@@ -1688,23 +2338,45 @@ namespace HMSTHModdingTool.RDTB
         // ═════════════════════════════
         // HELPERS
         // ═════════════════════════════
-        static List<int>
-            ReadChunkOffsets(
-                byte[] data)
+        static List<int> ReadChunkOffsets(
+            byte[] data)
         {
             var offs = new List<int>();
             for (int i = 0; i < 14; i++)
             {
-                int v = BitConverter
-                    .ToInt32(data,
-                        0x10 + i * 4);
-                if (v == 0 || v < 0x48 ||
-                    v > data.Length)
+                if (0x10 + i * 4 + 4 >
+                    data.Length)
                     break;
-                if (v == -1) continue;
-                offs.Add(v);
+                uint v =
+                    BitConverter.ToUInt32(
+                        data,
+                        0x10 + i * 4);
+                // Skip null and sentinel
+                // slots, but DO NOT BREAK
+                // — keep scanning the rest
+                if (v == 0)
+                    continue;
+                if (v == 0xFFFFFFFF)
+                    continue;
+                if (v < 0x48 ||
+                    v > (uint)data.Length)
+                    continue;
+                offs.Add((int)v);
             }
-            return offs;
+            // Sort because slots may
+            // store offsets out of order
+            offs.Sort();
+            // Remove duplicates
+            var unique =
+                new List<int>();
+            foreach (int o in offs)
+            {
+                if (unique.Count == 0 ||
+                    unique[unique.Count - 1]
+                        != o)
+                    unique.Add(o);
+            }
+            return unique;
         }
 
         static int GetBatchCount(
@@ -1860,5 +2532,376 @@ namespace HMSTHModdingTool.RDTB
                     rec);
         }
 
+        // ═════════════════════════════
+        // APPLY BIG LAYOUT
+        // Writes 3 copies of mesh chunk
+        // at slots 11, 12, 13 with their
+        // own offsets (not mirrored).
+        // Matches original game format.
+        // ═════════════════════════════
+        static byte[] ApplyBigLayout(
+            byte[] data)
+        {
+            uint[] rawSlots =
+                new uint[14];
+            for (int i = 0; i < 14; i++)
+            {
+                if (0x10 + i * 4 + 4 >
+                    data.Length)
+                    break;
+                rawSlots[i] =
+                    BitConverter
+                        .ToUInt32(
+                            data,
+                            0x10 +
+                            i * 4);
+            }
+
+            int HDR = 0x48;
+            uint c0 = rawSlots[0];
+            uint c8 = rawSlots[8];
+            uint c11 = rawSlots[11];
+
+            // Validate
+            if (c8 == 0xFFFFFFFF
+                || c11 == 0xFFFFFFFF
+                || c11 <= c8)
+            {
+                // Source malformed —
+                // fall back to mirror
+                return ApplySlotMirror(
+                    data);
+            }
+
+            // Find chunk 8 end and
+            // chunk 11 end via next
+            // distinct offset
+            uint c8End = data.Length
+                == 0
+                ? 0
+                : (uint)data.Length;
+            for (int i = 0; i < 14; i++)
+            {
+                uint v = rawSlots[i];
+                if (v > c8 &&
+                    v < c8End &&
+                    v != 0xFFFFFFFF)
+                    c8End = v;
+            }
+
+            uint c11End = (uint)
+                data.Length;
+            for (int i = 0; i < 14; i++)
+            {
+                uint v = rawSlots[i];
+                if (v > c11 &&
+                    v < c11End &&
+                    v != 0xFFFFFFFF)
+                    c11End = v;
+            }
+
+            byte[] chunks07 =
+                new byte[c8 - c0];
+            Array.Copy(data,
+                (int)c0, chunks07,
+                0, chunks07.Length);
+
+            byte[] chunk8 = new byte[
+                c8End - c8];
+            Array.Copy(data,
+                (int)c8, chunk8,
+                0, chunk8.Length);
+
+            byte[] chunk11 = new byte[
+                c11End - c11];
+            Array.Copy(data,
+                (int)c11, chunk11,
+                0, chunk11.Length);
+
+            // Preserve lookup chunks
+            // 9/10 if they exist as
+            // distinct chunks in source
+            byte[] chunk9 = null;
+            byte[] chunk10 = null;
+            uint c9 = rawSlots[9];
+            uint c10 = rawSlots[10];
+            if (c9 != 0xFFFFFFFF
+                && c9 != c8
+                && c9 > c8)
+            {
+                uint c9End = c10 ==
+                    0xFFFFFFFF
+                    ? c11
+                    : c10;
+                chunk9 = new byte[
+                    c9End - c9];
+                Array.Copy(data,
+                    (int)c9, chunk9,
+                    0, chunk9.Length);
+            }
+            if (c10 != 0xFFFFFFFF
+                && c10 != c8
+                && c10 > c8)
+            {
+                chunk10 = new byte[
+                    c11 - c10];
+                Array.Copy(data,
+                    (int)c10, chunk10,
+                    0,
+                    chunk10.Length);
+            }
+
+            using (var ms =
+                new MemoryStream())
+            {
+                ms.Write(
+                    new byte[HDR],
+                    0, HDR);
+                ms.Write(chunks07, 0,
+                    chunks07.Length);
+
+                uint newC8 =
+                    (uint)ms.Length;
+                ms.Write(chunk8, 0,
+                    chunk8.Length);
+
+                uint newC9;
+                if (chunk9 != null)
+                {
+                    newC9 =
+                        (uint)ms.Length;
+                    ms.Write(chunk9, 0,
+                        chunk9.Length);
+                }
+                else
+                {
+                    // Duplicate chunk 8
+                    // for slot 9
+                    newC9 =
+                        (uint)ms.Length;
+                    ms.Write(chunk8, 0,
+                        chunk8.Length);
+                }
+
+                uint newC10;
+                if (chunk10 != null)
+                {
+                    newC10 =
+                        (uint)ms.Length;
+                    ms.Write(chunk10, 0,
+                        chunk10.Length);
+                }
+                else
+                {
+                    newC10 =
+                        (uint)ms.Length;
+                    ms.Write(chunk8, 0,
+                        chunk8.Length);
+                }
+
+                uint newC11 =
+                    (uint)ms.Length;
+                ms.Write(chunk11, 0,
+                    chunk11.Length);
+
+                uint newC12 =
+                    (uint)ms.Length;
+                ms.Write(chunk11, 0,
+                    chunk11.Length);
+
+                uint newC13 =
+                    (uint)ms.Length;
+                ms.Write(chunk11, 0,
+                    chunk11.Length);
+
+                byte[] result =
+                    ms.ToArray();
+
+                Array.Copy(data, 0,
+                    result, 0, HDR);
+
+                for (int i = 0; i < 8;
+                     i++)
+                {
+                    byte[] ob =
+                        BitConverter
+                            .GetBytes(
+                                rawSlots[i]);
+                    Array.Copy(ob, 0,
+                        result,
+                        0x10 + i * 4,
+                        4);
+                }
+
+                WriteU32At(result,
+                    0x10 + 8 * 4, newC8);
+                WriteU32At(result,
+                    0x10 + 9 * 4, newC9);
+                WriteU32At(result,
+                    0x10 + 10 * 4,
+                    newC10);
+                WriteU32At(result,
+                    0x10 + 11 * 4,
+                    newC11);
+                WriteU32At(result,
+                    0x10 + 12 * 4,
+                    newC12);
+                WriteU32At(result,
+                    0x10 + 13 * 4,
+                    newC13);
+
+                return result;
+            }
+        }
+
+        // ═════════════════════════════
+        // APPLY SMALL LAYOUT
+        // Single mesh chunk, slots
+        // 9/10/12/13 = 0xFFFFFFFF.
+        // ═════════════════════════════
+        static byte[] ApplySmallLayout(
+            byte[] data)
+        {
+            uint[] rawSlots =
+                new uint[14];
+            for (int i = 0; i < 14; i++)
+            {
+                if (0x10 + i * 4 + 4 >
+                    data.Length)
+                    break;
+                rawSlots[i] =
+                    BitConverter
+                        .ToUInt32(
+                            data,
+                            0x10 +
+                            i * 4);
+            }
+
+            int HDR = 0x48;
+            uint c0 = rawSlots[0];
+            uint c8 = rawSlots[8];
+            uint c11 = rawSlots[11];
+
+            if (c8 == 0xFFFFFFFF
+                || c11 == 0xFFFFFFFF
+                || c11 <= c8)
+            {
+                return ApplySlotMirror(
+                    data);
+            }
+
+            uint c8End = (uint)
+                data.Length;
+            for (int i = 0; i < 14; i++)
+            {
+                uint v = rawSlots[i];
+                if (v > c8 &&
+                    v < c8End &&
+                    v != 0xFFFFFFFF)
+                    c8End = v;
+            }
+
+            uint c11End = (uint)
+                data.Length;
+            for (int i = 0; i < 14; i++)
+            {
+                uint v = rawSlots[i];
+                if (v > c11 &&
+                    v < c11End &&
+                    v != 0xFFFFFFFF)
+                    c11End = v;
+            }
+
+            byte[] chunks07 =
+                new byte[c8 - c0];
+            Array.Copy(data,
+                (int)c0, chunks07,
+                0, chunks07.Length);
+
+            byte[] chunk8 = new byte[
+                c8End - c8];
+            Array.Copy(data,
+                (int)c8, chunk8,
+                0, chunk8.Length);
+
+            byte[] chunk11 = new byte[
+                c11End - c11];
+            Array.Copy(data,
+                (int)c11, chunk11,
+                0, chunk11.Length);
+
+            using (var ms =
+                new MemoryStream())
+            {
+                ms.Write(
+                    new byte[HDR],
+                    0, HDR);
+                ms.Write(chunks07, 0,
+                    chunks07.Length);
+
+                uint newC8 =
+                    (uint)ms.Length;
+                ms.Write(chunk8, 0,
+                    chunk8.Length);
+
+                uint newC11 =
+                    (uint)ms.Length;
+                ms.Write(chunk11, 0,
+                    chunk11.Length);
+
+                byte[] result =
+                    ms.ToArray();
+
+                Array.Copy(data, 0,
+                    result, 0, HDR);
+
+                for (int i = 0; i < 8;
+                     i++)
+                {
+                    byte[] ob =
+                        BitConverter
+                            .GetBytes(
+                                rawSlots[i]);
+                    Array.Copy(ob, 0,
+                        result,
+                        0x10 + i * 4,
+                        4);
+                }
+
+                WriteU32At(result,
+                    0x10 + 8 * 4,
+                    newC8);
+                WriteU32At(result,
+                    0x10 + 9 * 4,
+                    0xFFFFFFFF);
+                WriteU32At(result,
+                    0x10 + 10 * 4,
+                    0xFFFFFFFF);
+                WriteU32At(result,
+                    0x10 + 11 * 4,
+                    newC11);
+                WriteU32At(result,
+                    0x10 + 12 * 4,
+                    0xFFFFFFFF);
+                WriteU32At(result,
+                    0x10 + 13 * 4,
+                    0xFFFFFFFF);
+
+                return result;
+            }
+        }
+
+        // Helper used by all 3 layouts
+        static void WriteU32At(
+            byte[] data,
+            int offset,
+            uint value)
+        {
+            byte[] b =
+                BitConverter.GetBytes(
+                    value);
+            Array.Copy(b, 0, data,
+                offset, 4);
+        }
     }
 }
