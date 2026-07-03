@@ -20,7 +20,7 @@ namespace HMSTHModdingTool
             "HMSTHModdingTool original as" +
             " HDATextTool by gdkchan";
         const string TOOL_VERSION =
-            "v1.4.6-Beta";
+            "v1.4.7-Beta";
         const string TOOL_AUTHOR =
             "gdkchan + DarthKrayt333" +
             " & HMSTH Community";
@@ -737,6 +737,385 @@ namespace HMSTHModdingTool
                         break;
 
                     // ════════════════════════
+                    // AUTOMATED LBA FIXER
+                    // (Reads real LBAs from ISO
+                    //  and writes into SLUS_202.51
+                    //  LBA table at 0x162460-0x162D30)
+                    // ════════════════════════
+                    case "fixlba":
+                        RequireArgs(args, 2,
+                            "-fixlba <file.iso>");
+                        {
+                            string isoPath =
+                                args[1];
+                            if (!Path
+                                    .IsPathRooted(
+                                        isoPath))
+                                isoPath =
+                                    Path.Combine(
+                                        Directory
+                                            .GetCurrentDirectory(),
+                                        isoPath);
+
+                            Console.ForegroundColor =
+                                ConsoleColor.Cyan;
+                            Console.WriteLine(
+                                "Auto-fixing LBA" +
+                                " table in" +
+                                " SLUS_202.51" +
+                                " inside ISO...");
+                            Console.ResetColor();
+
+                            int changes =
+                                HarvestIso.FixLba(
+                                    isoPath);
+
+                            if (changes == 0)
+                            {
+                                Console.ForegroundColor =
+                                    ConsoleColor.Green;
+                                Console.WriteLine(
+                                    "  LBA table" +
+                                    " already" +
+                                    " correct." +
+                                    " No changes" +
+                                    " needed.");
+                                Console.ResetColor();
+                            }
+                            else
+                            {
+                                Console.ForegroundColor =
+                                    ConsoleColor.Green;
+                                Console.WriteLine(
+                                    "  Patched " +
+                                    changes +
+                                    " LBA" +
+                                    " entries" +
+                                    " in ISO.");
+                                Console.ResetColor();
+                            }
+                        }
+                        break;
+
+                    // ════════════════════════
+                    // FIXISOONLY - Just repairs
+                    // ISO structure (renamed
+                    // from old fixiso)
+                    // ════════════════════════
+                    case "fixisoonly":
+                        RequireArgs(args, 2,
+                            "-fixisoonly" +
+                            " <file.iso>");
+                        {
+                            string isoPath =
+                                args[1];
+                            if (!Path
+                                    .IsPathRooted(
+                                        isoPath))
+                                isoPath =
+                                    Path.Combine(
+                                        Directory
+                                            .GetCurrentDirectory(),
+                                        isoPath);
+
+                            Console.ForegroundColor =
+                                ConsoleColor.Cyan;
+                            Console.WriteLine(
+                                "Repairing ISO" +
+                                " structure...");
+                            Console.ResetColor();
+
+                            IsoRepair.FixIso(
+                                isoPath);
+                        }
+                        break;
+
+                    // ════════════════════════
+                    // FIXISO - Does everything:
+                    // 1. Repairs ISO structure
+                    // 2. Patches PS2 logo
+                    // 3. Fixes LBA table
+                    // ════════════════════════
+                    case "fixiso":
+                        RequireArgs(args, 2,
+                            "-fixiso <file.iso>");
+                        {
+                            string isoPath =
+                                args[1];
+                            if (!Path
+                                    .IsPathRooted(
+                                        isoPath))
+                                isoPath =
+                                    Path.Combine(
+                                        Directory
+                                            .GetCurrentDirectory(),
+                                        isoPath);
+
+                            Console.ForegroundColor =
+                                ConsoleColor.Cyan;
+                            Console.WriteLine(
+                                "═════════════════" +
+                                "═════════════════");
+                            Console.WriteLine(
+                                " FIXISO - Full" +
+                                " Auto Fix");
+                            Console.WriteLine(
+                                "═════════════════" +
+                                "═════════════════");
+                            Console.ResetColor();
+
+                            // ─── STEP 1: Fix ISO
+                            // structure
+                            Console.WriteLine();
+                            Console.ForegroundColor =
+                                ConsoleColor.Yellow;
+                            Console.WriteLine(
+                                "[STEP 1/3]" +
+                                " Repairing ISO" +
+                                " structure...");
+                            Console.ResetColor();
+
+                            try
+                            {
+                                IsoRepair.FixIso(
+                                    isoPath);
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.ForegroundColor
+                                    = ConsoleColor
+                                        .Yellow;
+                                Console.WriteLine(
+                                    "  Step 1 warning:"
+                                    + " " + ex.Message);
+                                Console.ResetColor();
+                            }
+
+                            // ─── STEP 2: Fix
+                            // PS2 logo
+                            Console.WriteLine();
+                            Console.ForegroundColor =
+                                ConsoleColor.Yellow;
+                            Console.WriteLine(
+                                "[STEP 2/3]" +
+                                " Fixing PS2 logo" +
+                                " + Master Disc" +
+                                " markers...");
+                            Console.ResetColor();
+
+                            try
+                            {
+                                IsoLogoPatcher
+                                    .PatchIso(
+                                        isoPath);
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.ForegroundColor
+                                    = ConsoleColor
+                                        .Yellow;
+                                Console.WriteLine(
+                                    "  Step 2 warning:"
+                                    + " " + ex.Message);
+                                Console.ResetColor();
+                            }
+
+                            // ─── STEP 3: Fix LBA
+                            // table in SLUS
+                            Console.WriteLine();
+                            Console.ForegroundColor =
+                                ConsoleColor.Yellow;
+                            Console.WriteLine(
+                                "[STEP 3/3]" +
+                                " Fixing LBA table" +
+                                " in SLUS_202.51" +
+                                "...");
+                            Console.ResetColor();
+
+                            try
+                            {
+                                int changes =
+                                    HarvestIso
+                                        .FixLba(
+                                            isoPath);
+
+                                if (changes == 0)
+                                {
+                                    Console.ForegroundColor
+                                        = ConsoleColor
+                                            .Green;
+                                    Console.WriteLine(
+                                        "  LBA table" +
+                                        " already" +
+                                        " correct.");
+                                    Console.ResetColor();
+                                }
+                                else
+                                {
+                                    Console.ForegroundColor
+                                        = ConsoleColor
+                                            .Green;
+                                    Console.WriteLine(
+                                        "  Patched " +
+                                        changes +
+                                        " LBA" +
+                                        " entries.");
+                                    Console.ResetColor();
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.ForegroundColor
+                                    = ConsoleColor
+                                        .Yellow;
+                                Console.WriteLine(
+                                    "  Step 3 warning:"
+                                    + " " + ex.Message);
+                                Console.ResetColor();
+                            }
+
+                            Console.WriteLine();
+                            Console.ForegroundColor =
+                                ConsoleColor.Green;
+                            Console.WriteLine(
+                                "═════════════════" +
+                                "═════════════════");
+                            Console.WriteLine(
+                                " ALL DONE! ISO is" +
+                                " ready to play.");
+                            Console.WriteLine(
+                                "═════════════════" +
+                                "═════════════════");
+                            Console.ResetColor();
+                        }
+                        break;
+
+                    // ════════════════════════
+                    // PS2 LOGO FIXER
+                    // ════════════════════════
+                    case "fixps2logo":
+                        RequireArgs(args, 2,
+                            "-fixps2logo" +
+                            " <file.iso>");
+                        {
+                            string isoPath =
+                                args[1];
+                            if (!Path
+                                    .IsPathRooted(
+                                        isoPath))
+                                isoPath =
+                                    Path.Combine(
+                                        Directory
+                                            .GetCurrentDirectory(),
+                                        isoPath);
+
+                            IsoLogoPatcher.PatchIso(
+                                isoPath);
+                        }
+                        break;
+
+                    // ════════════════════════
+                    // ISO / BIN CONVERTER
+                    // ════════════════════════
+                    case "convertiso":
+                        RequireArgs(args, 3,
+                            "-convertiso" +
+                            " <input>" +
+                            " <output>");
+                        {
+                            string inPath =
+                                args[1];
+                            string outPath =
+                                args[2];
+                            if (!Path
+                                    .IsPathRooted(
+                                        inPath))
+                                inPath =
+                                    Path.Combine(
+                                        Directory
+                                            .GetCurrentDirectory(),
+                                        inPath);
+                            if (!Path
+                                    .IsPathRooted(
+                                        outPath))
+                                outPath =
+                                    Path.Combine(
+                                        Directory
+                                            .GetCurrentDirectory(),
+                                        outPath);
+
+                            IsoConverter.Convert(
+                                inPath,
+                                outPath);
+                        }
+                        break;
+
+                    // ════════════════════════
+                    // FAKEYEAR - Change year
+                    // on files with a bigger year
+                    // than 2001
+                    // Usage:
+                    //   fakeyear <file.iso>
+                    //     (defaults to 2001)
+                    //   fakeyear <year>
+                    //              <file.iso>
+                    // ════════════════════════
+                    case "fakeyear":
+                        RequireArgs(args, 2,
+                            "-fakeyear [year]" +
+                            " <file.iso>");
+                        {
+                            int fakeYear;
+                            string isoPath;
+
+                            // Try parse first arg
+                            // as year
+                            if (args.Length >= 3 &&
+                                int.TryParse(
+                                    args[1],
+                                    out fakeYear))
+                            {
+                                // Format:
+                                // fakeyear <year>
+                                //   <file>
+                                isoPath = args[2];
+                            }
+                            else
+                            {
+                                // Format:
+                                // fakeyear <file>
+                                // (default year
+                                //  to 2001)
+                                fakeYear = 2001;
+                                isoPath = args[1];
+
+                                Console.ForegroundColor
+                                    = ConsoleColor
+                                        .DarkGray;
+                                Console.WriteLine(
+                                    "  (No year" +
+                                    " specified," +
+                                    " using default:" +
+                                    " 2001)");
+                                Console.ResetColor();
+                            }
+
+                            if (!Path
+                                    .IsPathRooted(
+                                        isoPath))
+                                isoPath =
+                                    Path.Combine(
+                                        Directory
+                                            .GetCurrentDirectory(),
+                                        isoPath);
+
+                            IsoFakeYear.Run(
+                                isoPath,
+                                fakeYear);
+                        }
+                        break;
+
+                    // ════════════════════════
                     // RDTB COMMANDS
                     // ════════════════════════
                     case "irdtb":
@@ -1304,197 +1683,6 @@ namespace HMSTHModdingTool
                         }
                         break;
 
-                    case "c3d":
-                        {
-                            float scaleC3d = 1.0f;
-                            string c3dNormals = "match";
-                            float[] c3dCustomNorm = null;
-                            bool c3dDeleteAll = false;
-                            string c3dFormat = "default";
-                            var cleanC3d =
-                                new System.Collections
-                                    .Generic.List<string>();
-                            int ic3d = 1;
-                            while (ic3d < args.Length)
-                            {
-                                string a = args[ic3d];
-                                string al = a.ToLower();
-                                if (al == "--scale" ||
-                                    al == "-scale" ||
-                                    al == "-s")
-                                {
-                                    if (ic3d + 1 <
-                                        args.Length)
-                                    {
-                                        float.TryParse(
-                                            args[ic3d + 1],
-                                            out scaleC3d);
-                                        if (scaleC3d <= 0)
-                                            scaleC3d = 1.0f;
-                                        ic3d += 2;
-                                        continue;
-                                    }
-                                }
-                                else if (al == "--normals")
-                                {
-                                    if (ic3d + 1 <
-                                        args.Length)
-                                    {
-                                        c3dNormals =
-                                            args[ic3d + 1]
-                                            .ToLower();
-                                        ic3d += 2;
-                                        continue;
-                                    }
-                                }
-                                else if (al ==
-                                    "--normals-xyz")
-                                {
-                                    if (ic3d + 1 <
-                                        args.Length)
-                                    {
-                                        var parts =
-                                            args[ic3d + 1]
-                                            .Split(',');
-                                        if (parts.Length
-                                            >= 3)
-                                        {
-                                            c3dCustomNorm
-                                                = new
-                                                float[3];
-                                            float.TryParse(
-                                                parts[0],
-                                                out c3dCustomNorm[0]);
-                                            float.TryParse(
-                                                parts[1],
-                                                out c3dCustomNorm[1]);
-                                            float.TryParse(
-                                                parts[2],
-                                                out c3dCustomNorm[2]);
-                                            c3dNormals
-                                                = "custom";
-                                        }
-                                        ic3d += 2;
-                                        continue;
-                                    }
-                                }
-                                else if (al == "-all" ||
-                                    al == "--all")
-                                {
-                                    c3dDeleteAll = true;
-                                    ic3d++;
-                                    continue;
-                                }
-                                else if (al == "--small" ||
-                                    al == "-small")
-                                {
-                                    c3dFormat = "small";
-                                    ic3d++;
-                                    continue;
-                                }
-                                else if (al == "--mirrored"
-                                    || al == "-mirrored"
-                                    || al == "--mirror"
-                                    || al == "-mirror")
-                                {
-                                    c3dFormat = "mirrored";
-                                    ic3d++;
-                                    continue;
-                                }
-                                else if (al == "--big" ||
-                                    al == "-big")
-                                {
-                                    c3dFormat = "big";
-                                    ic3d++;
-                                    continue;
-                                }
-                                cleanC3d.Add(a);
-                                ic3d++;
-                            }
-
-                            if (cleanC3d.Count == 2)
-                            {
-                                string folder =
-                                    cleanC3d[0];
-                                string outFolder =
-                                    cleanC3d[1];
-
-                                if (RDTBBatchFolder
-                                    .IsBatchFolder(
-                                        folder))
-                                {
-                                    Console
-                                        .ForegroundColor =
-                                        ConsoleColor.Cyan;
-                                    Console.WriteLine(
-                                        "[Auto-detect]"
-                                        + " Batch folder"
-                                        + " format -> C#"
-                                        + " rebuild ("
-                                        + c3dFormat + ")");
-                                    Console.ResetColor();
-                                    RDTBBatchFolder
-                                        .BuildFromBatchFolder(
-                                            folder,
-                                            outFolder,
-                                            c3dNormals,
-                                            c3dCustomNorm,
-                                            c3dDeleteAll,
-                                            c3dFormat);
-                                }
-                                else
-                                {
-                                    string mfp =
-                                        Path.Combine(
-                                            folder,
-                                            "rebuild_manifest"
-                                            + ".json");
-                                    bool isSrdbFolder
-                                        = false;
-                                    if (File.Exists(mfp))
-                                    {
-                                        string mfc =
-                                            File
-                                                .ReadAllText(
-                                                    mfp);
-                                        isSrdbFolder =
-                                            mfc.Contains(
-                                            "\"embedded_rdtbs\"");
-                                    }
-                                    if (isSrdbFolder)
-                                    {
-                                        SRDBArchive
-                                            .Create3D(
-                                                folder,
-                                                outFolder,
-                                                scaleC3d);
-                                    }
-                                    else
-                                    {
-                                        Model3D.Create(
-                                            folder,
-                                            outFolder,
-                                            scaleC3d);
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                Console.WriteLine(
-                                    "Usage: c3d "
-                                    + "<folder> "
-                                    + "<output> "
-                                    + "[--scale N] "
-                                    + "[--normals MODE] "
-                                    + "[--normals-xyz "
-                                    + "X,Y,Z] [-all] "
-                                    + "[--small] "
-                                    + "[--mirrored] "
-                                    + "[--big]");
-                            }
-                        }
-                        break;
-
 
                     // ════════════════════════
                     // BATCH TOOLS (NEW v1.4.6)
@@ -1681,6 +1869,15 @@ namespace HMSTHModdingTool
                                 cbClean.Add(a);
                                 icb++;
                             }
+
+                            // cbatches ALWAYS defaults
+                            // to mirror regardless of
+                            // source format
+                            if (cbFormat == "default")
+                            {
+                                cbFormat = "mirrored";
+                            }
+
                             if (cbClean.Count == 2)
                             {
                                 RDTBBatchFolder
@@ -1775,6 +1972,34 @@ namespace HMSTHModdingTool
                             + " <out.rdtb>");
                         RDTBConverter.MirroredToBig(
                             args[1], args[2]);
+                        break;
+
+
+                    // ════════════════════════
+                    // 3D MODEL DIAGNOSTICS
+                    // ════════════════════════
+                    case "imodel":
+                    case "inspectmodel":
+                        RequireArgs(args, 2,
+                            "-imodel <file.rdtb>");
+                        RDTBInspector.InspectModel(
+                            args[1]);
+                        break;
+
+                    case "iobj":
+                    case "inspectobj":
+                        RequireArgs(args, 2,
+                            "-iobj <file.obj>");
+                        RDTBInspector.InspectObj(
+                            args[1]);
+                        break;
+
+                    case "idae":
+                    case "inspectdae":
+                        RequireArgs(args, 2,
+                            "-idae <file.dae>");
+                        RDTBInspector.InspectDae(
+                            args[1]);
                         break;
 
                     // ════════════════════════
@@ -2207,7 +2432,10 @@ namespace HMSTHModdingTool
                     "comp",
                     "compress",   "uncompress",
                     "xtxt",       "ctxt",
-                    "fixelf",
+                    "fixelf",     "fixlba",
+                    "fixiso",     "fixisoonly",
+                    "convertiso", "fixps2logo",
+                    "fakeyear",
                     "irdtb",      "irdtbnb",
                     "xrdtb",      "crdtb",
                     "srdtb",      "rrdtb",
@@ -2248,6 +2476,9 @@ namespace HMSTHModdingTool
                     "rdtbbig2mirror",
                     "mirror2big",   "mirrored2big",
                     "rdtbmirror2big",
+                    "imodel",    "inspectmodel",
+                    "iobj",      "inspectobj",
+                    "idae",      "inspectdae",
                 };
 
             bool firstIsCommand =
@@ -2347,6 +2578,266 @@ namespace HMSTHModdingTool
                 " <lba> <size>");
             Console.WriteLine();
 
+            // ── ISO LBA AUTO-FIXER (NEW) ──────
+            Console.ForegroundColor =
+                ConsoleColor.White;
+            Console.WriteLine(
+                "=== ISO LBA Auto-Fixer" +
+                " (NEW) ===");
+            Console.ResetColor();
+            Console.WriteLine(
+                "  -fixlba <file.iso>");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    Auto-reads real LBAs" +
+                " from ISO and writes new");
+            Console.WriteLine(
+                "    LBA table into" +
+                " SLUS_202.51 at offset" +
+                " 0x162460-0x162D30.");
+            Console.WriteLine(
+                "    ONLY the LBA table" +
+                " is modified. Nothing" +
+                " else touched.");
+            Console.WriteLine(
+                "    Supports ISO, BIN," +
+                " RAW 2048/2352/2336" +
+                " formats.");
+            Console.ResetColor();
+            Console.ForegroundColor =
+                ConsoleColor.DarkYellow;
+            Console.WriteLine(
+                "  Example:");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    tool.exe fixlba" +
+                " HMSTH_MODDED.iso");
+            Console.ResetColor();
+            Console.WriteLine();
+
+
+            // ── ISO REPAIR / PS2 LOGO / CONVERT ───
+            Console.ForegroundColor =
+                ConsoleColor.White;
+            Console.WriteLine(
+                "=== ISO Commands" +
+                " ===");
+            Console.ResetColor();
+
+            Console.WriteLine(
+                "  -fixiso <file.iso>");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    ALL-IN-ONE: Repairs" +
+                " ISO + Patches PS2" +
+                " logo + Fixes LBA" +
+                " table");
+            Console.WriteLine(
+                "    Automatically runs" +
+                " all 3 fixes in the" +
+                " correct order.");
+            Console.ResetColor();
+
+            Console.WriteLine();
+            Console.WriteLine(
+                "  -fixisoonly" +
+                " <file.iso>");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    Only repairs ISO" +
+                " structure (no logo," +
+                " no LBA fix).");
+            Console.ResetColor();
+
+            Console.WriteLine();
+            Console.WriteLine(
+                "  -fixps2logo" +
+                " <file.iso>");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    Only fixes PS2" +
+                " logo + Master Disc" +
+                " markers.");
+            Console.ResetColor();
+
+            Console.WriteLine();
+            Console.WriteLine(
+                "  -fixlba" +
+                " <file.iso>");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    Only fixes LBA" +
+                " table in SLUS_202.51.");
+            Console.ResetColor();
+            Console.WriteLine();
+
+            // ── FAKE YEAR OF THE FILES ───
+            Console.ForegroundColor =
+                ConsoleColor.White;
+            Console.WriteLine(
+                "=== Change Year" +
+                " ===");
+            Console.ResetColor();
+
+            Console.WriteLine(
+                "  -fakeyear" +
+                " [year] <file.iso>");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    Changes year on" +
+                " all files with year" +
+                " > 2001 to your year.");
+            Console.WriteLine(
+                "    Leaves files with" +
+                " year <= 2001" +
+                " unchanged.");
+            Console.WriteLine(
+                "    Only changes year" +
+                " - month/day/time" +
+                " stay the same.");
+            Console.WriteLine(
+                "    Also patches the" +
+                " ISO's own PVD dates.");
+            Console.ResetColor();
+            Console.ForegroundColor =
+                ConsoleColor.DarkYellow;
+            Console.WriteLine(
+                "  Examples:");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    fakeyear 2000" +
+                " HMSTH.iso");
+            Console.WriteLine(
+                "    fakeyear HMSTH.iso" +
+                "  (defaults to 2001)");
+            Console.ResetColor();
+
+            // ── Audio / Music ──────────────────
+            Console.ForegroundColor =
+                ConsoleColor.Cyan;
+            Console.WriteLine(
+                "=== Audio / Music ===");
+            Console.ResetColor();
+
+            Console.WriteLine(
+                "  -cmusic <input.vag>");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    Converts a looped" +
+                " .VAG file into PS2" +
+                " .BD/.HD/.SQ music.");
+            Console.WriteLine(
+                "    Sample rate is" +
+                " auto-detected from" +
+                " the VAG.");
+            Console.WriteLine(
+                "    Output goes into a" +
+                " subfolder named after" +
+                " the VAG.");
+            Console.ResetColor();
+
+            Console.WriteLine();
+            Console.WriteLine(
+                "  -xvag <bd> <hd>" +
+                " <index> [output.vag]");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    Extracts a single" +
+                " VAG from BD/HD bank.");
+            Console.ResetColor();
+
+            Console.WriteLine();
+            Console.WriteLine(
+                "  -xvag all <bd> <hd>" +
+                " <out_folder>");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    Extracts ALL VAGs" +
+                " from a BD/HD bank" +
+                " into a folder.");
+            Console.ResetColor();
+
+            Console.WriteLine();
+            Console.WriteLine(
+                "  -rvag <index>" +
+                " <input.vag> <bd> <hd>");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    Replaces a single" +
+                " VAG at <index> in" +
+                " BD/HD bank.");
+            Console.ResetColor();
+
+            Console.WriteLine();
+            Console.WriteLine(
+                "  -rvag all <folder>" +
+                " <bd> <hd>");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    Replaces ALL VAGs" +
+                " in a BD/HD bank from" +
+                " a folder of .VAG" +
+                " files.");
+            Console.ResetColor();
+
+            Console.WriteLine();
+            Console.ForegroundColor =
+                ConsoleColor.DarkYellow;
+            Console.WriteLine(
+                "  Music Examples:");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    tool.exe cmusic" +
+                " mymusic.vag");
+            Console.WriteLine(
+                "    tool.exe xvag" +
+                " SE.BD SE.HD 5" +
+                " sound.vag");
+            Console.WriteLine(
+                "    tool.exe xvag all" +
+                " SE.BD SE.HD" +
+                " ./extracted");
+            Console.WriteLine(
+                "    tool.exe rvag 0" +
+                " new.vag SE.BD SE.HD");
+            Console.WriteLine(
+                "    tool.exe rvag all" +
+                " ./mods SE.BD SE.HD");
+            Console.ResetColor();
+            Console.WriteLine();
+
+            Console.ForegroundColor =
+                ConsoleColor.DarkYellow;
+            Console.WriteLine(
+                "  Audio Format Info:");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    BD = Body (raw" +
+                " ADPCM audio data)");
+            Console.WriteLine(
+                "    HD = Header (bank" +
+                " info, sample rates)");
+            Console.WriteLine(
+                "    SQ = Sequence (PS2" +
+                " MIDI that plays BD)");
+            Console.ResetColor();
+            Console.WriteLine();
+
             // ── RDTB ──────────────────────────
             Console.ForegroundColor =
                 ConsoleColor.Magenta;
@@ -2395,6 +2886,26 @@ namespace HMSTHModdingTool
                 "  Bone layout CORRECTED:" +
                 " byte0=self byte3=parent" +
                 " bytes4-15=XYZ");
+            Console.ResetColor();
+            Console.WriteLine();
+
+            Console.ForegroundColor =
+                ConsoleColor.Cyan;
+            Console.WriteLine(
+                "  NEW Diagnostics:");
+            Console.ResetColor();
+            Console.WriteLine(
+                "  -imodel <file.rdtb>"
+                + "  (per-batch tri/vc"
+                + " stats + memory)");
+            Console.WriteLine(
+                "  -iobj   <file.obj>"
+                + "   (vertices, tris,"
+                + " groups, bounds)");
+            Console.WriteLine(
+                "  -idae   <file.dae>"
+                + "   (geometries, mats,"
+                + " textures)");
             Console.ResetColor();
             Console.WriteLine();
 
@@ -2500,29 +3011,35 @@ namespace HMSTHModdingTool
                 "=== 3D Model Tools ===");
             Console.ResetColor();
             Console.WriteLine(
-                "  -x3d <file.rdtb>" +
-                " <file.gdtb> <base>");
+                "  -x3d <file.rdtb>"
+                + " <file.gdtb> <base>");
             Console.WriteLine(
-                "    Extract 3D models with" +
-                " textures. Creates:");
+                "    Extract for VIEWING"
+                + " only. Creates:");
             Console.WriteLine(
-                "      <base>_obj/");
+                "      <base>_all_obj/"
+                + "  (single OBJ + textures)");
+            Console.WriteLine();
+            Console.ForegroundColor =
+                ConsoleColor.Cyan;
             Console.WriteLine(
-                "      <base>_dae/");
+                "  For MODDING use:");
+            Console.ResetColor();
             Console.WriteLine(
-                "      <base>_all_obj/");
+                "  -xbatches <rdtb>"
+                + " <gdtb> <base>");
             Console.WriteLine(
-                "      <base>_all_dae/");
+                "    Extract per-batch"
+                + " OBJ files (round-"
+                + "trip safe)");
             Console.WriteLine(
-                "  -x3d split <rdtb> <gdtb>" +
-                " <base>  (per-batch split)");
+                "  -cbatches <folder>"
+                + " <out_folder>"
+                + " [--small] [--big]"
+                + " [--mirrored]");
             Console.WriteLine(
-                "  -c3d <models_folder>" +
-                " <output_folder>" +
-                " [--scale N]");
-            Console.WriteLine(
-                "    Rebuild RDTB+GDTB from" +
-                " edited OBJ/DAE files");
+                "    Rebuild RDTB+GDTB"
+                + " (default: mirror)");
             Console.WriteLine();
             Console.ForegroundColor =
                 ConsoleColor.DarkYellow;
@@ -2538,9 +3055,6 @@ namespace HMSTHModdingTool
                 "    tool.exe x3d" +
                 " HAYATO_00000.rdtb" +
                 " HAYATO_00001.gdtb KURT");
-            Console.WriteLine(
-                "    tool.exe c3d" +
-                " BOY_obj BOY_NEW");
             Console.ResetColor();
             Console.WriteLine();
 
