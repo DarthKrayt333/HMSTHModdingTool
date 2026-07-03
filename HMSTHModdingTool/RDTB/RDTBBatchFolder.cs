@@ -787,13 +787,50 @@ namespace HMSTHModdingTool.RDTB
                 bool deleteAll,
                 string targetFormat)
         {
+            RDTBBatchReplacer
+                .TargetRdtbFormat fmt;
+            string fl = (targetFormat
+                ?? "")
+                .ToLower().Trim();
+            switch (fl)
+            {
+                case "big":
+                    fmt = RDTBBatchReplacer
+                        .TargetRdtbFormat
+                        .Big;
+                    break;
+                case "small":
+                    fmt = RDTBBatchReplacer
+                        .TargetRdtbFormat
+                        .Small;
+                    break;
+                case "mirror":
+                case "mirrored":
+                    fmt = RDTBBatchReplacer
+                        .TargetRdtbFormat
+                        .Mirror;
+                    break;
+                case "match":
+                case "auto":
+                    fmt = RDTBBatchReplacer
+                        .TargetRdtbFormat
+                        .Match;
+                    break;
+                default:
+                    // cbatches default
+                    // is ALWAYS mirror
+                    fmt = RDTBBatchReplacer
+                        .TargetRdtbFormat
+                        .Mirror;
+                    break;
+            }
             RDTBBatchReplacer.Build(
                 folderPath,
                 outDir,
                 normalsMode,
                 customNormal,
                 deleteAll,
-                targetFormat);
+                fmt);
         }
 
         private static bool
@@ -864,18 +901,10 @@ namespace HMSTHModdingTool.RDTB
                         break;
                     allV.Add(new float[]
                     {
-                        BitConverter
-                            .ToSingle(
-                                bdata,
-                                vo + 4),
-                        BitConverter
-                            .ToSingle(
-                                bdata,
-                                vo + 8),
-                        BitConverter
-                            .ToSingle(
-                                bdata,
-                                vo + 12)
+                        BitConverter.ToSingle(bdata, vo + 4),
+                        BitConverter.ToSingle(bdata, vo + 8),
+                        BitConverter.ToSingle(bdata, vo + 12),
+                        BitConverter.ToUInt32(bdata, vo + 0)   // bone weight flag
                     });
                     allN.Add(new float[]
                     {
@@ -1055,15 +1084,23 @@ namespace HMSTHModdingTool.RDTB
                     + Path.GetFileName(
                         mtlPath));
                 sw.WriteLine();
-                foreach (float[] v
-                    in allV)
+                for (int i = 0; i < allV.Count; i++)
+                {
+                    float[] v = allV[i];
                     sw.WriteLine("v "
-                        + v[0].ToString(
-                            "F6") + " "
-                        + v[1].ToString(
-                            "F6") + " "
-                        + v[2].ToString(
-                            "F6"));
+                        + v[0].ToString("F6") + " "
+                        + v[1].ToString("F6") + " "
+                        + v[2].ToString("F6"));
+                    // Preserve bone weight flag
+                    // as metadata comment right
+                    // after each vertex line
+                    if (v.Length >= 4)
+                    {
+                        uint flag = (uint)v[3];
+                        sw.WriteLine("#vw "
+                            + flag.ToString("X8"));
+                    }
+                }
                 sw.WriteLine();
                 foreach (float[] uv
                     in allU)
