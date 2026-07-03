@@ -36,6 +36,80 @@ with the new `xbatches`/`cbatches` per-batch workflow.*
 
 ## Changelog
 
+### Version v1.4.7-Beta
+
+- **Added** `fixps2logo` — replicates Disc Patcher
+  v3.0 functionality directly inside the tool
+  (fixes PS2 logo + Master Disc markers so PS2
+  BIOS accepts modded ISOs)
+- **Added** `fixiso` — all-in-one auto-fix command
+  that runs 3 operations in order: repairs ISO
+  structure, patches PS2 logo, fixes LBA table
+  in SLUS_202.51
+- **Added** `fixisoonly` — renamed from old
+  `fixiso` (structure repair only, without logo
+  patch or LBA fix)
+- **Added** `fixps2logo` supports both `.iso`
+  (2048 bytes/sector) and `.bin` (2352 bytes
+  /sector) formats automatically
+- **Added** ISO format preservation — 2048 ISOs
+  stay as 2048 ISO after patching, 2352 BINs
+  stay as 2352 BIN (no forced conversion)
+- **Added** `fakeyear` command — changes year on
+  all files inside the ISO/BIN with year > 2001
+  to your specified year. Files with year ≤ 2001
+  are left unchanged
+- **Added** `fakeyear` also patches the ISO's own
+  PVD dates (Creation, Modification, Expiration,
+  Effective) using the same year > 2001 rule
+- **Added** `fakeyear` also updates Windows
+  Explorer file timestamps (Created, Modified,
+  Accessed) so the ISO appears with the fake
+  year in Windows as well
+- **Added** `fakeyear` defaults to year 2001 if
+  no year is specified (e.g., `fakeyear
+  HMSTH.iso` uses 2001 automatically)
+- **Added** Master Disc marker application
+  (CDVDGEN 1.20, PlayStation Master Disc 2
+  identifiers) via `fixps2logo` — replicates
+  Sony's official master disc format
+- **Added** `cmusic` auto-detects the VAG's
+  sample rate and patches the HD file accordingly
+  (2 bytes at offset 0x68). Previously the HD
+  was hardcoded to 22050 Hz regardless of input
+- **Added** `cmusic` PS2 hardware limit
+  protection — caps sample rate at 48000 Hz
+  (PS2 SPU2 maximum) with a warning message if
+  the input VAG exceeds this
+- **Added** Fully self-contained tool — embedded
+  logo blobs and ECC data directly inside the
+  .exe as Base64 (no external `embedded_blobs.
+  bin` or `ecc_data.bin` files needed)
+- **Added** Universal batch swapping — you can
+  now swap ANY batch in an RDTB with a custom
+  3D model, including BOY's tools, NPCs,
+  animated hair, and body parts (previously
+  only batch_0005 head swap was safe)
+- **Fixed** All non-head batches now render
+  correctly in game with custom meshes
+  (animated hair, body parts, tools when held/
+  used, NPC parts, items)
+- **Fixed** BOY's tools now render correctly
+  in-game with swapped 3D models when he holds
+  or uses them (previously would render doubled
+  or incorrectly)
+- **Known Issue** Tool inventory MENU ICONS
+  still show the ORIGINAL 3D model even after
+  swap. The in-game tool (when BOY holds/uses
+  it) renders correctly with the new mesh, but
+  the inventory/menu preview icon uses a
+  separate render path that isn't updated yet.
+  Fix in development.
+- **Working On** Menu icon batch identification
+  for proper inventory preview swapping
+
+---
+
 ### Version v1.4.6-Beta
 
 - **Added** Per-batch 3D model swapping —
@@ -100,7 +174,7 @@ with the new `xbatches`/`cbatches` per-batch workflow.*
 - **Changed** Default output format for `c3d`
   and `cbatches` is now MIRRORED (smaller
   files, works in any slot, easier to mod)
-- **Known Issue** Only player head batch
+- **Fixed** Only player head batch
   (batch_0005) is currently safe to swap for
   3D model mods — other batches (animated hair,
   tools, body parts) may render incorrectly
@@ -110,11 +184,11 @@ with the new `xbatches`/`cbatches` per-batch workflow.*
   show original 3D model when only the in-game
   batch is swapped (items have separate menu
   render path that's not yet identified)
-- **Working On** Universal batch swapping for
+- **Fixed** Universal batch swapping for
   all batches (animated hair, tools, body
   parts, NPC parts)
 - **Working On** Menu icon batch identification
-  for proper item icon swapping
+  for proper tool item icon swapping
 
 ---
 
@@ -331,52 +405,73 @@ without skeleton visibility in Blender.
 
 ---
 
-### 3D Model Per-Batch Swapping
-As of v1.4.6, only the player head batch
-(batch_0005 in BOY.HDA) is safe to swap with
-a completely new 3D model. Other batches
-(animated hair 30-36, tools 49-99, body parts)
-will render incorrectly when swapped because
-the game's VU1 microprogram expects specific
-vertex layouts for animated batches that the
-current writer doesn't yet replicate.
+### 3D Model Per-Batch Swapping (Updated v1.4.7)
+As of v1.4.7, batch swapping works for ALL batches
+in the RDTB — you can replace animated hair, body
+parts, NPC batches, tools (when used in-game), and
+other items with custom 3D models successfully.
 
-**What works for any batch:**
-- Editing existing vertex positions
-- Modifying UVs and textures
-- Scaling models with `--scale N`
-- Upscaling/downscaling for in-game changes
-- Replacing textures only
+**What works for ANY batch (v1.4.7):**
+- ✅ Swapping with a completely new mesh
+- ✅ Changing vertex count
+- ✅ Editing existing vertex positions
+- ✅ Modifying UVs and textures
+- ✅ Scaling models with `--scale N`
+- ✅ Upscaling/downscaling for in-game changes
+- ✅ Replacing textures only
+- ✅ BOY's tools when he holds/uses them in-game
 
-**What only works for player head (batch_0005):**
-- Swapping with a completely new mesh
-- Changing vertex count
+**Still has one known bug:**
+- ❌ Tool inventory menu icons still show ORIGINAL
+  mesh even after swap (in-game tool renders
+  correctly, only the menu preview is affected)
 
-**Workaround for other batches:**
-- Keep the same vertex count when editing
-- Modify positions/UVs only, don't replace
-  the entire mesh
-- Use `boyscale` for skeleton-level changes
-  that affect mesh proportions
+**Fix coming:**
+- Menu icon batch identification for proper
+  inventory preview swapping
 
 ---
 
-### Menu Icons
-When you swap a batch that has an inventory
-menu icon (like tools in batch 49-99), the
-in-game 3D model updates but the menu icon
-still shows the original model. This is because
-items have a separate render path for menu
-display that hasn't been identified yet.
+### Menu Icons (Still Not Fixed in v1.4.7)
+When you swap a tool batch that has an inventory
+menu icon, the in-game 3D model (the tool BOY
+holds and uses) updates correctly with your new
+mesh. However, the menu icon preview inside the
+inventory/tool menu still shows the ORIGINAL 3D
+model. This is because items have a separate
+render path for menu display that hasn't been
+identified yet.
+
+**What works:**
+- ✅ Tool renders correctly in BOY's hand
+- ✅ Tool animations work with the new mesh
+- ✅ All texture changes apply correctly
+- ✅ Vertex positions and scaling work
+
+**Still broken:**
+- ❌ Inventory menu preview icon uses original mesh
+
+Fix in development for a future update.
 
 ---
 
-### Cross-Character Mesh
-Transplanting a mesh from one character to another
-does not work yet. The game uses per-character
-vertex counts and bone bindings that differ between
-characters. Editing vertices of the same character
-works correctly.
+### PS2 Logo Patching
+Works on both ISO (2048) and BIN (2352) formats
+
+The logo functionality works even if you don't run fakeyear (they're independent features)
+
+Original ISO format is preserved (won't convert 2048 to 2352 permanently)
+
+---
+
+### Audio Sample Rate Limit
+PS2 SPU2 hardware maximum is 48000 Hz
+
+cmusic automatically caps higher rates at 48000 Hz
+
+For proper playback, encode VAGs at 22050-48000 Hz range
+
+22050 Hz or 16000 Hz recommended for smallest file size
 
 ---
 
@@ -529,7 +624,7 @@ What works:
   
   ✅ Edit and reimport modified vertices to game
   
-  ✅ **NEW**: Player head swap with custom 3D models (batch_0005)
+  ✅ **NEW v1.4.7**: Universal batch swap — swap ANY batch (head, hair, body parts, NPCs, tools, items) — full mesh swap now works everywhere
   
   ✅ **NEW**: Per-batch extraction and editing workflow
   
@@ -541,13 +636,7 @@ What works:
   
   ⚠️  Cannot yet change vertex count on standard `c3d` (must keep same)
   
-  ⚠️  Only player head batch (batch_0005) safe to swap with new mesh
-  
-  ❌ Other batches (animated hair, tools, body parts) not yet swappable
-  
   ❌ Menu icons not yet updated when item batches swapped
-  
-  ❌ Cross-character mesh transplant not yet working
 
 ---
 
@@ -1007,6 +1096,38 @@ ctxt clean <in.txt> <text.bin> <ptr.bin> Same without dashes
 
 ---
 
+### PS2 ISO/BIN Commands (NEW v1.4.7)
+-fixiso <file.iso>
+    ALL-IN-ONE auto-fix. Runs 3 fixes in order:
+    1. Repairs ISO structure
+    2. Patches PS2 logo + Master Disc markers
+    3. Fixes LBA table in SLUS_202.51
+
+-fixisoonly <file.iso>
+    Only repairs ISO structure
+    (no logo patch, no LBA fix)
+
+-fixps2logo <file.iso>
+    Replicates Disc Patcher v3.0.
+    Fixes PS2 logo + Master Disc markers.
+    Works on both .iso (2048) and .bin (2352).
+    Preserves the original format.
+
+-fakeyear [year] <file.iso>
+    Changes year on all files with year > 2001
+    to your specified year. Leaves files with
+    year <= 2001 unchanged. Only year is changed
+    (month/day/time stay the same). Also patches
+    the ISO's own PVD dates + Windows file
+    timestamps.
+    Default year is 2001 if not specified.
+
+    Examples:
+      fakeyear 2000 HMSTH.iso
+      fakeyear HMSTH.iso   (defaults to 2001)
+
+---
+
 
 ### GDTB Texture Archive
 -igdtb <file.gdtb> Show archive info
@@ -1098,6 +1219,13 @@ Output is saved automatically:
     Replaces only up to folder count if fewer files.
     
     Example: -rvag all ./sfx SE.BD SE.HD
+
+
+NEW v1.4.7: cmusic now auto-detects the input VAG's
+sample rate and patches the HD file accordingly.
+Previous versions were hardcoded to 22050 Hz. Now
+any sample rate up to 48000 Hz (PS2 hardware max)
+is supported automatically.
 
 
 ---
@@ -1446,11 +1574,15 @@ with your new head:
 
 Done! Your custom head is now in the game.
 
-**Note:** Currently ONLY batch_0005 (head) is safe
-to swap for 3D model mods. Other batches (hair,
-tools, body parts) work for vertex editing but
-not for full mesh swaps. Universal batch swapping
-is in development.
+**Note (v1.4.7):** Universal batch swapping now
+works for ALL batches (head, hair, body parts,
+NPCs, tools). You can swap any batch with a
+custom mesh and it renders correctly in-game.
+The only remaining bug is that tool inventory
+MENU ICONS still show the original mesh even
+after a tool swap — the tool renders correctly
+when BOY holds/uses it, only the menu preview
+is affected. Fix in development.
 
 ### Extract and repack BOY.HDA (Player textures)
 Extract BOY.HDA
@@ -1848,6 +1980,15 @@ HMSTHModdingTool> exit
 HMSTHModdingTool> -x3d BOY_00000.rdtb BOY_00001.gdtb BOY
 
 HMSTHModdingTool> -c3d BOY_obj BOY_NEW
+
+HMSTHModdingTool> fixiso HMSTH_MODDED.iso
+
+HMSTHModdingTool> fixps2logo HMSTH.bin
+
+HMSTHModdingTool> fakeyear 2001 HMSTH.iso
+
+HMSTHModdingTool> cmusic mysong.vag
+
 
 
 
