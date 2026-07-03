@@ -39,7 +39,8 @@ namespace HMSTHModdingTool.RDTB
         public float BindZ { get; set; }
 
         public bool IsRoot =>
-            ParentIndex == 0xFF;
+            ParentIndex == 0xFF
+            || ParentIndex == 0x00;
         public bool HasChild =>
             ChildIndex != 0xFF;
 
@@ -281,7 +282,7 @@ namespace HMSTHModdingTool.RDTB
                     { i };
                 int p = Bones[i].IsRoot
                     ? -1
-                    : Bones[i].ParentIndex;
+                    : (Bones[i].ParentIndex & 0x7F);
                 while (p >= 0 && p < n)
                 {
                     if (visited.Contains(p))
@@ -291,7 +292,7 @@ namespace HMSTHModdingTool.RDTB
                         getLocal(Bones[p]);
                     p = Bones[p].IsRoot
                         ? -1
-                        : Bones[p].ParentIndex;
+                        : (Bones[p].ParentIndex & 0x7F);
                 }
             }
             return world;
