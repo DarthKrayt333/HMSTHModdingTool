@@ -823,7 +823,8 @@ namespace HMSTHModdingTool.RDTB
             Console.ForegroundColor =
                 ConsoleColor.Cyan;
             Console.WriteLine(
-                "[+] HMSTH 3D Extractor v2.1");
+                "[+] HMSTH 3D Extractor"
+                + " v2.2 (viewer)");
             Console.ResetColor();
             Console.WriteLine(
                 new string('=', 60));
@@ -836,7 +837,9 @@ namespace HMSTHModdingTool.RDTB
             Console.WriteLine(
                 "    Base : " + baseName);
             Console.WriteLine(
-                "    LOD sync: ENABLED");
+                "    Mode : VIEW-ONLY"
+                + " (use xbatches for"
+                + " modding)");
             Console.WriteLine(
                 new string('=', 60));
 
@@ -847,15 +850,16 @@ namespace HMSTHModdingTool.RDTB
                 "    Chunks : " +
                 _chunkOffsets.Count);
 
-            // ADDITIVE: detect small/embedded RDTB
-            _isEmbedded = _chunkOffsets.Count <= 11;
+            // Detect small/embedded RDTB
+            _isEmbedded =
+                _chunkOffsets.Count <= 11;
             if (_isEmbedded)
             {
                 Console.ForegroundColor =
                     ConsoleColor.Cyan;
                 Console.WriteLine(
-                    "    Mode   : EMBEDDED" +
-                    " (one combined OBJ)");
+                    "    Mode   : EMBEDDED"
+                    + " (one combined OBJ)");
                 Console.ResetColor();
             }
 
@@ -864,46 +868,21 @@ namespace HMSTHModdingTool.RDTB
             string dr = Path.GetDirectoryName(
                 Path.GetFullPath(rdtbPath));
 
-            string fObj = Path.Combine(
-                dr, baseName + "_obj");
-            string fDae = Path.Combine(
-                dr, baseName + "_dae");
+            // Only ONE folder now: _all_obj
             string fAllObj = Path.Combine(
                 dr, baseName + "_all_obj");
-            string fAllDae = Path.Combine(
-                dr, baseName + "_all_dae");
+            Directory.CreateDirectory(fAllObj);
+            Directory.CreateDirectory(
+                Path.Combine(fAllObj, "textures"));
 
-            foreach (var d in new[]
-                { fObj, fDae, fAllObj, fAllDae })
-                Directory.CreateDirectory(d);
-
-            foreach (var d in new[]
-                { fObj, fDae, fAllObj, fAllDae })
-                Directory.CreateDirectory(
-                    Path.Combine(d, "textures"));
-
-            var tpObj = ExtrTex(gdtbPath,
-                Path.Combine(fObj, "textures"),
-                "[obj]");
-            var tpDae = ExtrTex(gdtbPath,
-                Path.Combine(fDae, "textures"),
-                "[dae]");
             var tpAllObj = ExtrTex(gdtbPath,
                 Path.Combine(fAllObj, "textures"),
                 "[all_obj]");
-            var tpAllDae = ExtrTex(gdtbPath,
-                Path.Combine(fAllDae, "textures"),
-                "[all_dae]");
 
             var batches = LoadMatsAndBatches(
                 out int mci);
 
-            // ADDITIVE: auto-scale oversized
-            // models (items like blueberry)
-            // to fit a reasonable display size.
-            // Computes bounding box across all
-            // batches and scales down if max
-            // dimension exceeds threshold.
+            // Auto-scale oversized models
             if (batches.Count > 0)
             {
                 float mnx = float.MaxValue;
@@ -933,13 +912,6 @@ namespace HMSTHModdingTool.RDTB
                     if (dy > maxDim) maxDim = dy;
                     if (dz > maxDim) maxDim = dz;
 
-                    // Threshold: if model's max
-                    // dimension exceeds 250
-                    // units, scale it down so
-                    // max dim becomes 100 units.
-                    // Tuned so dog house (~100)
-                    // stays unscaled and items
-                    // (~1500) shrink properly.
                     const float TARGET = 100f;
                     const float THRESHOLD = 250f;
 
@@ -956,8 +928,8 @@ namespace HMSTHModdingTool.RDTB
                             "x (model was " +
                             maxDim.ToString(
                                 "F0") +
-                            " units, scaling" +
-                            " to " + TARGET +
+                            " units, scaling"
+                            + " to " + TARGET +
                             ")");
                         Console.ResetColor();
                         foreach (var b in
@@ -995,7 +967,8 @@ namespace HMSTHModdingTool.RDTB
             AssignRanges(batches);
             var groups = GroupByTex(batches);
 
-            // LOD pairing (port of Python)
+            // LOD pairing (still useful for
+            // viewing per-LOD if needed)
             _lodPairings =
                 new Dictionary<int,
                     List<LODSiblingInfo>>();
@@ -1006,71 +979,15 @@ namespace HMSTHModdingTool.RDTB
                     _lodPairings =
                         LODPairer.PairBatches(
                             _batchesPerChunk);
-                    int paired =
-                        _lodPairings.Count;
-                    int sibs = 0;
-                    int toolsBatches = 0;
-                    int toolsPaired = 0;
-                    // Count tools batches across all chunks
-                    foreach (var kv in _batchesPerChunk)
-                    {
-                        var byTex = new Dictionary<int, int>();
-                        foreach (var b in kv.Value)
-                        {
-                            if (!byTex.ContainsKey(b.TexId))
-                                byTex[b.TexId] = 0;
-                            byTex[b.TexId]++;
-                        }
-                        // Largest group = tools
-                        int maxC = 0, toolsTexId = -1;
-                        foreach (var tk in byTex)
-                        {
-                            if (tk.Value > maxC)
-                            {
-                                maxC = tk.Value;
-                                toolsTexId = tk.Key;
-                            }
-                        }
-                        if (maxC >= 4 && kv.Key == 11)
-                        {
-                            foreach (var b in kv.Value)
-                            {
-                                if (b.TexId == toolsTexId)
-                                {
-                                    toolsBatches++;
-                                    if (_lodPairings.ContainsKey(
-                                            b.Index))
-                                        toolsPaired++;
-                                }
-                            }
-                        }
-                    }
-                    foreach (var v in _lodPairings.Values)
-                        sibs += v.Count;
-                    Console.ForegroundColor = ConsoleColor.Green;
-                    Console.WriteLine(
-                        $"[+] LOD: paired {paired} batches /" +
-                        $" {sibs} siblings");
-                    if (toolsBatches > 0)
-                    {
-                        Console.ForegroundColor = toolsPaired
-                            == toolsBatches
-                            ? ConsoleColor.Green
-                            : ConsoleColor.Yellow;
-                        Console.WriteLine(
-                            $"[+] Tools LOD coverage: " +
-                            $"{toolsPaired}/{toolsBatches}" +
-                            $" tool batches paired");
-                    }
-                    Console.ResetColor();
                 }
                 catch (Exception ex)
                 {
                     Console.ForegroundColor =
                         ConsoleColor.Yellow;
                     Console.WriteLine(
-                        "  [!] LOD pairing" +
-                        " failed: " + ex.Message);
+                        "  [!] LOD pairing"
+                        + " failed: " +
+                        ex.Message);
                     Console.ResetColor();
                     _lodPairings =
                         new Dictionary<int,
@@ -1084,51 +1001,44 @@ namespace HMSTHModdingTool.RDTB
 
                 if (_isEmbedded)
                 {
-                    // EMBEDDED MODE: write ONE
-                    // combined OBJ/DAE per folder
-                    // (matches SRDB output format)
-                    WriteEmbeddedSingleObj(
-                        fObj, baseName,
-                        groups, tpObj);
                     WriteEmbeddedSingleObj(
                         fAllObj, baseName,
                         groups, tpAllObj);
-                    WriteEmbeddedSingleDae(
-                        fDae, baseName,
-                        groups, tpDae);
-                    WriteEmbeddedSingleDae(
-                        fAllDae, baseName,
-                        groups, tpAllDae);
                 }
                 else
                 {
-                    // STANDARD MODE: original
-                    // per-tex split (BOY, HAYATO,
-                    // large NPCs, etc.)
-                    WriteObjPerTex(
-                        fObj, groups, tpObj);
-                    WriteDaePerTex(
-                        fDae, groups, tpDae);
-                    WriteAllObj(fAllObj, baseName,
-                        groups, tpAllObj);
-                    WriteAllDae(fAllDae, baseName,
-                        groups, tpAllDae);
+                    WriteAllObj(fAllObj,
+                        baseName, groups,
+                        tpAllObj);
                 }
             }
 
-            foreach (var folder in new[]
-                { fObj, fDae, fAllObj, fAllDae })
-            {
-                WriteManifest(folder, baseName,
-                    rdtbPath, gdtbPath,
-                    batches, groups, mci);
-            }
+            // Manifest (still useful for
+            // reference)
+            WriteManifest(fAllObj, baseName,
+                rdtbPath, gdtbPath,
+                batches, groups, mci);
 
             Console.WriteLine();
             Console.ForegroundColor =
                 ConsoleColor.Green;
             Console.WriteLine(
                 "[OK] Extraction complete!");
+            Console.ResetColor();
+            Console.WriteLine(
+                "     Folder: " + fAllObj);
+            Console.WriteLine();
+            Console.ForegroundColor =
+                ConsoleColor.Cyan;
+            Console.WriteLine(
+                "     For modding,"
+                + " use:");
+            Console.WriteLine(
+                "       xbatches "
+                + Path.GetFileName(rdtbPath)
+                + " "
+                + Path.GetFileName(gdtbPath)
+                + " " + baseName);
             Console.ResetColor();
         }
 
@@ -1203,9 +1113,34 @@ namespace HMSTHModdingTool.RDTB
                 int o = rowsStart + b * 16;
                 if (o + 16 > c0.Length) break;
                 byte pb = c0[o + 3];
-                parents[b] =
-                    (pb == 0xFF || pb >= _boneCount)
-                    ? -1 : pb;
+                // Mask off bit 7 (which is a
+                // flag, possibly mirror or
+                // LR-twin marker). The actual
+                // bone index is in bits 0-6.
+                int parentIdx = pb & 0x7F;
+
+                if (pb == 0xFF || pb == 0x00)
+                {
+                    // Root bone:
+                    // 0xFF = explicit "no parent"
+                    // 0x00 = PS2 sentinel for
+                    //        "this IS the root"
+                    //        (parent=bone0 would
+                    //        be self-reference)
+                    parents[b] = -1;
+                }
+                else if (parentIdx >= _boneCount)
+                {
+                    // Still out of range even
+                    // after masking - treat as
+                    // root
+                    parents[b] = -1;
+                }
+                else
+                {
+                    parents[b] = parentIdx;
+                }
+
                 localT[b] = new Vec3(
                     BitConverter.ToSingle(c0, o + 4),
                     BitConverter.ToSingle(c0, o + 8),
@@ -1452,13 +1387,29 @@ namespace HMSTHModdingTool.RDTB
                     FirstVertex = 0,
                 });
                 for (int i = 0; i < n; i++)
+                {
+                    float vx = rows[i].x;
+                    // W-flag 0xFFFFFFFF means
+                    // "mirror X" — the PS2
+                    // uses this for left/right
+                    // body symmetry. Negate X
+                    // to produce the correct
+                    // mirrored position.
+                    if (rows[i].flag == 0xFFFFFFFF)
+                        vx = -vx;
                     b.Verts.Add(new Vec3(
-                        rows[i].x, rows[i].y,
+                        vx, rows[i].y,
                         rows[i].z));
-                for (int i = n; i < 2 * n; i++)
-                    b.Normals.Add(new Vec3(
-                        rows[i].x, rows[i].y,
+                }
+                for (int i = 0; i < n; i++)
+                {
+                    float vx = rows[i].x;
+                    if (rows[i].flag == 0xFFFFFFFF)
+                        vx = -vx;
+                    b.Verts.Add(new Vec3(
+                        vx, rows[i].y,
                         rows[i].z));
+                }
                 for (int i = 2 * n; i < 3 * n; i++)
                     b.UVs.Add(new Vec2(
                         rows[i].x,
