@@ -59,7 +59,12 @@
     <Compile Include="GDTB\GDTBTexture.cs" />
     <Compile Include="IO\HarvestDataArchive.cs" />
     <Compile Include="IO\HarvestElf.cs" />
+    <Compile Include="IO\HarvestIso.cs" />
     <Compile Include="IO\HarvestText.cs" />
+    <Compile Include="IO\IsoConverter.cs" />
+    <Compile Include="IO\IsoFakeYear.cs" />
+    <Compile Include="IO\IsoLogoPatcher.cs" />
+    <Compile Include="IO\IsoRepair.cs" />
     <Compile Include="RDTB\RDTB3D.cs" />
     <Compile Include="RDTB\RDTBArchive.cs" />
     <Compile Include="Program.cs" />
@@ -74,6 +79,8 @@
     <Compile Include="RDTB\RDTBBatchReplacer.cs" />
     <Compile Include="RDTB\RDTBBatchTools.cs" />
     <Compile Include="RDTB\RDTBConverter.cs" />
+    <Compile Include="RDTB\RDTBInspector.cs" />
+    <Compile Include="RDTB\RDTBObjFolderRouter.cs" />
     <Compile Include="SRDB\SRDB3D.cs" />
     <Compile Include="SRDB\SRDBArchive.cs" />
   </ItemGroup>
