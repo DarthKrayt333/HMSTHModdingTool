@@ -3414,11 +3414,11 @@ namespace HMSTHModdingTool.RDTB
                 }
 
                 W($"<vertices id=" +
-  $"\"{geomId}-verts\">" +
-  "<input semantic=" +
-  "\"POSITION\"" +
-  $" source=\"#{geomId}-pos\"/>" +
-  "</vertices>\n");
+                    $"\"{geomId}-verts\">" +
+                    "<input semantic=" +
+                    "\"POSITION\"" +
+                    $" source=\"#{geomId}-pos\"/>" +
+                    "</vertices>\n");
                 int stride = 1 +
                     (hasN ? 1 : 0) +
                     (hasU ? 1 : 0);
@@ -3500,14 +3500,14 @@ namespace HMSTHModdingTool.RDTB
         }
 
         private void WriteDaeMulti(
-    string path,
-    List<Vec3> av,
-    List<Vec3> an_,
-    List<Vec2> au_,
-    Dictionary<int, List<Tri>> ft,
-    SortedDictionary<int,
-        List<MeshBatch>> groups,
-    List<string> tpaths)
+            string path,
+            List<Vec3> av,
+            List<Vec3> an_,
+            List<Vec2> au_,
+            Dictionary<int, List<Tri>> ft,
+            SortedDictionary<int,
+                List<MeshBatch>> groups,
+            List<string> tpaths)
         {
             using (var f = new StreamWriter(
                 path, false, Encoding.UTF8))
@@ -6026,8 +6026,8 @@ namespace HMSTHModdingTool.RDTB
         }
 
         private byte[] ReassembleRdtb(
-    byte[] originalRdtb,
-    Dictionary<int, byte[]> newChunks)
+            byte[] originalRdtb,
+            Dictionary<int, byte[]> newChunks)
         {
             int ptrCount =
                 BitConverter.ToUInt16(
@@ -6139,7 +6139,7 @@ namespace HMSTHModdingTool.RDTB
         }
 
         private static ManifestData3D
-    LoadManifest(string path)
+            LoadManifest(string path)
         {
             string json = File.ReadAllText(
                 path, Encoding.UTF8);
