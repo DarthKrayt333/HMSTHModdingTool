@@ -6,28 +6,6 @@ using System.Text;
 
 namespace HMSTHModdingTool.RDTB
 {
-    // ═════════════════════════════════════════════
-    // BONE RECORD  (16 bytes per bone)
-    // ═════════════════════════════════════════════
-    // CORRECTED LAYOUT v2.0 (verified against
-    // working Python _compute_bone_world_t and
-    // successful boyscale modifications)
-    //
-    // Byte layout per 16-byte bone record:
-    //  0x00  uint8    self_index
-    //  0x01  uint8    flags_byte1
-    //  0x02  uint8    child_index  (0xFF = none)
-    //  0x03  uint8    parent_index (0xFF = root)
-    //  0x04  float32  bind_x  (local translation)
-    //  0x08  float32  bind_y  (local translation)
-    //  0x0C  float32  bind_z  (local translation)
-    //
-    // NOTE: The old RDTBArchive.cs had this REVERSED
-    // (floats at 0-11, indices at 12-15).
-    // The Python extractor which successfully scales
-    // bones reads parent at byte+3, floats at +4/+8/+12.
-    // This corrected layout matches the Python.
-    // ═════════════════════════════════════════════
     internal class RDTBBone
     {
         public byte SelfIndex { get; set; }
@@ -46,41 +24,27 @@ namespace HMSTHModdingTool.RDTB
 
         public byte[] RawBytes { get; set; }
 
-        // ─────────────────────────────────────
-        // Parse from raw bytes (CORRECTED)
-        // ─────────────────────────────────────
         public static RDTBBone FromBytes(
             byte[] data, int offset)
         {
             byte[] raw = new byte[16];
             Array.Copy(data, offset, raw, 0, 16);
-
             return new RDTBBone
             {
-                SelfIndex =
-                    data[offset + 0],
-                FlagsByte1 =
-                    data[offset + 1],
-                ChildIndex =
-                    data[offset + 2],
-                ParentIndex =
-                    data[offset + 3],
-                BindX =
-                    BitConverter.ToSingle(
-                        data, offset + 4),
-                BindY =
-                    BitConverter.ToSingle(
-                        data, offset + 8),
-                BindZ =
-                    BitConverter.ToSingle(
-                        data, offset + 12),
+                SelfIndex = data[offset + 0],
+                FlagsByte1 = data[offset + 1],
+                ChildIndex = data[offset + 2],
+                ParentIndex = data[offset + 3],
+                BindX = BitConverter.ToSingle(
+                    data, offset + 4),
+                BindY = BitConverter.ToSingle(
+                    data, offset + 8),
+                BindZ = BitConverter.ToSingle(
+                    data, offset + 12),
                 RawBytes = raw,
             };
         }
 
-        // ─────────────────────────────────────
-        // Serialize back to 16 bytes (CORRECTED)
-        // ─────────────────────────────────────
         public byte[] ToBytes()
         {
             byte[] buf = new byte[16];
@@ -88,14 +52,11 @@ namespace HMSTHModdingTool.RDTB
             buf[1] = FlagsByte1;
             buf[2] = ChildIndex;
             buf[3] = ParentIndex;
-            Array.Copy(
-                BitConverter.GetBytes(BindX),
+            Array.Copy(BitConverter.GetBytes(BindX),
                 0, buf, 4, 4);
-            Array.Copy(
-                BitConverter.GetBytes(BindY),
+            Array.Copy(BitConverter.GetBytes(BindY),
                 0, buf, 8, 4);
-            Array.Copy(
-                BitConverter.GetBytes(BindZ),
+            Array.Copy(BitConverter.GetBytes(BindZ),
                 0, buf, 12, 4);
             return buf;
         }
@@ -119,22 +80,25 @@ namespace HMSTHModdingTool.RDTB
         }
     }
 
-    // ═════════════════════════════════════════════
-    // RDTB CHUNK
-    // ═════════════════════════════════════════════
     internal class RDTBChunk
     {
         public int Index { get; set; }
+        // ── NEW: original slot number (0-13) ──
+        public int SlotIndex { get; set; }
         public int Offset { get; set; }
         public int Size { get; set; }
         public byte[] Data { get; set; }
+        public int TotalChunks { get; set; }
+            = 14;
 
         public string Label =>
-            RDTBArchive.GetChunkLabel(Index);
+            RDTBArchive.GetChunkLabel(
+                SlotIndex, TotalChunks);
         public string Description =>
-            RDTBArchive.GetChunkDesc(Index);
+            RDTBArchive.GetChunkDesc(
+                SlotIndex, TotalChunks);
         public string Filename =>
-            $"{Index:D2}_{Label}.bin";
+            $"{SlotIndex:D2}_{Label}.bin";
 
         public bool HasEofTerminator
         {
@@ -205,8 +169,7 @@ namespace HMSTHModdingTool.RDTB
                 if (Data == null ||
                     Data.Length == 0)
                     return "";
-                int len =
-                    Math.Min(8, Data.Length);
+                int len = Math.Min(8, Data.Length);
                 var sb = new StringBuilder();
                 for (int i = 0; i < len; i++)
                 {
@@ -219,9 +182,6 @@ namespace HMSTHModdingTool.RDTB
         }
     }
 
-    // ═════════════════════════════════════════════
-    // RDTB SKELETON
-    // ═════════════════════════════════════════════
     internal class RDTBSkeleton
     {
         public int BoneCount { get; set; }
@@ -231,44 +191,27 @@ namespace HMSTHModdingTool.RDTB
         public List<int> GetRoots()
         {
             var roots = new List<int>();
-            for (int i = 0;
-                 i < Bones.Count; i++)
-            {
+            for (int i = 0; i < Bones.Count; i++)
                 if (Bones[i].IsRoot)
                     roots.Add(i);
-            }
             return roots;
         }
 
         public List<int> GetChildrenOf(int idx)
         {
             var ch = new List<int>();
-            for (int i = 0;
-                 i < Bones.Count; i++)
-            {
+            for (int i = 0; i < Bones.Count; i++)
                 if (Bones[i].ParentIndex == idx)
                     ch.Add(i);
-            }
             return ch;
         }
 
-        // ─────────────────────────────────────
-        // Compute world-space translations
-        // (same algorithm as Python
-        //  _compute_bone_world_t)
-        // ─────────────────────────────────────
         public float[] ComputeWorldX()
-        {
-            return ComputeWorldAxis(b => b.BindX);
-        }
+            => ComputeWorldAxis(b => b.BindX);
         public float[] ComputeWorldY()
-        {
-            return ComputeWorldAxis(b => b.BindY);
-        }
+            => ComputeWorldAxis(b => b.BindY);
         public float[] ComputeWorldZ()
-        {
-            return ComputeWorldAxis(b => b.BindZ);
-        }
+            => ComputeWorldAxis(b => b.BindZ);
 
         private float[] ComputeWorldAxis(
             Func<RDTBBone, float> getLocal)
@@ -278,31 +221,26 @@ namespace HMSTHModdingTool.RDTB
             for (int i = 0; i < n; i++)
             {
                 world[i] = getLocal(Bones[i]);
-                var visited = new HashSet<int>
-                    { i };
+                var visited =
+                    new HashSet<int> { i };
                 int p = Bones[i].IsRoot
                     ? -1
                     : (Bones[i].ParentIndex & 0x7F);
                 while (p >= 0 && p < n)
                 {
-                    if (visited.Contains(p))
-                        break;
+                    if (visited.Contains(p)) break;
                     visited.Add(p);
-                    world[i] +=
-                        getLocal(Bones[p]);
+                    world[i] += getLocal(Bones[p]);
                     p = Bones[p].IsRoot
                         ? -1
-                        : (Bones[p].ParentIndex & 0x7F);
+                        : (Bones[p].ParentIndex
+                           & 0x7F);
                 }
             }
             return world;
         }
     }
 
-    // ═════════════════════════════════════════════
-    // MATERIAL RECORD (from chunk 8)
-    // 8 bytes per record in material table
-    // ═════════════════════════════════════════════
     internal class RDTBMaterialRecord
     {
         public int Index { get; set; }
@@ -322,23 +260,16 @@ namespace HMSTHModdingTool.RDTB
         }
     }
 
-    // ═════════════════════════════════════════════
-    // EMBEDDED RDTB INFO (for SRDB detection)
-    // ═════════════════════════════════════════════
     internal class EmbeddedRDTBInfo
     {
         public int Offset { get; set; }
         public int Size { get; set; }
         public int PtrCount { get; set; }
         public int BoneCount { get; set; }
-        public List<int> ChunkOffsets
-        { get; set; }
+        public List<int> ChunkOffsets { get; set; }
         public byte[] RawData { get; set; }
     }
 
-    // ═════════════════════════════════════════════
-    // MANIFEST DATA CLASSES
-    // ═════════════════════════════════════════════
     internal class RDTBManifest
     {
         public string Tool { get; set; }
@@ -349,19 +280,23 @@ namespace HMSTHModdingTool.RDTB
         public string Unk08Hex { get; set; }
         public int PtrCount { get; set; }
         public int BoneCount { get; set; }
+        // ── NEW: raw 14-slot table from original
+        public int[] OriginalSlotTable { get; set; }
         public int ChunkCount =>
             Chunks?.Count ?? 0;
         public List<RDTBManifestChunk>
-                      Chunks
+            Chunks
         { get; set; }
         public List<EmbeddedRDTBManifest>
-                      EmbeddedRdtbs
+            EmbeddedRdtbs
         { get; set; }
     }
 
     internal class RDTBManifestChunk
     {
         public int Index { get; set; }
+        // ── NEW: original slot number 0-13 ──
+        public int SlotIndex { get; set; }
         public string Filename { get; set; }
         public string Label { get; set; }
         public string Description { get; set; }
@@ -384,15 +319,8 @@ namespace HMSTHModdingTool.RDTB
         public string Filename { get; set; }
     }
 
-    // ═════════════════════════════════════════════
-    // RDTB ARCHIVE  (main class) v2.0
-    // CORRECTED bone layout + new features
-    // ═════════════════════════════════════════════
     public class RDTBArchive
     {
-        // ─────────────────────────────────────
-        // CONSTANTS
-        // ─────────────────────────────────────
         private const int HEADER_SIZE = 0x48;
         private const int OFFSET_TBL_START = 0x10;
         private const int OFFSET_TBL_SLOTS = 14;
@@ -400,12 +328,9 @@ namespace HMSTHModdingTool.RDTB
         private const int BONE_REC_SIZE = 16;
         private const int MAT_REC_SIZE = 8;
 
-        // VIF signature bytes
         private const byte VIF_B0 = 0x00;
         private const byte VIF_B1 = 0x80;
         private const byte VIF_B3 = 0x6C;
-
-        // EOF terminator pattern
         private const uint FLAG_EOF = 0x70000000;
 
         private const string TOOL_VERSION =
@@ -414,17 +339,12 @@ namespace HMSTHModdingTool.RDTB
             "gdkchan (original), " +
             "DarthKrayt333 (upgrade v2.0)";
         private const string TOOL_GAME =
-            "Harvest Moon Save The Homeland" +
-            " (PS2)";
+            "Harvest Moon Save The Homeland (PS2)";
 
         private static readonly byte[] MAGIC =
-        {
-            0x52, 0x44, 0x54, 0x42  // "RDTB"
-        };
+            { 0x52, 0x44, 0x54, 0x42 };
         private static readonly byte[] SRDB_MAGIC =
-        {
-            0x53, 0x52, 0x44, 0x42  // "SRDB"
-        };
+            { 0x53, 0x52, 0x44, 0x42 };
         private static readonly byte[] EOF_TERM =
         {
             0x00, 0x00, 0x00, 0x70,
@@ -433,9 +353,6 @@ namespace HMSTHModdingTool.RDTB
             0x00, 0x00, 0x00, 0x00,
         };
 
-        // ─────────────────────────────────────
-        // PRIVATE FIELDS
-        // ─────────────────────────────────────
         private string _filepath;
         private byte[] _data;
         private byte[] _unk08;
@@ -445,58 +362,45 @@ namespace HMSTHModdingTool.RDTB
         private List<RDTBChunk> _chunks;
         private RDTBSkeleton _skeleton;
         private List<RDTBMaterialRecord> _materials;
-        private List<EmbeddedRDTBInfo>
-            _embeddedRdtbs;
+        private List<EmbeddedRDTBInfo> _embeddedRdtbs;
 
-        // ─────────────────────────────────────
-        // CONSTRUCTOR
-        // ─────────────────────────────────────
+        // ── NEW: raw 14-slot table read from file ──
+        // Preserves zeros, aliases, and gaps exactly
+        // as they appear in the original binary.
+        // Used by AssembleRDTB to reconstruct
+        // the header with correct slot layout.
+        private int[] _slotTable;
+
         public RDTBArchive(string filepath)
         {
             _filepath = filepath;
             _offsets = new List<int>();
             _chunks = new List<RDTBChunk>();
             _unk08 = new byte[4];
-            _materials =
-                new List<RDTBMaterialRecord>();
-            _embeddedRdtbs =
-                new List<EmbeddedRDTBInfo>();
+            _materials = new List<RDTBMaterialRecord>();
+            _embeddedRdtbs = new List<EmbeddedRDTBInfo>();
+            _slotTable = new int[OFFSET_TBL_SLOTS];
         }
 
-        // ─────────────────────────────────────
-        // READ HELPERS
-        // ─────────────────────────────────────
         private int ReadInt32(int offset)
-            => BitConverter.ToInt32(
-                   _data, offset);
-
+            => BitConverter.ToInt32(_data, offset);
         private uint ReadUInt32(int offset)
-            => BitConverter.ToUInt32(
-                   _data, offset);
-
+            => BitConverter.ToUInt32(_data, offset);
         private ushort ReadUInt16(int offset)
-            => BitConverter.ToUInt16(
-                   _data, offset);
-
+            => BitConverter.ToUInt16(_data, offset);
         private float ReadFloat(int offset)
-            => BitConverter.ToSingle(
-                   _data, offset);
-
-        private byte[] GetBytes(
-            int offset, int len)
+            => BitConverter.ToSingle(_data, offset);
+        private byte[] GetBytes(int offset, int len)
         {
             byte[] buf = new byte[len];
-            Array.Copy(
-                _data, offset,
-                buf, 0, len);
+            Array.Copy(_data, offset, buf, 0, len);
             return buf;
         }
 
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
         // STATIC ENTRY POINTS
-        // ═════════════════════════════════════
-        public static void Info(
-            string rdtbPath)
+        // ═══════════════════════════════════════
+        public static void Info(string rdtbPath)
         {
             var arc = new RDTBArchive(rdtbPath);
             arc.Load();
@@ -552,8 +456,7 @@ namespace HMSTHModdingTool.RDTB
             string originalPath,
             string rebuiltPath)
         {
-            var arc =
-                new RDTBArchive(originalPath);
+            var arc = new RDTBArchive(originalPath);
             arc.VerifyAgainst(rebuiltPath);
         }
 
@@ -574,19 +477,16 @@ namespace HMSTHModdingTool.RDTB
             DoScanFolder(folderPath);
         }
 
-        // ─── NEW: Detect embedded RDTBs ─────
         public static void DetectEmbedded(
             string filePath)
         {
             var arc = new RDTBArchive(filePath);
-            arc._data =
-                File.ReadAllBytes(filePath);
+            arc._data = File.ReadAllBytes(filePath);
             arc._filepath = filePath;
             arc.FindEmbeddedRDTBs();
             arc.ShowEmbeddedInfo();
         }
 
-        // ─── NEW: Material table info ────────
         public static void Materials(
             string rdtbPath)
         {
@@ -595,126 +495,155 @@ namespace HMSTHModdingTool.RDTB
             arc.ShowMaterialTable();
         }
 
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
         // LOAD
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
         public void Load()
         {
-            _data =
-                File.ReadAllBytes(_filepath);
+            _data = File.ReadAllBytes(_filepath);
 
-            // ── Validate magic ───────────────
             if (_data.Length < 4 ||
                 _data[0] != 'R' ||
                 _data[1] != 'D' ||
                 _data[2] != 'T' ||
                 _data[3] != 'B')
-            {
                 throw new InvalidDataException(
                     "Not a valid RDTB file: " +
                     _filepath);
-            }
 
             if (_data.Length < HEADER_SIZE)
-            {
                 throw new InvalidDataException(
                     $"File too small " +
                     $"({_data.Length} B < " +
                     $"{HEADER_SIZE} B)");
-            }
 
-            // ── Header fields ────────────────
             _unk08 = GetBytes(8, 4);
             _ptrCount = ReadUInt16(0x0C);
             _boneCount = ReadUInt16(0x0E);
 
-            // ── Offset table ─────────────────
             LoadOffsets();
 
-            // ── Slice chunks ─────────────────
             _chunks.Clear();
-            for (int i = 0;
-                 i < _offsets.Count; i++)
+            for (int i = 0; i < _offsets.Count; i++)
             {
                 int start = _offsets[i];
-                int end =
-                    (i + 1 < _offsets.Count)
-                    ? _offsets[i + 1]
-                    : _data.Length;
+
+                // Find the next DIFFERENT offset
+                // (handles mirrored slots where
+                // multiple slots share same address)
+                int end = _data.Length;
+                for (int j = i + 1;
+                     j < _offsets.Count; j++)
+                {
+                    if (_offsets[j] != start)
+                    {
+                        end = _offsets[j];
+                        break;
+                    }
+                }
+
                 int sz = end - start;
                 if (sz <= 0) continue;
+
+                // Find which slot this offset
+                // belongs to (first slot with
+                // this value)
+                int slotIdx = i; // fallback
+                for (int s = 0;
+                     s < OFFSET_TBL_SLOTS; s++)
+                {
+                    if (_slotTable[s] == start)
+                    {
+                        slotIdx = s;
+                        break;
+                    }
+                }
 
                 _chunks.Add(new RDTBChunk
                 {
                     Index = i,
+                    SlotIndex = slotIdx,
                     Offset = start,
                     Size = sz,
                     Data = GetBytes(start, sz),
+                    TotalChunks = _offsets.Count,
                 });
             }
 
-            // ── Parse skeleton (chunk 0) ─────
             ParseSkeleton();
-
-            // ── Parse materials (chunk 8) ────
             ParseMaterialTable();
-
-            // ── Detect embedded RDTBs ────────
             FindEmbeddedRDTBs();
         }
 
-        // ═════════════════════════════════════
-        // LOAD OFFSETS  (safe)
-        // Handles both normal offsets and
-        // 0xFFFFFFFF sentinel values seen in
-        // some RDTB files
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
+        // LOAD OFFSETS - FIXED v2.1
+        //
+        // KEY CHANGES vs old version:
+        // 1. Reads ALL 14 slots (no break on zero)
+        // 2. Stores raw slot table in _slotTable[]
+        //    for exact reconstruction by assembler
+        // 3. Skips zeros and duplicates for the
+        //    _offsets list (unique real offsets)
+        // 4. Does NOT stop early on zero
+        // ═══════════════════════════════════════
         private void LoadOffsets()
         {
             _offsets.Clear();
+            _slotTable = new int[OFFSET_TBL_SLOTS];
 
+            // ── Step 1: read all 14 slots raw ──
             for (int slot = 0;
-                 slot < OFFSET_TBL_SLOTS;
-                 slot++)
+                 slot < OFFSET_TBL_SLOTS; slot++)
             {
                 int pos =
                     OFFSET_TBL_START + slot * 4;
                 if (pos + 4 > _data.Length)
                     break;
+                _slotTable[slot] = ReadInt32(pos);
+            }
 
-                int val = ReadInt32(pos);
+            // ── Step 2: build unique offset list
+            // preserving original slot order ────
+            var seen = new HashSet<int>();
+            for (int slot = 0;
+                 slot < OFFSET_TBL_SLOTS; slot++)
+            {
+                int val = _slotTable[slot];
 
-                // Zero = unused slot = end
-                if (val == 0) break;
+                // Skip zero (unused slot)
+                if (val == 0) continue;
 
-                // 0xFFFFFFFF sentinel = skip
+                // Skip sentinel
                 if (val == -1 ||
                     val == unchecked(
                         (int)0xFFFFFFFF))
                     continue;
 
-                // Sanity check
+                // Skip invalid range
                 if (val < HEADER_SIZE ||
                     val > _data.Length)
                 {
                     Console.ForegroundColor =
                         ConsoleColor.Yellow;
                     Console.WriteLine(
-                        $"[!] Offset[{slot}] " +
+                        $"[!] Slot[{slot}] " +
                         $"= 0x{val:X8} " +
-                        $"suspicious - skipping");
+                        $"out of range - skipping");
                     Console.ResetColor();
                     continue;
                 }
 
+                // Skip aliased (duplicate) offset
+                if (seen.Contains(val)) continue;
+
+                seen.Add(val);
                 _offsets.Add(val);
             }
         }
 
-        // ═════════════════════════════════════
-        // PARSE SKELETON (CORRECTED v2.0)
-        // Matches Python _compute_bone_world_t
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
+        // PARSE SKELETON
+        // ═══════════════════════════════════════
         private void ParseSkeleton()
         {
             if (_chunks.Count == 0 ||
@@ -724,9 +653,7 @@ namespace HMSTHModdingTool.RDTB
             var c0 = _chunks[0];
             var dat = c0.Data;
 
-            int ptrEnd =
-                _boneCount * BONE_PTR_SIZE;
-
+            int ptrEnd = _boneCount * BONE_PTR_SIZE;
             if (ptrEnd > dat.Length)
             {
                 Console.ForegroundColor =
@@ -739,31 +666,21 @@ namespace HMSTHModdingTool.RDTB
                 return;
             }
 
-            // ── Read bone pointers ───────────
             var ptrs = new List<uint>();
             for (int i = 0; i < _boneCount; i++)
-            {
-                ptrs.Add(
-                    BitConverter.ToUInt32(
-                        dat,
-                        i * BONE_PTR_SIZE));
-            }
+                ptrs.Add(BitConverter.ToUInt32(
+                    dat, i * BONE_PTR_SIZE));
 
-            // ── Read bone records ────────────
-            // CORRECTED: indices at bytes 0-3,
-            //            floats at bytes 4-15
             int recStart = ptrEnd;
             int recEnd =
-                recStart +
-                _boneCount * BONE_REC_SIZE;
+                recStart + _boneCount * BONE_REC_SIZE;
 
             if (recEnd > dat.Length)
             {
                 Console.ForegroundColor =
                     ConsoleColor.Yellow;
                 Console.WriteLine(
-                    "[!] Bone records " +
-                    "exceed chunk 0");
+                    "[!] Bone records exceed chunk 0");
                 Console.ResetColor();
                 return;
             }
@@ -771,11 +688,9 @@ namespace HMSTHModdingTool.RDTB
             var bones = new List<RDTBBone>();
             for (int i = 0; i < _boneCount; i++)
             {
-                int off =
-                    recStart + i * BONE_REC_SIZE;
+                int off = recStart + i * BONE_REC_SIZE;
                 bones.Add(
-                    RDTBBone.FromBytes(
-                        dat, off));
+                    RDTBBone.FromBytes(dat, off));
             }
 
             _skeleton = new RDTBSkeleton
@@ -786,17 +701,14 @@ namespace HMSTHModdingTool.RDTB
             };
         }
 
-        // ═════════════════════════════════════
-        // PARSE MATERIAL TABLE (chunk 8)
-        // NEW in v2.0
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
+        // PARSE MATERIAL TABLE
+        // ═══════════════════════════════════════
         private void ParseMaterialTable()
         {
             _materials.Clear();
 
-            // Find chunk 8 (or equivalent)
-            int c8Idx = Math.Min(
-                8, _chunks.Count - 1);
+            int c8Idx = Math.Min(8, _chunks.Count - 1);
             if (c8Idx < 0) return;
 
             var c8 = _chunks[c8Idx];
@@ -804,8 +716,6 @@ namespace HMSTHModdingTool.RDTB
             if (dat == null || dat.Length < 4)
                 return;
 
-            // Check if chunk 8 starts with VIF
-            // (small RDTB - no material table)
             if (dat.Length >= 4 &&
                 dat[0] == VIF_B0 &&
                 dat[1] == VIF_B1 &&
@@ -826,12 +736,10 @@ namespace HMSTHModdingTool.RDTB
             for (int i = 0; i < batchCount; i++)
             {
                 int ptrOff = i * 4;
-                if (ptrOff + 4 > dat.Length)
-                    break;
+                if (ptrOff + 4 > dat.Length) break;
 
                 uint ptr =
-                    BitConverter.ToUInt32(
-                        dat, ptrOff);
+                    BitConverter.ToUInt32(dat, ptrOff);
                 if (ptr + MAT_REC_SIZE >
                     (uint)dat.Length)
                 {
@@ -839,8 +747,7 @@ namespace HMSTHModdingTool.RDTB
                         new RDTBMaterialRecord
                         {
                             Index = i,
-                            Signature =
-                                new byte[8],
+                            Signature = new byte[8],
                         });
                     continue;
                 }
@@ -848,33 +755,25 @@ namespace HMSTHModdingTool.RDTB
                 var rec = new RDTBMaterialRecord
                 {
                     Index = i,
-                    BoneIndex =
-                        BitConverter.ToUInt16(
-                            dat, (int)ptr),
-                    FieldB =
-                        BitConverter.ToUInt16(
-                            dat, (int)ptr + 2),
-                    FieldC =
-                        BitConverter.ToUInt16(
-                            dat, (int)ptr + 4),
-                    TextureId =
-                        BitConverter.ToUInt16(
-                            dat, (int)ptr + 6),
+                    BoneIndex = BitConverter.ToUInt16(
+                        dat, (int)ptr),
+                    FieldB = BitConverter.ToUInt16(
+                        dat, (int)ptr + 2),
+                    FieldC = BitConverter.ToUInt16(
+                        dat, (int)ptr + 4),
+                    TextureId = BitConverter.ToUInt16(
+                        dat, (int)ptr + 6),
                 };
                 byte[] sig = new byte[8];
-                Array.Copy(
-                    dat, (int)ptr,
-                    sig, 0, 8);
+                Array.Copy(dat, (int)ptr, sig, 0, 8);
                 rec.Signature = sig;
                 _materials.Add(rec);
             }
         }
 
-        // ═════════════════════════════════════
-        // FIND EMBEDDED RDTBs (NEW in v2.0)
-        // Scans binary data for RDTB magic
-        // bytes, validates each candidate
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
+        // FIND EMBEDDED RDTBs
+        // ═══════════════════════════════════════
         private void FindEmbeddedRDTBs()
         {
             _embeddedRdtbs.Clear();
@@ -889,34 +788,28 @@ namespace HMSTHModdingTool.RDTB
                     _data, MAGIC, pos);
                 if (idx < 0) break;
 
-                // Skip the file's own header
                 if (idx == 0)
                 {
                     pos = idx + 4;
                     continue;
                 }
 
-                // Must be 4-byte aligned
                 if (idx % 4 != 0)
                 {
                     pos = idx + 1;
                     continue;
                 }
 
-                // Validate RDTB header
-                if (idx + HEADER_SIZE >
-                    _data.Length)
+                if (idx + HEADER_SIZE > _data.Length)
                 {
                     pos = idx + 4;
                     continue;
                 }
 
-                int pc =
-                    BitConverter.ToUInt16(
-                        _data, idx + 0x0C);
-                int bc =
-                    BitConverter.ToUInt16(
-                        _data, idx + 0x0E);
+                int pc = BitConverter.ToUInt16(
+                    _data, idx + 0x0C);
+                int bc = BitConverter.ToUInt16(
+                    _data, idx + 0x0E);
 
                 if (pc == 0 || pc > 10000 ||
                     bc > 1000)
@@ -925,7 +818,6 @@ namespace HMSTHModdingTool.RDTB
                     continue;
                 }
 
-                // Find EOF terminator
                 int eofIdx = IndexOfPattern(
                     _data, EOF_TERM, idx + 0x48);
                 if (eofIdx < 0)
@@ -935,8 +827,7 @@ namespace HMSTHModdingTool.RDTB
                 }
 
                 int endAligned =
-                    ((eofIdx + 16 + 15) / 16)
-                    * 16;
+                    ((eofIdx + 16 + 15) / 16) * 16;
                 int sz = endAligned - idx;
 
                 if (sz < 64 ||
@@ -946,18 +837,14 @@ namespace HMSTHModdingTool.RDTB
                     continue;
                 }
 
-                // Read chunk offsets
                 var coffs = new List<int>();
                 for (int s = 0; s < 14; s++)
                 {
                     int off = idx + 0x10 + s * 4;
-                    if (off + 4 > _data.Length)
-                        break;
-                    int v =
-                        BitConverter.ToInt32(
-                            _data, off);
-                    if (v == 0 || v < 0x48 ||
-                        v > sz)
+                    if (off + 4 > _data.Length) break;
+                    int v = BitConverter.ToInt32(
+                        _data, off);
+                    if (v == 0 || v < 0x48 || v > sz)
                         break;
                     if (v == -1 ||
                         v == unchecked(
@@ -967,8 +854,7 @@ namespace HMSTHModdingTool.RDTB
                 }
 
                 byte[] raw = new byte[sz];
-                Array.Copy(
-                    _data, idx, raw, 0, sz);
+                Array.Copy(_data, idx, raw, 0, sz);
 
                 _embeddedRdtbs.Add(
                     new EmbeddedRDTBInfo
@@ -986,162 +872,133 @@ namespace HMSTHModdingTool.RDTB
         }
 
         private static int IndexOfMagic(
-            byte[] data, byte[] magic,
-            int start)
+            byte[] data, byte[] magic, int start)
         {
             for (int i = start;
                  i <= data.Length - magic.Length;
                  i++)
             {
                 bool match = true;
-                for (int j = 0;
-                     j < magic.Length; j++)
-                {
+                for (int j = 0; j < magic.Length; j++)
                     if (data[i + j] != magic[j])
-                    {
-                        match = false;
-                        break;
-                    }
-                }
+                    { match = false; break; }
                 if (match) return i;
             }
             return -1;
         }
 
         private static int IndexOfPattern(
-            byte[] data, byte[] pattern,
-            int start)
+            byte[] data, byte[] pattern, int start)
         {
-            // Only match first 8 bytes of
-            // EOF pattern for detection
-            int pLen = Math.Min(
-                8, pattern.Length);
+            int pLen = Math.Min(8, pattern.Length);
             for (int i = start;
-                 i <= data.Length - pLen;
-                 i++)
+                 i <= data.Length - pLen; i++)
             {
                 bool match = true;
                 for (int j = 0; j < pLen; j++)
-                {
-                    if (data[i + j] !=
-                        pattern[j])
-                    {
-                        match = false;
-                        break;
-                    }
-                }
+                    if (data[i + j] != pattern[j])
+                    { match = false; break; }
                 if (match) return i;
             }
             return -1;
         }
 
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
         // CHUNK LABELS / DESCRIPTIONS
-        // (KEPT from original, these are
-        //  confirmed correct for large RDTB)
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
+        public static string GetChunkLabel(int idx)
+            => GetChunkLabel(idx, 14);
+
         public static string GetChunkLabel(
-            int idx)
+            int idx, int totalChunks)
         {
+            // Use slot number for big RDTB labels
             switch (idx)
             {
-                case 0:
-                    return "skeleton";
-                case 1:
-                    return "anim_ptr_table";
-                case 2:
-                    return "anim_data_0";
-                case 3:
-                    return "anim_data_1";
-                case 4:
-                    return "anim_data_2";
-                case 5:
-                    return "anim_data_3";
-                case 6:
-                    return "anim_data_4";
-                case 7:
-                    return "lookup_table_0";
+                case 0: return "skeleton";
+                case 1: return "anim_rotation_ptrs";
+                case 2: return "anim_rotation_keyframes";
+                case 3: return "anim_position_ptrs";
+                case 4: return "anim_transform_data";
+                case 5: return "anim_scale_ptrs";
+                case 6: return "anim_scale_keyframes";
+                case 7: return "batch_bone_map";
                 case 8:
-                    return "material_mesh";
+                    return totalChunks <= 10
+                    ? "material_table"
+                    : "material_table_lod1";
                 case 9:
-                    return "lookup_table_1";
-                case 10:
-                    return "lookup_table_2";
-                case 11:
-                    return "vif_mesh_lod0";
-                case 12:
-                    return "vif_mesh_lod1";
-                case 13:
-                    return "vif_mesh_lod2";
+                    return totalChunks <= 10
+                    ? "vif_mesh"
+                    : "material_table_lod2";
+                case 10: return "material_table_lod3";
+                case 11: return "vif_mesh_lod1";
+                case 12: return "vif_mesh_lod2";
+                case 13: return "vif_mesh_lod3";
                 default:
                     return $"chunk_{idx:D2}";
             }
         }
 
+        public static string GetChunkDesc(int idx)
+            => GetChunkDesc(idx, 14);
+
         public static string GetChunkDesc(
-            int idx)
+            int idx, int totalChunks)
         {
             switch (idx)
             {
                 case 0:
-                    return
-                        "Bone ptr array + " +
-                        "bone records (16B each)";
+                    return "Bone ptr array + " +
+                           "bone records (16B each)";
                 case 1:
-                    return
-                        "Animation pointer table";
+                    return "Per-bone rotation " +
+                           "keyframe pointer table";
                 case 2:
+                    return "Rotation quaternion " +
+                           "keyframe stream";
                 case 3:
+                    return "Per-bone position " +
+                           "keyframe pointer table";
                 case 4:
+                    return "Per-bone transform data";
                 case 5:
+                    return "Per-bone scale " +
+                           "keyframe pointer table";
                 case 6:
-                    return
-                        $"Animation/transform " +
-                        $"data {idx - 2}";
+                    return "Scale/misc keyframe data";
                 case 7:
-                    return
-                        "Small lookup/index table";
+                    return "Batch-to-bone mapping " +
+                           "table (8B each)";
                 case 8:
-                    return
-                        "Material table + mesh " +
-                        "VIF data (small RDTB) " +
-                        "or material records " +
-                        "(large RDTB)";
+                    return totalChunks <= 10
+                        ? "Material table (8B records)"
+                        : "Material table LOD1";
                 case 9:
-                case 10:
-                    return
-                        "Small lookup/index table";
-                case 11:
-                    return
-                        "VIF mesh LOD0 (high " +
-                        "quality, close range)";
-                case 12:
-                    return
-                        "VIF mesh LOD1 (medium " +
-                        "quality, mid range)";
-                case 13:
-                    return
-                        "VIF mesh LOD2 (low " +
-                        "quality, far range)";
-                default:
-                    return "Unknown data";
+                    return totalChunks <= 10
+                        ? "VIF mesh (single LOD)"
+                        : "Material table LOD2";
+                case 10: return "Material table LOD3";
+                case 11: return "VIF mesh LOD1 (high quality)";
+                case 12: return "VIF mesh LOD2 (medium quality)";
+                case 13: return "VIF mesh LOD3 (low quality)";
+                default: return "Unknown data";
             }
         }
 
-        // ═════════════════════════════════════
-        // SHOW INFO (ENHANCED v2.0)
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
+        // SHOW INFO
+        // ═══════════════════════════════════════
         private void ShowInfo(bool showBones)
         {
             Console.WriteLine();
             Console.ForegroundColor =
                 ConsoleColor.Cyan;
             Console.WriteLine(
-                "[+] RDTB Info v2.0: " +
+                "[+] RDTB Info v2.1: " +
                 Path.GetFileName(_filepath));
             Console.ResetColor();
-            Console.WriteLine(
-                new string('═', 64));
+            Console.WriteLine(new string('═', 64));
 
             Console.WriteLine(
                 $"    File          : " +
@@ -1149,37 +1006,66 @@ namespace HMSTHModdingTool.RDTB
             Console.WriteLine(
                 $"    Size          : " +
                 _data.Length.ToString("N0") +
-                $" bytes " +
-                $"(0x{_data.Length:X8})");
+                $" bytes (0x{_data.Length:X8})");
             Console.WriteLine(
                 $"    Magic         : RDTB");
             Console.WriteLine(
-                $"    Version       : " +
-                "00 01 00 00");
+                $"    Version       : 00 01 00 00");
             Console.WriteLine(
                 $"    Metadata 0x08 : " +
-                BitConverter
-                    .ToString(_unk08)
+                BitConverter.ToString(_unk08)
                     .Replace('-', ' '));
             Console.WriteLine(
                 $"    Ptr count     : " +
-                _ptrCount +
-                $" (0x{_ptrCount:X4})");
+                $"{_ptrCount} (0x{_ptrCount:X4})");
             Console.WriteLine(
                 $"    Bone count    : " +
-                _boneCount +
-                $" (0x{_boneCount:X4})");
+                $"{_boneCount} (0x{_boneCount:X4})");
             Console.WriteLine(
-                $"    Chunks        : " +
-                _chunks.Count);
+                $"    Chunks        : {_chunks.Count}");
             Console.WriteLine(
                 $"    Materials     : " +
-                _materials.Count);
+                $"{_materials.Count}");
             Console.WriteLine(
                 $"    Embedded RDTBs: " +
-                _embeddedRdtbs.Count);
+                $"{_embeddedRdtbs.Count}");
 
-            // ── EOF check ────────────────────
+            // ── Show raw slot table ──────────
+            Console.WriteLine();
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    Slot Table (0x10..0x47):");
+            for (int s = 0;
+                 s < OFFSET_TBL_SLOTS; s++)
+            {
+                int v = _slotTable[s];
+                string note = "";
+                if (v == 0)
+                    note = "(zero/unused)";
+                else if (v < HEADER_SIZE)
+                    note = "(invalid)";
+                // Check if aliased
+                else
+                {
+                    for (int s2 = 0; s2 < s; s2++)
+                    {
+                        if (_slotTable[s2] == v)
+                        {
+                            note = $"(alias of slot {s2})";
+                            break;
+                        }
+                    }
+                }
+                Console.WriteLine(
+                    $"      [{s,2}] " +
+                    $"0x{v & 0xFFFFFFFF:X8}" +
+                    (note != ""
+                        ? $"  {note}"
+                        : ""));
+            }
+            Console.ResetColor();
+
             bool hasEof = HasEofTerminator();
             Console.ForegroundColor = hasEof
                 ? ConsoleColor.Green
@@ -1191,44 +1077,36 @@ namespace HMSTHModdingTool.RDTB
                     : "unexpected!"));
             Console.ResetColor();
 
-            // ── Chunk table ──────────────────
             Console.WriteLine();
             Console.WriteLine(
-                "    " +
-                new string('─', 72));
+                "    " + new string('─', 72));
             Console.WriteLine(
                 $"    {"#",3}  " +
+                $"{"SLT",3}  " +
                 $"{"OFFSET",10}  " +
                 $"{"SIZE",10}  " +
-                $"{"SIZE_B",12}  " +
                 $"{"VIF",4}  LABEL");
             Console.WriteLine(
-                "    " +
-                new string('─', 72));
+                "    " + new string('─', 72));
 
             foreach (var c in _chunks)
             {
-                string eof =
-                    c.HasEofTerminator
+                string eof = c.HasEofTerminator
                     ? " [EOF]" : "";
-                string vif =
-                    c.HasVIFData
+                string vif = c.HasVIFData
                     ? $"{c.VIFBlockCount,4}"
                     : "   -";
                 Console.WriteLine(
                     $"    [{c.Index,2}]  " +
+                    $"{c.SlotIndex,2}   " +
                     $"0x{c.Offset:X8}  " +
                     $"0x{c.Size:X8}  " +
-                    $"{c.Size,12:N0} B  " +
                     $"{vif}  " +
                     $"{c.Label}{eof}");
             }
-
             Console.WriteLine(
-                "    " +
-                new string('─', 72));
+                "    " + new string('─', 72));
 
-            // ── Material records ─────────────
             if (_materials.Count > 0)
             {
                 Console.WriteLine();
@@ -1236,12 +1114,10 @@ namespace HMSTHModdingTool.RDTB
                     ConsoleColor.Cyan;
                 Console.WriteLine(
                     $"    Material Table " +
-                    $"({_materials.Count}" +
-                    $" records)");
+                    $"({_materials.Count} records)");
                 Console.ResetColor();
 
-                var texIds =
-                    new HashSet<int>();
+                var texIds = new HashSet<int>();
                 foreach (var m in _materials)
                     texIds.Add(m.TextureId);
                 Console.WriteLine(
@@ -1249,16 +1125,12 @@ namespace HMSTHModdingTool.RDTB
                     $"[{string.Join(", ", texIds)}]");
 
                 Console.WriteLine(
-                    "    " +
-                    new string('─', 60));
-                int showMax = Math.Min(
-                    _materials.Count, 20);
-                for (int i = 0;
-                     i < showMax; i++)
-                {
+                    "    " + new string('─', 60));
+                int showMax =
+                    Math.Min(_materials.Count, 20);
+                for (int i = 0; i < showMax; i++)
                     Console.WriteLine(
                         $"    {_materials[i]}");
-                }
                 if (_materials.Count > showMax)
                     Console.WriteLine(
                         $"    ... and " +
@@ -1266,7 +1138,6 @@ namespace HMSTHModdingTool.RDTB
                         $" more");
             }
 
-            // ── Embedded RDTBs ──────────────
             if (_embeddedRdtbs.Count > 0)
             {
                 Console.WriteLine();
@@ -1274,15 +1145,12 @@ namespace HMSTHModdingTool.RDTB
                     ConsoleColor.Magenta;
                 Console.WriteLine(
                     $"    Embedded RDTBs " +
-                    $"({_embeddedRdtbs.Count}" +
-                    $" found)");
+                    $"({_embeddedRdtbs.Count} found)");
                 Console.ResetColor();
                 Console.WriteLine(
-                    "    " +
-                    new string('─', 60));
+                    "    " + new string('─', 60));
                 for (int i = 0;
-                     i < _embeddedRdtbs.Count;
-                     i++)
+                     i < _embeddedRdtbs.Count; i++)
                 {
                     var e = _embeddedRdtbs[i];
                     Console.WriteLine(
@@ -1291,12 +1159,10 @@ namespace HMSTHModdingTool.RDTB
                         $"{e.Size,8:N0} B  " +
                         $"ptr={e.PtrCount}  " +
                         $"bones={e.BoneCount}  " +
-                        $"chunks=" +
-                        $"{e.ChunkOffsets.Count}");
+                        $"chunks={e.ChunkOffsets.Count}");
                 }
             }
 
-            // ── Skeleton summary ─────────────
             if (_skeleton != null)
             {
                 Console.WriteLine();
@@ -1304,8 +1170,7 @@ namespace HMSTHModdingTool.RDTB
                     ConsoleColor.Cyan;
                 Console.WriteLine(
                     $"    Skeleton " +
-                    $"({_skeleton.BoneCount}" +
-                    $" bones)  " +
+                    $"({_skeleton.BoneCount} bones)  " +
                     $"[CORRECTED v2.0 layout]");
                 Console.ResetColor();
 
@@ -1322,29 +1187,21 @@ namespace HMSTHModdingTool.RDTB
                         $"{"BIND_Z",10}  " +
                         $"F1  NOTE");
                     Console.WriteLine(
-                        "    " +
-                        new string('─', 76));
+                        "    " + new string('─', 76));
 
                     for (int i = 0;
-                         i < _skeleton
-                               .Bones.Count;
+                         i < _skeleton.Bones.Count;
                          i++)
                     {
-                        var b =
-                            _skeleton.Bones[i];
+                        var b = _skeleton.Bones[i];
                         string par = b.IsRoot
                             ? "ROOT"
-                            : b.ParentIndex
-                                .ToString("D3");
+                            : b.ParentIndex.ToString("D3");
                         string chl = b.HasChild
-                            ? b.ChildIndex
-                                .ToString("D3")
+                            ? b.ChildIndex.ToString("D3")
                             : "none";
-                        string note =
-                            b.IsRoot
-                            ? " ◄ ROOT"
-                            : "";
-
+                        string note = b.IsRoot
+                            ? " ◄ ROOT" : "";
                         Console.WriteLine(
                             $"    [{i,3}]  " +
                             $"{b.SelfIndex,4}  " +
@@ -1356,20 +1213,17 @@ namespace HMSTHModdingTool.RDTB
                             $"0x{b.FlagsByte1:X2}" +
                             $"{note}");
                     }
-
                     Console.WriteLine(
-                        "    " +
-                        new string('─', 76));
+                        "    " + new string('─', 76));
                 }
             }
 
-            Console.WriteLine(
-                new string('═', 64));
+            Console.WriteLine(new string('═', 64));
         }
 
-        // ═════════════════════════════════════
-        // SHOW MATERIAL TABLE (NEW)
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
+        // SHOW MATERIAL TABLE
+        // ═══════════════════════════════════════
         private void ShowMaterialTable()
         {
             Console.WriteLine();
@@ -1379,38 +1233,30 @@ namespace HMSTHModdingTool.RDTB
                 "[+] Material Table: " +
                 Path.GetFileName(_filepath));
             Console.ResetColor();
-            Console.WriteLine(
-                new string('═', 64));
+            Console.WriteLine(new string('═', 64));
 
             if (_materials.Count == 0)
             {
                 Console.ForegroundColor =
                     ConsoleColor.Yellow;
                 Console.WriteLine(
-                    "    No material records " +
-                    "found (small RDTB or " +
-                    "no chunk 8)");
+                    "    No material records found " +
+                    "(small RDTB or no chunk 8)");
                 Console.ResetColor();
                 return;
             }
 
             Console.WriteLine(
-                $"    Records: " +
-                $"{_materials.Count}");
+                $"    Records: {_materials.Count}");
             Console.WriteLine();
             Console.WriteLine(
-                $"    {"#",3}  " +
-                $"{"BONE",6}  " +
-                $"{"B",5}  " +
-                $"{"C",5}  " +
-                $"{"TEX",4}  " +
+                $"    {"#",3}  {"BONE",6}  " +
+                $"{"B",5}  {"C",5}  {"TEX",4}  " +
                 $"SIGNATURE");
             Console.WriteLine(
-                "    " +
-                new string('─', 60));
+                "    " + new string('─', 60));
 
             foreach (var m in _materials)
-            {
                 Console.WriteLine(
                     $"    [{m.Index:D2}]  " +
                     $"{m.BoneIndex,6}  " +
@@ -1418,15 +1264,13 @@ namespace HMSTHModdingTool.RDTB
                     $"{m.FieldC,5}  " +
                     $"{m.TextureId,4}  " +
                     $"{BitConverter.ToString(m.Signature).Replace('-', ' ')}");
-            }
 
-            Console.WriteLine(
-                new string('═', 64));
+            Console.WriteLine(new string('═', 64));
         }
 
-        // ═════════════════════════════════════
-        // SHOW EMBEDDED INFO (NEW)
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
+        // SHOW EMBEDDED INFO
+        // ═══════════════════════════════════════
         private void ShowEmbeddedInfo()
         {
             Console.WriteLine();
@@ -1436,15 +1280,12 @@ namespace HMSTHModdingTool.RDTB
                 "[+] Embedded RDTB Scan: " +
                 Path.GetFileName(_filepath));
             Console.ResetColor();
+            Console.WriteLine(new string('═', 64));
             Console.WriteLine(
-                new string('═', 64));
-            Console.WriteLine(
-                $"    File size: " +
-                $"{_data.Length:N0} B");
+                $"    File size: {_data.Length:N0} B");
             Console.WriteLine(
                 $"    Found: " +
-                $"{_embeddedRdtbs.Count}" +
-                $" embedded RDTBs");
+                $"{_embeddedRdtbs.Count} embedded RDTBs");
             Console.WriteLine();
 
             if (_embeddedRdtbs.Count == 0)
@@ -1458,53 +1299,45 @@ namespace HMSTHModdingTool.RDTB
             }
 
             for (int i = 0;
-                 i < _embeddedRdtbs.Count;
-                 i++)
+                 i < _embeddedRdtbs.Count; i++)
             {
                 var e = _embeddedRdtbs[i];
                 Console.ForegroundColor =
                     ConsoleColor.Green;
                 Console.WriteLine(
-                    $"    === Embedded RDTB " +
-                    $"#{i:D2} ===");
+                    $"    === Embedded RDTB #{i:D2} ===");
                 Console.ResetColor();
                 Console.WriteLine(
-                    $"    Offset     : " +
-                    $"0x{e.Offset:X8}");
+                    $"    Offset     : 0x{e.Offset:X8}");
                 Console.WriteLine(
-                    $"    Size       : " +
-                    $"{e.Size:N0} B");
+                    $"    Size       : {e.Size:N0} B");
                 Console.WriteLine(
-                    $"    ptr_count  : " +
-                    $"{e.PtrCount}");
+                    $"    ptr_count  : {e.PtrCount}");
                 Console.WriteLine(
-                    $"    bone_count : " +
-                    $"{e.BoneCount}");
+                    $"    bone_count : {e.BoneCount}");
                 Console.WriteLine(
                     $"    chunks     : " +
                     $"{e.ChunkOffsets.Count}");
                 Console.WriteLine();
             }
-
-            Console.WriteLine(
-                new string('═', 64));
+            Console.WriteLine(new string('═', 64));
         }
 
-        // ═════════════════════════════════════
-        // EXTRACT ALL (ENHANCED v2.0)
-        // Now exports embedded RDTBs too
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
+        // EXTRACT ALL - FIXED v2.1
+        // Now saves _source_original.bin for
+        // exact CRDTB header reconstruction
+        // ═══════════════════════════════════════
         private void ExtractAll(
             string outputFolder)
         {
-            Directory.CreateDirectory(
-                outputFolder);
+            Directory.CreateDirectory(outputFolder);
 
             Console.WriteLine();
             Console.ForegroundColor =
                 ConsoleColor.Cyan;
             Console.WriteLine(
-                "[+] Extracting RDTB v2.0: " +
+                "[+] Extracting RDTB v2.1: " +
                 Path.GetFileName(_filepath));
             Console.ResetColor();
             Console.WriteLine(
@@ -1514,60 +1347,51 @@ namespace HMSTHModdingTool.RDTB
             Console.WriteLine(
                 $"    Bones  : {_boneCount}");
             Console.WriteLine(
-                $"    Mats   : " +
-                $"{_materials.Count}");
+                $"    Mats   : {_materials.Count}");
             Console.WriteLine(
                 $"    Embedded RDTBs: " +
                 $"{_embeddedRdtbs.Count}");
             Console.WriteLine();
 
-            // ── Write chunk files ────────────
             foreach (var c in _chunks)
             {
                 string dest = Path.Combine(
                     outputFolder, c.Filename);
-                File.WriteAllBytes(
-                    dest, c.Data);
+                File.WriteAllBytes(dest, c.Data);
 
-                string eof =
-                    c.HasEofTerminator
+                string eof = c.HasEofTerminator
                     ? " [EOF✓]" : "";
-                string vif =
-                    c.HasVIFData
+                string vif = c.HasVIFData
                     ? $" [VIF×{c.VIFBlockCount}]"
                     : "";
                 Console.ForegroundColor =
                     ConsoleColor.Green;
                 Console.WriteLine(
-                    $"    [{c.Index,2}] " +
-                    $"{c.Filename,-32} " +
-                    $"({c.Size,10:N0} B)  " +
-                    $"@ 0x{c.Offset:X8}" +
+                    $"    [{c.Index,2}]" +
+                    $" slt={c.SlotIndex,2}" +
+                    $" {c.Filename,-36}" +
+                    $" ({c.Size,10:N0} B)" +
+                    $"  @ 0x{c.Offset:X8}" +
                     $"{eof}{vif}");
                 Console.ResetColor();
             }
 
-            // ── Write skeleton CSV ───────────
             WriteSkeletonCsv(outputFolder);
 
-            // ── Write embedded RDTBs ─────────
             if (_embeddedRdtbs.Count > 0)
             {
                 string embDir = Path.Combine(
                     outputFolder,
                     "_embedded_rdtbs");
-                Directory.CreateDirectory(
-                    embDir);
+                Directory.CreateDirectory(embDir);
 
                 for (int i = 0;
-                     i < _embeddedRdtbs.Count;
-                     i++)
+                     i < _embeddedRdtbs.Count; i++)
                 {
                     var e = _embeddedRdtbs[i];
-                    string embPath =
-                        Path.Combine(embDir,
-                            $"embedded_{i:D2}" +
-                            $".rdtb");
+                    string embPath = Path.Combine(
+                        embDir,
+                        $"embedded_{i:D2}.rdtb");
                     File.WriteAllBytes(
                         embPath, e.RawData);
                     Console.ForegroundColor =
@@ -1581,7 +1405,20 @@ namespace HMSTHModdingTool.RDTB
                 }
             }
 
-            // ── Write manifest ───────────────
+            // ── CRITICAL: save original file ──
+            // CRDTB needs this to reconstruct
+            // the exact 14-slot header table
+            string origCopy = Path.Combine(
+                outputFolder,
+                "_source_original.rdtb");
+            File.WriteAllBytes(origCopy, _data);
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                $"    _source_original.rdtb" +
+                $"  (header reference for CRDTB)");
+            Console.ResetColor();
+
             WriteManifest(outputFolder);
 
             Console.WriteLine();
@@ -1594,9 +1431,9 @@ namespace HMSTHModdingTool.RDTB
                 $"     Folder : {outputFolder}");
         }
 
-        // ═════════════════════════════════════
-        // WRITE SKELETON CSV (CORRECTED v2.0)
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
+        // WRITE SKELETON CSV
+        // ═══════════════════════════════════════
         private void WriteSkeletonCsv(
             string outputFolder)
         {
@@ -1604,7 +1441,6 @@ namespace HMSTHModdingTool.RDTB
 
             string path = Path.Combine(
                 outputFolder, "skeleton.csv");
-
             var sb = new StringBuilder();
             sb.AppendLine(
                 "# RDTB Skeleton Export v2.0" +
@@ -1613,25 +1449,18 @@ namespace HMSTHModdingTool.RDTB
                 "# Source: " +
                 Path.GetFileName(_filepath));
             sb.AppendLine(
-                "# Bones:  " +
-                _skeleton.BoneCount);
+                "# Bones:  " + _skeleton.BoneCount);
             sb.AppendLine(
-                "# Layout: byte0=self," +
-                " byte1=flags," +
-                " byte2=child," +
-                " byte3=parent," +
-                " float4=X," +
-                " float8=Y," +
-                " float12=Z");
+                "# Layout: byte0=self, byte1=flags," +
+                " byte2=child, byte3=parent," +
+                " float4=X, float8=Y, float12=Z");
             sb.AppendLine();
             sb.AppendLine(
                 "idx,self,parent,child," +
-                "bind_x,bind_y,bind_z," +
-                "flags,is_root");
+                "bind_x,bind_y,bind_z,flags,is_root");
 
             for (int i = 0;
-                 i < _skeleton.Bones.Count;
-                 i++)
+                 i < _skeleton.Bones.Count; i++)
             {
                 var b = _skeleton.Bones[i];
                 sb.AppendLine(
@@ -1647,21 +1476,21 @@ namespace HMSTHModdingTool.RDTB
             }
 
             File.WriteAllText(
-                path, sb.ToString(),
-                Encoding.UTF8);
-
+                path, sb.ToString(), Encoding.UTF8);
             Console.ForegroundColor =
                 ConsoleColor.Green;
             Console.WriteLine(
                 $"    skeleton.csv  " +
-                $"({_skeleton.BoneCount}" +
-                $" bones) [v2.0 CORRECTED]");
+                $"({_skeleton.BoneCount} bones)" +
+                $" [v2.0 CORRECTED]");
             Console.ResetColor();
         }
 
-        // ═════════════════════════════════════
-        // WRITE MANIFEST (ENHANCED v2.0)
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
+        // WRITE MANIFEST - FIXED v2.1
+        // Now stores slot_index and full 14-slot
+        // table for exact CRDTB reconstruction
+        // ═══════════════════════════════════════
         private void WriteManifest(
             string outputFolder)
         {
@@ -1671,44 +1500,33 @@ namespace HMSTHModdingTool.RDTB
 
             var sb = new StringBuilder();
             sb.AppendLine("{");
-
             sb.AppendLine(
-                $"  \"_tool\": " +
-                $"\"{TOOL_VERSION}\",");
+                $"  \"_tool\": \"{TOOL_VERSION}\",");
             sb.AppendLine(
-                $"  \"_credits\": " +
-                $"\"{TOOL_CREDITS}\",");
+                $"  \"_credits\": \"{TOOL_CREDITS}\",");
             sb.AppendLine(
-                $"  \"_game\": " +
-                $"\"{TOOL_GAME}\",");
+                $"  \"_game\": \"{TOOL_GAME}\",");
             sb.AppendLine(
-                $"  \"_bone_layout\": " +
-                $"\"CORRECTED v2.0: " +
-                $"[0]=self [1]=flags " +
-                $"[2]=child [3]=parent " +
-                $"[4-7]=X [8-11]=Y " +
-                $"[12-15]=Z\",");
+                "  \"_bone_layout\": " +
+                "\"CORRECTED v2.0: [0]=self " +
+                "[1]=flags [2]=child [3]=parent " +
+                "[4-7]=X [8-11]=Y [12-15]=Z\",");
             sb.AppendLine(
-                $"  \"source_file\": \"" +
+                "  \"source_file\": \"" +
                 Path.GetFileName(_filepath)
                     .Replace("\\", "/") +
                 "\",");
             sb.AppendLine(
-                $"  \"source_size\": " +
-                $"{_data.Length},");
+                $"  \"source_size\": {_data.Length},");
             sb.AppendLine(
-                $"  \"unk_08_hex\": \"" +
-                BitConverter
-                    .ToString(_unk08)
-                    .Replace("-", "")
-                    .ToLower() +
+                "  \"unk_08_hex\": \"" +
+                BitConverter.ToString(_unk08)
+                    .Replace("-", "").ToLower() +
                 "\",");
             sb.AppendLine(
-                $"  \"ptr_count\": " +
-                $"{_ptrCount},");
+                $"  \"ptr_count\": {_ptrCount},");
             sb.AppendLine(
-                $"  \"bone_count\": " +
-                $"{_boneCount},");
+                $"  \"bone_count\": {_boneCount},");
             sb.AppendLine(
                 $"  \"material_count\": " +
                 $"{_materials.Count},");
@@ -1716,19 +1534,33 @@ namespace HMSTHModdingTool.RDTB
                 $"  \"embedded_rdtb_count\": " +
                 $"{_embeddedRdtbs.Count},");
 
+            // ── CRITICAL NEW: store full 14-slot
+            // table for CRDTB reconstruction ────
+            sb.AppendLine(
+                "  \"slot_table_raw\": [");
+            for (int s = 0;
+                 s < OFFSET_TBL_SLOTS; s++)
+            {
+                bool last = s == OFFSET_TBL_SLOTS - 1;
+                sb.AppendLine(
+                    $"    {_slotTable[s]}" +
+                    (last ? "" : ","));
+            }
+            sb.AppendLine("  ],");
+
             // ── Chunks array ─────────────────
             sb.AppendLine("  \"chunks\": [");
-            for (int i = 0;
-                 i < _chunks.Count; i++)
+            for (int i = 0; i < _chunks.Count; i++)
             {
                 var c = _chunks[i];
-                bool last =
-                    i == _chunks.Count - 1;
-
+                bool last = i == _chunks.Count - 1;
                 sb.AppendLine("    {");
                 sb.AppendLine(
-                    $"      \"index\": " +
-                    $"{c.Index},");
+                    $"      \"index\": {c.Index},");
+                // ── NEW: slot_index ───────────
+                sb.AppendLine(
+                    $"      \"slot_index\": " +
+                    $"{c.SlotIndex},");
                 sb.AppendLine(
                     $"      \"filename\": " +
                     $"\"{c.Filename}\",");
@@ -1739,58 +1571,50 @@ namespace HMSTHModdingTool.RDTB
                     $"      \"description\": " +
                     $"\"{c.Description}\",");
                 sb.AppendLine(
-                    $"      \"offset\": " +
-                    $"{c.Offset},");
+                    $"      \"offset\": {c.Offset},");
                 sb.AppendLine(
                     $"      \"offset_hex\": " +
                     $"\"0x{c.Offset:X8}\",");
                 sb.AppendLine(
-                    $"      \"size\": " +
-                    $"{c.Size},");
+                    $"      \"size\": {c.Size},");
                 sb.AppendLine(
                     $"      \"size_hex\": " +
                     $"\"0x{c.Size:X8}\",");
                 sb.AppendLine(
                     $"      \"has_eof\": " +
                     (c.HasEofTerminator
-                        ? "true" : "false") +
-                    ",");
+                        ? "true" : "false") + ",");
                 sb.AppendLine(
                     $"      \"has_vif\": " +
                     (c.HasVIFData
-                        ? "true" : "false") +
-                    ",");
+                        ? "true" : "false") + ",");
                 sb.AppendLine(
                     $"      \"vif_count\": " +
                     $"{c.VIFBlockCount}");
                 sb.AppendLine(
-                    "    }" +
-                    (last ? "" : ","));
+                    "    }" + (last ? "" : ","));
             }
             sb.AppendLine("  ],");
 
-            // ── Embedded RDTBs array ─────────
+            // ── Embedded RDTBs ───────────────
             sb.AppendLine(
                 "  \"embedded_rdtbs\": [");
             for (int i = 0;
-                 i < _embeddedRdtbs.Count;
-                 i++)
+                 i < _embeddedRdtbs.Count; i++)
             {
                 var e = _embeddedRdtbs[i];
-                bool last = i ==
-                    _embeddedRdtbs.Count - 1;
+                bool last =
+                    i == _embeddedRdtbs.Count - 1;
                 sb.AppendLine("    {");
                 sb.AppendLine(
                     $"      \"index\": {i},");
                 sb.AppendLine(
-                    $"      \"offset\": " +
-                    $"{e.Offset},");
+                    $"      \"offset\": {e.Offset},");
                 sb.AppendLine(
                     $"      \"offset_hex\": " +
                     $"\"0x{e.Offset:X8}\",");
                 sb.AppendLine(
-                    $"      \"size\": " +
-                    $"{e.Size},");
+                    $"      \"size\": {e.Size},");
                 sb.AppendLine(
                     $"      \"ptr_count\": " +
                     $"{e.PtrCount},");
@@ -1805,28 +1629,25 @@ namespace HMSTHModdingTool.RDTB
                     $"\"_embedded_rdtbs/" +
                     $"embedded_{i:D2}.rdtb\"");
                 sb.AppendLine(
-                    "    }" +
-                    (last ? "" : ","));
+                    "    }" + (last ? "" : ","));
             }
             sb.AppendLine("  ]");
             sb.AppendLine("}");
 
             File.WriteAllText(
-                path, sb.ToString(),
-                Encoding.UTF8);
-
+                path, sb.ToString(), Encoding.UTF8);
             Console.ForegroundColor =
                 ConsoleColor.Green;
             Console.WriteLine(
-                "    rdtb_manifest.json " +
-                "[v2.0 enhanced]");
+                "    rdtb_manifest.json [v2.1]");
             Console.ResetColor();
         }
 
-        // ═════════════════════════════════════
-        // CREATE FROM FOLDER
-        // (kept from original, works correctly)
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
+        // CREATE FROM FOLDER - FIXED v2.1
+        // Uses original slot table for exact
+        // header reconstruction
+        // ═══════════════════════════════════════
         private void CreateFromFolder(
             string inputFolder,
             string outputPath)
@@ -1835,92 +1656,114 @@ namespace HMSTHModdingTool.RDTB
             Console.ForegroundColor =
                 ConsoleColor.Cyan;
             Console.WriteLine(
-                "[+] Building RDTB v2.0 from: " +
+                "[+] Building RDTB v2.1 from: " +
                 inputFolder);
             Console.ResetColor();
 
             string mfPath = Path.Combine(
-                inputFolder,
-                "rdtb_manifest.json");
-
+                inputFolder, "rdtb_manifest.json");
             if (!File.Exists(mfPath))
-            {
                 throw new FileNotFoundException(
-                    "rdtb_manifest.json not " +
-                    "found in: " +
+                    "rdtb_manifest.json not found: " +
                     inputFolder +
                     "\nRun -xrdtb first.");
-            }
 
             var mf = ReadManifest(mfPath);
 
+            // ── Try to load original for slot table
+            // Priority: _source_original.rdtb
+            // (saved by XRDTB), then manifest
+            // slot_table_raw
+            byte[] originalData = null;
+            string origPath = Path.Combine(
+                inputFolder,
+                "_source_original.rdtb");
+            if (File.Exists(origPath))
+            {
+                originalData =
+                    File.ReadAllBytes(origPath);
+                Console.ForegroundColor =
+                    ConsoleColor.Green;
+                Console.WriteLine(
+                    "    [slot table] " +
+                    "Using _source_original.rdtb");
+                Console.ResetColor();
+            }
+            else if (mf.OriginalSlotTable != null &&
+                     mf.OriginalSlotTable.Length
+                     == OFFSET_TBL_SLOTS)
+            {
+                Console.ForegroundColor =
+                    ConsoleColor.Green;
+                Console.WriteLine(
+                    "    [slot table] " +
+                    "Using manifest slot_table_raw");
+                Console.ResetColor();
+            }
+            else
+            {
+                Console.ForegroundColor =
+                    ConsoleColor.Yellow;
+                Console.WriteLine(
+                    "    [slot table] No original" +
+                    " found - using sequential layout" +
+                    " (may differ from original)");
+                Console.ResetColor();
+            }
+
             Console.WriteLine(
-                $"    Source   : " +
-                $"{mf.SourceFile}");
+                $"    Source   : {mf.SourceFile}");
             Console.WriteLine(
-                $"    Bones    : " +
-                $"{mf.BoneCount}");
+                $"    Bones    : {mf.BoneCount}");
             Console.WriteLine(
-                $"    Chunks   : " +
-                $"{mf.Chunks.Count}");
+                $"    Chunks   : {mf.Chunks.Count}");
             Console.WriteLine();
 
-            var chunkData = new List<byte[]>();
+            // ── Load chunk files in slot order ──
+            // Sort by slot_index so they are
+            // placed at the correct positions
+            var chunksBySlot =
+                new SortedDictionary<int, byte[]>();
+
             foreach (var entry in mf.Chunks)
             {
                 string cp = Path.Combine(
-                    inputFolder,
-                    entry.Filename);
-
+                    inputFolder, entry.Filename);
                 if (!File.Exists(cp))
-                {
                     throw new FileNotFoundException(
                         "Missing chunk: " +
                         entry.Filename);
-                }
 
-                byte[] raw =
-                    File.ReadAllBytes(cp);
-                chunkData.Add(raw);
+                byte[] raw = File.ReadAllBytes(cp);
+                chunksBySlot[entry.SlotIndex] = raw;
 
                 Console.ForegroundColor =
                     ConsoleColor.Green;
                 Console.WriteLine(
-                    $"    [{entry.Index,2}] " +
-                    $"{entry.Filename,-32} " +
-                    $"({raw.Length,10:N0} B)");
+                    $"    [{entry.Index,2}]" +
+                    $" slt={entry.SlotIndex,2}" +
+                    $" {entry.Filename,-36}" +
+                    $" ({raw.Length,10:N0} B)");
                 Console.ResetColor();
             }
 
-            if (chunkData.Count >
-                OFFSET_TBL_SLOTS)
-            {
-                throw new InvalidDataException(
-                    $"Too many chunks " +
-                    $"({chunkData.Count} > " +
-                    $"{OFFSET_TBL_SLOTS})");
-            }
+            byte[] result = AssembleRDTBWithSlots(
+                chunksBySlot, mf, originalData);
 
-            byte[] result = AssembleRDTB(
-                chunkData, mf.Unk08Hex,
-                mf.PtrCount, mf.BoneCount);
-
-            File.WriteAllBytes(
-                outputPath, result);
+            File.WriteAllBytes(outputPath, result);
 
             Console.WriteLine();
             Console.ForegroundColor =
                 ConsoleColor.Green;
             Console.WriteLine(
-                "[OK] RDTB created: " +
-                outputPath);
+                "[OK] RDTB created: " + outputPath);
             Console.ResetColor();
             Console.WriteLine(
-                $"     Size     : " +
+                "     Size     : " +
                 result.Length.ToString("N0") +
                 " bytes");
             Console.WriteLine(
-                $"     Original : " +
+                "     Original : " +
                 mf.SourceSize.ToString("N0") +
                 " bytes");
 
@@ -1929,16 +1772,13 @@ namespace HMSTHModdingTool.RDTB
                 Console.ForegroundColor =
                     ConsoleColor.Green;
                 Console.WriteLine(
-                    "     Match    : ✓ " +
-                    "identical size");
+                    "     Match    : ✓ identical size");
                 Console.ResetColor();
             }
             else
             {
-                int diff =
-                    result.Length - mf.SourceSize;
-                string sign =
-                    diff > 0 ? "+" : "";
+                int diff = result.Length - mf.SourceSize;
+                string sign = diff > 0 ? "+" : "";
                 Console.ForegroundColor =
                     ConsoleColor.Yellow;
                 Console.WriteLine(
@@ -1948,9 +1788,346 @@ namespace HMSTHModdingTool.RDTB
             }
         }
 
-        // ═════════════════════════════════════
-        // REPLACE SINGLE CHUNK
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
+        // ASSEMBLE RDTB WITH SLOT MAP - v2.1
+        //
+        // This is the core fix. Instead of writing
+        // sequential slots 0..N, we reconstruct
+        // the exact original 14-slot table by:
+        //
+        // 1. Getting the original slot values
+        //    (from _source_original.rdtb or
+        //     manifest slot_table_raw)
+        //
+        // 2. For each of the 14 slots:
+        //    - If orig slot was 0 → keep 0
+        //    - If orig slot pointed to a known
+        //      chunk → remap to its new offset
+        //    - If orig slot was aliased (same value
+        //      as another slot) → remap to same
+        //      new offset as that chunk
+        //
+        // 3. This perfectly handles:
+        //    - Small RDTB (10 slots used, rest 0)
+        //    - Mirrored RDTB (slots 11/12/13 alias
+        //      slot 10)
+        //    - BOY big RDTB (all 14 unique)
+        //    - Modified chunk sizes (grows/shrinks)
+        // ═══════════════════════════════════════
+        private static byte[] AssembleRDTBWithSlots(
+            SortedDictionary<int, byte[]>
+                chunksBySlot,
+            RDTBManifest mf,
+            byte[] originalData)
+        {
+            byte[] unk08 =
+                HexStringToBytes(mf.Unk08Hex);
+            if (unk08 == null || unk08.Length < 4)
+                unk08 = new byte[]
+                    { 0x00, 0x76, 0x07, 0x40 };
+
+            // ── Get original slot table ──────
+            int[] origSlots = new int[OFFSET_TBL_SLOTS];
+
+            if (originalData != null &&
+                originalData.Length >= HEADER_SIZE)
+            {
+                // Read directly from original file
+                for (int s = 0;
+                     s < OFFSET_TBL_SLOTS; s++)
+                {
+                    int pos = OFFSET_TBL_START + s * 4;
+                    origSlots[s] =
+                        BitConverter.ToInt32(
+                            originalData, pos);
+                }
+            }
+            else if (mf.OriginalSlotTable != null &&
+                     mf.OriginalSlotTable.Length
+                     == OFFSET_TBL_SLOTS)
+            {
+                // From manifest
+                Array.Copy(
+                    mf.OriginalSlotTable,
+                    origSlots, OFFSET_TBL_SLOTS);
+            }
+            else
+            {
+                // Fallback: build from chunk slot
+                // indices (best effort)
+                foreach (var kv in chunksBySlot)
+                    if (kv.Key < OFFSET_TBL_SLOTS)
+                        origSlots[kv.Key] = 1;
+                // Will be computed below
+            }
+
+            // ── Compute new chunk positions ──
+            // Place chunks back-to-back from 0x48
+            // in slot index order
+            var newChunkOffset =
+                new Dictionary<int, int>();
+            int cursor = HEADER_SIZE;
+
+            foreach (var kv in chunksBySlot)
+            {
+                newChunkOffset[kv.Key] = cursor;
+                cursor += kv.Value.Length;
+            }
+
+            // ── Build new 14-slot table ──────
+            // Map: original_offset → new_offset
+            var origToNew =
+                new Dictionary<int, int>();
+
+            foreach (var kv in chunksBySlot)
+            {
+                int slotIdx = kv.Key;
+                if (slotIdx >= OFFSET_TBL_SLOTS)
+                    continue;
+                int origOff = origSlots[slotIdx];
+                if (origOff > 0 &&
+                    !origToNew.ContainsKey(origOff))
+                    origToNew[origOff] =
+                        newChunkOffset[slotIdx];
+            }
+
+            int[] newSlots = new int[OFFSET_TBL_SLOTS];
+            for (int s = 0;
+                 s < OFFSET_TBL_SLOTS; s++)
+            {
+                int origVal = origSlots[s];
+
+                if (origVal == 0)
+                {
+                    // Preserve zero
+                    newSlots[s] = 0;
+                    continue;
+                }
+
+                if (origToNew.TryGetValue(
+                        origVal, out int newOff))
+                {
+                    // Direct match or aliased match
+                    newSlots[s] = newOff;
+                    continue;
+                }
+
+                // Slot not in any chunk's original
+                // offset - try to find an alias
+                // (another slot with same origVal
+                // that IS in origToNew)
+                bool aliasFound = false;
+                for (int s2 = 0;
+                     s2 < OFFSET_TBL_SLOTS; s2++)
+                {
+                    if (origSlots[s2] == origVal &&
+                        origToNew.TryGetValue(
+                            origVal, out int nv2))
+                    {
+                        newSlots[s] = nv2;
+                        aliasFound = true;
+                        break;
+                    }
+                }
+
+                if (aliasFound) continue;
+
+                // Last resort: find chunk whose
+                // original offset is closest ≤
+                // origVal and compute delta
+                int bestOrig = -1;
+                int bestSlot = -1;
+                foreach (var kv in chunksBySlot)
+                {
+                    int cs = kv.Key;
+                    if (cs >= OFFSET_TBL_SLOTS)
+                        continue;
+                    int ov = origSlots[cs];
+                    if (ov > 0 && ov <= origVal &&
+                        ov > bestOrig)
+                    {
+                        bestOrig = ov;
+                        bestSlot = cs;
+                    }
+                }
+
+                if (bestSlot >= 0)
+                {
+                    int delta = origVal - bestOrig;
+                    newSlots[s] =
+                        newChunkOffset[bestSlot] +
+                        delta;
+                }
+                else
+                {
+                    // Truly unknown - preserve
+                    // original value as-is
+                    newSlots[s] = origVal;
+                }
+            }
+
+            // ── Build header ─────────────────
+            byte[] header = new byte[HEADER_SIZE];
+            header[0] = (byte)'R';
+            header[1] = (byte)'D';
+            header[2] = (byte)'T';
+            header[3] = (byte)'B';
+            header[4] = 0x00;
+            header[5] = 0x01;
+            header[6] = 0x00;
+            header[7] = 0x00;
+
+            // Preserve exact bytes 4-11 from
+            // original (version + unk08)
+            if (originalData != null &&
+                originalData.Length >= 12)
+            {
+                Array.Copy(
+                    originalData, 4,
+                    header, 4, 8);
+            }
+            else
+            {
+                Array.Copy(unk08, 0, header, 8, 4);
+            }
+
+            // ptr_count and bone_count
+            header[0x0C] =
+                (byte)(mf.PtrCount & 0xFF);
+            header[0x0D] =
+                (byte)((mf.PtrCount >> 8) & 0xFF);
+            header[0x0E] =
+                (byte)(mf.BoneCount & 0xFF);
+            header[0x0F] =
+                (byte)((mf.BoneCount >> 8) & 0xFF);
+
+            // Write new slot table
+            for (int s = 0;
+                 s < OFFSET_TBL_SLOTS; s++)
+            {
+                int pos = OFFSET_TBL_START + s * 4;
+                byte[] ob =
+                    BitConverter.GetBytes(newSlots[s]);
+                Array.Copy(ob, 0, header, pos, 4);
+            }
+
+            // ── Assemble final file ──────────
+            byte[] result = new byte[cursor];
+            Array.Copy(header, 0,
+                result, 0, HEADER_SIZE);
+
+            foreach (var kv in chunksBySlot)
+            {
+                int slotIdx = kv.Key;
+                byte[] data = kv.Value;
+                int offset = newChunkOffset[slotIdx];
+                Array.Copy(data, 0,
+                    result, offset, data.Length);
+            }
+
+            return result;
+        }
+
+        // ═══════════════════════════════════════
+        // LEGACY AssembleRDTB
+        // Kept for DoReplaceChunk compatibility
+        // ═══════════════════════════════════════
+        private static byte[] AssembleRDTB(
+            List<byte[]> chunkData,
+            string unk08Hex,
+            int ptrCount,
+            int boneCount,
+            int[] slotTable = null)
+        {
+            byte[] unk08 =
+                HexStringToBytes(unk08Hex);
+            if (unk08 == null || unk08.Length < 4)
+                unk08 = new byte[]
+                    { 0x00, 0x76, 0x07, 0x40 };
+
+            if (chunkData == null ||
+                chunkData.Count == 0)
+                throw new ArgumentException(
+                    "No chunks provided");
+
+            var offsets = new int[chunkData.Count];
+            int cursor = HEADER_SIZE;
+            for (int i = 0; i < chunkData.Count; i++)
+            {
+                offsets[i] = cursor;
+                cursor += chunkData[i].Length;
+            }
+
+            byte[] header = new byte[HEADER_SIZE];
+            header[0] = (byte)'R';
+            header[1] = (byte)'D';
+            header[2] = (byte)'T';
+            header[3] = (byte)'B';
+            header[4] = 0x00;
+            header[5] = 0x01;
+            header[6] = 0x00;
+            header[7] = 0x00;
+
+            Array.Copy(unk08, 0, header, 8, 4);
+
+            header[0x0C] =
+                (byte)(ptrCount & 0xFF);
+            header[0x0D] =
+                (byte)((ptrCount >> 8) & 0xFF);
+            header[0x0E] =
+                (byte)(boneCount & 0xFF);
+            header[0x0F] =
+                (byte)((boneCount >> 8) & 0xFF);
+
+            if (slotTable != null &&
+                slotTable.Length ==
+                OFFSET_TBL_SLOTS)
+            {
+                // Use provided slot table
+                // (will be remapped externally)
+                for (int s = 0;
+                     s < OFFSET_TBL_SLOTS; s++)
+                {
+                    int pos =
+                        OFFSET_TBL_START + s * 4;
+                    byte[] ob =
+                        BitConverter.GetBytes(
+                            slotTable[s]);
+                    Array.Copy(ob, 0, header, pos, 4);
+                }
+            }
+            else
+            {
+                // Sequential fallback
+                for (int i = 0;
+                     i < offsets.Length &&
+                     i < OFFSET_TBL_SLOTS; i++)
+                {
+                    int pos =
+                        OFFSET_TBL_START + i * 4;
+                    byte[] ob =
+                        BitConverter.GetBytes(
+                            offsets[i]);
+                    Array.Copy(ob, 0, header, pos, 4);
+                }
+            }
+
+            byte[] result = new byte[cursor];
+            Array.Copy(header, 0,
+                result, 0, HEADER_SIZE);
+            for (int i = 0;
+                 i < chunkData.Count; i++)
+                Array.Copy(chunkData[i], 0,
+                    result, offsets[i],
+                    chunkData[i].Length);
+
+            return result;
+        }
+
+        // ═══════════════════════════════════════
+        // REPLACE SINGLE CHUNK - FIXED v2.1
+        // Now preserves original slot table
+        // ═══════════════════════════════════════
         private void DoReplaceChunk(
             int chunkIndex,
             string chunkFile)
@@ -1958,8 +2135,7 @@ namespace HMSTHModdingTool.RDTB
             Console.WriteLine();
             Console.ForegroundColor =
                 ConsoleColor.Cyan;
-            Console.WriteLine(
-                "[+] Replace Chunk");
+            Console.WriteLine("[+] Replace Chunk");
             Console.ResetColor();
 
             if (!File.Exists(chunkFile))
@@ -1982,140 +2158,47 @@ namespace HMSTHModdingTool.RDTB
             Console.WriteLine(
                 $"    New: {newData.Length:N0} B");
 
-            _chunks[chunkIndex] =
-                new RDTBChunk
-                {
-                    Index = chunkIndex,
-                    Offset = oldChunk.Offset,
-                    Size = newData.Length,
-                    Data = newData,
-                };
+            _chunks[chunkIndex] = new RDTBChunk
+            {
+                Index = chunkIndex,
+                SlotIndex = oldChunk.SlotIndex,
+                Offset = oldChunk.Offset,
+                Size = newData.Length,
+                Data = newData,
+            };
 
-            var allData = new List<byte[]>();
+            // Build chunk by slot map
+            var chunksBySlot =
+                new SortedDictionary<int, byte[]>();
             foreach (var c in _chunks)
-                allData.Add(c.Data);
+                chunksBySlot[c.SlotIndex] = c.Data;
 
-            string unk08Hex = BitConverter
-                .ToString(_unk08)
-                .Replace("-", "")
-                .ToLower();
+            // Build a minimal manifest
+            var mf = new RDTBManifest
+            {
+                SourceSize = _data.Length,
+                Unk08Hex = BitConverter
+                    .ToString(_unk08)
+                    .Replace("-", "").ToLower(),
+                PtrCount = _ptrCount,
+                BoneCount = _boneCount,
+                OriginalSlotTable = _slotTable,
+                Chunks = new List<RDTBManifestChunk>(),
+            };
 
-            byte[] result = AssembleRDTB(
-                allData, unk08Hex,
-                _ptrCount, _boneCount);
+            byte[] result = AssembleRDTBWithSlots(
+                chunksBySlot, mf, _data);
 
-            File.WriteAllBytes(
-                _filepath, result);
-
+            File.WriteAllBytes(_filepath, result);
             Console.ForegroundColor =
                 ConsoleColor.Green;
-            Console.WriteLine(
-                "[OK] Chunk replaced!");
+            Console.WriteLine("[OK] Chunk replaced!");
             Console.ResetColor();
         }
 
-        // ═════════════════════════════════════
-        // ASSEMBLE RDTB
-        // ═════════════════════════════════════
-        private static byte[] AssembleRDTB(
-            List<byte[]> chunkData,
-            string unk08Hex,
-            int ptrCount,
-            int boneCount)
-        {
-            byte[] unk08 =
-                HexStringToBytes(unk08Hex);
-
-            if (chunkData == null ||
-                chunkData.Count == 0)
-                throw new ArgumentException(
-                    "No chunks provided");
-
-            // NO ALIGNMENT AT ALL.
-            // The original RDTB places chunks
-            // back-to-back with no gaps and no
-            // 16-byte alignment. Even the first
-            // chunk starts at 0x48 (not aligned).
-            // Just place each chunk immediately
-            // after the previous one.
-            var offsets =
-                new int[chunkData.Count];
-            int cursor = HEADER_SIZE;
-            for (int i = 0;
-                 i < chunkData.Count; i++)
-            {
-                offsets[i] = cursor;
-                cursor += chunkData[i].Length;
-            }
-
-            // Build header
-            byte[] header =
-                new byte[HEADER_SIZE];
-            header[0] = (byte)'R';
-            header[1] = (byte)'D';
-            header[2] = (byte)'T';
-            header[3] = (byte)'B';
-            header[4] = 0x00;
-            header[5] = 0x01;
-            header[6] = 0x00;
-            header[7] = 0x00;
-
-            if (unk08 == null ||
-                unk08.Length < 4)
-                unk08 = new byte[] {
-                    0x00, 0x76, 0x07, 0x40 };
-            Array.Copy(
-                unk08, 0, header, 8, 4);
-
-            header[0x0C] =
-                (byte)(ptrCount & 0xFF);
-            header[0x0D] =
-                (byte)((ptrCount >> 8) & 0xFF);
-            header[0x0E] =
-                (byte)(boneCount & 0xFF);
-            header[0x0F] =
-                (byte)((boneCount >> 8) & 0xFF);
-
-            for (int i = 0;
-                 i < offsets.Length; i++)
-            {
-                int pos =
-                    OFFSET_TBL_START + i * 4;
-                header[pos + 0] =
-                    (byte)(offsets[i] & 0xFF);
-                header[pos + 1] =
-                    (byte)((offsets[i] >> 8)
-                           & 0xFF);
-                header[pos + 2] =
-                    (byte)((offsets[i] >> 16)
-                           & 0xFF);
-                header[pos + 3] =
-                    (byte)((offsets[i] >> 24)
-                           & 0xFF);
-            }
-
-            // Assemble (gaps between chunks
-            // stay as zero from new[])
-            byte[] result =
-                new byte[cursor];
-            Array.Copy(
-                header, 0, result, 0,
-                HEADER_SIZE);
-            for (int i = 0;
-                 i < chunkData.Count; i++)
-            {
-                Array.Copy(
-                    chunkData[i], 0,
-                    result, offsets[i],
-                    chunkData[i].Length);
-            }
-
-            return result;
-        }
-
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
         // SHOW SKELETON TREE
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
         private void ShowSkeletonTree()
         {
             Console.WriteLine();
@@ -2126,8 +2209,7 @@ namespace HMSTHModdingTool.RDTB
                 Path.GetFileName(_filepath) +
                 $"  ({_boneCount} bones)");
             Console.ResetColor();
-            Console.WriteLine(
-                new string('═', 64));
+            Console.WriteLine(new string('═', 64));
 
             if (_skeleton == null)
             {
@@ -2144,48 +2226,33 @@ namespace HMSTHModdingTool.RDTB
                 new Dictionary<int, List<int>>();
             var roots = new List<int>();
 
-            for (int i = 0;
-                 i < bones.Count; i++)
+            for (int i = 0; i < bones.Count; i++)
                 children[i] = new List<int>();
 
-            for (int i = 0;
-                 i < bones.Count; i++)
+            for (int i = 0; i < bones.Count; i++)
             {
                 var b = bones[i];
                 if (b.IsRoot)
-                {
                     roots.Add(i);
-                }
-                else if (
-                    b.ParentIndex <
-                    bones.Count)
-                {
-                    children[b.ParentIndex]
-                        .Add(i);
-                }
+                else if (b.ParentIndex < bones.Count)
+                    children[b.ParentIndex].Add(i);
             }
 
             if (roots.Count == 0)
-            {
                 for (int i = 0;
                      i < bones.Count; i++)
                     PrintBoneNode(
                         i, bones, children,
                         "  ", true);
-            }
             else
-            {
                 for (int i = 0;
                      i < roots.Count; i++)
                     PrintBoneNode(
                         roots[i],
-                        bones, children,
-                        "  ",
+                        bones, children, "  ",
                         i == roots.Count - 1);
-            }
 
-            Console.WriteLine(
-                new string('═', 64));
+            Console.WriteLine(new string('═', 64));
         }
 
         private static void PrintBoneNode(
@@ -2196,12 +2263,9 @@ namespace HMSTHModdingTool.RDTB
             bool isLast)
         {
             var b = bones[idx];
-            string conn =
-                isLast ? "└─" : "├─";
-
+            string conn = isLast ? "└─" : "├─";
             Console.Write(prefix + conn);
-            Console.ForegroundColor =
-                b.IsRoot
+            Console.ForegroundColor = b.IsRoot
                 ? ConsoleColor.Yellow
                 : ConsoleColor.White;
             Console.Write(
@@ -2219,26 +2283,20 @@ namespace HMSTHModdingTool.RDTB
             Console.ResetColor();
             Console.WriteLine();
 
-            string ext =
-                isLast ? "   " : "│  ";
-            var ch =
-                children.ContainsKey(idx)
+            string ext = isLast ? "   " : "│  ";
+            var ch = children.ContainsKey(idx)
                 ? children[idx]
                 : new List<int>();
-
-            for (int j = 0;
-                 j < ch.Count; j++)
-            {
+            for (int j = 0; j < ch.Count; j++)
                 PrintBoneNode(
                     ch[j], bones, children,
                     prefix + ext,
                     j == ch.Count - 1);
-            }
         }
 
-        // ═════════════════════════════════════
-        // COMPARE WITH ANOTHER RDTB
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
+        // COMPARE
+        // ═══════════════════════════════════════
         private void CompareWith(
             RDTBArchive other)
         {
@@ -2246,10 +2304,9 @@ namespace HMSTHModdingTool.RDTB
             Console.ForegroundColor =
                 ConsoleColor.Cyan;
             Console.WriteLine(
-                "[+] Compare RDTB Files v2.0");
+                "[+] Compare RDTB Files v2.1");
             Console.ResetColor();
-            Console.WriteLine(
-                new string('═', 64));
+            Console.WriteLine(new string('═', 64));
             Console.WriteLine(
                 $"    A: " +
                 Path.GetFileName(_filepath) +
@@ -2264,41 +2321,43 @@ namespace HMSTHModdingTool.RDTB
             CmpField("file_size",
                 _data.Length.ToString("N0"),
                 other._data.Length.ToString("N0"),
-                _data.Length ==
-                other._data.Length);
+                _data.Length == other._data.Length);
             CmpField("ptr_count",
                 _ptrCount.ToString(),
                 other._ptrCount.ToString(),
-                _ptrCount ==
-                other._ptrCount);
+                _ptrCount == other._ptrCount);
             CmpField("bone_count",
                 _boneCount.ToString(),
                 other._boneCount.ToString(),
-                _boneCount ==
-                other._boneCount);
+                _boneCount == other._boneCount);
             CmpField("chunk_count",
                 _chunks.Count.ToString(),
                 other._chunks.Count.ToString(),
-                _chunks.Count ==
-                other._chunks.Count);
+                _chunks.Count == other._chunks.Count);
+
+            // Compare slot tables
+            Console.WriteLine();
+            for (int s = 0;
+                 s < OFFSET_TBL_SLOTS; s++)
+            {
+                // We can only compare if we know
+                // original vs rebuilt slot values
+                // This is shown in VRDTB
+            }
 
             Console.WriteLine();
             int mx = Math.Max(
                 _chunks.Count,
                 other._chunks.Count);
-
             for (int i = 0; i < mx; i++)
             {
                 var ca = i < _chunks.Count
                     ? _chunks[i] : null;
-                var cb =
-                    i < other._chunks.Count
+                var cb = i < other._chunks.Count
                     ? other._chunks[i] : null;
-
                 int sza = ca?.Size ?? 0;
                 int szb = cb?.Size ?? 0;
                 bool same = sza == szb;
-
                 Console.ForegroundColor = same
                     ? ConsoleColor.Green
                     : ConsoleColor.Red;
@@ -2311,15 +2370,12 @@ namespace HMSTHModdingTool.RDTB
                     $"A: {sza,10:N0} B  " +
                     $"B: {szb,10:N0} B");
             }
-
-            Console.WriteLine(
-                new string('═', 64));
+            Console.WriteLine(new string('═', 64));
         }
 
         private static void CmpField(
             string label,
-            string a, string b,
-            bool same)
+            string a, string b, bool same)
         {
             Console.ForegroundColor = same
                 ? ConsoleColor.Green
@@ -2328,13 +2384,13 @@ namespace HMSTHModdingTool.RDTB
                 $"    {(same ? "✓" : "✗")}  " +
                 $"{label,-20}");
             Console.ResetColor();
-            Console.WriteLine(
-                $"A={a}   B={b}");
+            Console.WriteLine($"A={a}   B={b}");
         }
 
-        // ═════════════════════════════════════
-        // VERIFY (byte-for-byte)
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
+        // VERIFY - ENHANCED v2.1
+        // Now also shows slot table comparison
+        // ═══════════════════════════════════════
         private void VerifyAgainst(
             string rebuiltPath)
         {
@@ -2347,10 +2403,9 @@ namespace HMSTHModdingTool.RDTB
             Console.ForegroundColor =
                 ConsoleColor.Cyan;
             Console.WriteLine(
-                "[+] Verify RDTB v2.0");
+                "[+] Verify RDTB v2.1");
             Console.ResetColor();
-            Console.WriteLine(
-                new string('═', 64));
+            Console.WriteLine(new string('═', 64));
             Console.WriteLine(
                 "    Original: " +
                 Path.GetFileName(_filepath) +
@@ -2360,23 +2415,58 @@ namespace HMSTHModdingTool.RDTB
                 Path.GetFileName(rebuiltPath) +
                 $"  ({reb.Length:N0} B)");
 
+            // ── Compare slot tables ──────────
+            bool slotsSame = true;
+            if (orig.Length >= HEADER_SIZE &&
+                reb.Length >= HEADER_SIZE)
+            {
+                Console.WriteLine();
+                Console.WriteLine(
+                    "    Slot Table Comparison:");
+                Console.WriteLine(
+                    $"    {"Slt",3}  " +
+                    $"{"Original",12}  " +
+                    $"{"Rebuilt",12}  " +
+                    $"Match");
+                Console.WriteLine(
+                    "    " + new string('-', 44));
+
+                for (int s = 0;
+                     s < OFFSET_TBL_SLOTS; s++)
+                {
+                    int pos =
+                        OFFSET_TBL_START + s * 4;
+                    int ov = BitConverter.ToInt32(
+                        orig, pos);
+                    int rv = BitConverter.ToInt32(
+                        reb, pos);
+                    bool match = ov == rv;
+                    if (!match) slotsSame = false;
+                    Console.ForegroundColor = match
+                        ? ConsoleColor.DarkGray
+                        : ConsoleColor.Red;
+                    Console.WriteLine(
+                        $"    {s,3}  " +
+                        $"0x{ov & 0xFFFFFFFF:X8}  " +
+                        $"0x{rv & 0xFFFFFFFF:X8}  " +
+                        (match ? "✓" : "✗ DIFF"));
+                    Console.ResetColor();
+                }
+            }
+
+            // ── Byte-for-byte compare ────────
             int minLen = Math.Min(
                 orig.Length, reb.Length);
             int diffOff = -1;
-
             for (int i = 0; i < minLen; i++)
-            {
                 if (orig[i] != reb[i])
-                {
-                    diffOff = i;
-                    break;
-                }
-            }
+                { diffOff = i; break; }
 
             if (diffOff == -1 &&
                 orig.Length != reb.Length)
                 diffOff = minLen;
 
+            Console.WriteLine();
             if (diffOff == -1)
             {
                 Console.ForegroundColor =
@@ -2395,24 +2485,32 @@ namespace HMSTHModdingTool.RDTB
                 Console.ResetColor();
 
                 int total = 0;
-                for (int i = 0;
-                     i < minLen; i++)
-                    if (orig[i] != reb[i])
-                        total++;
+                for (int i = 0; i < minLen; i++)
+                    if (orig[i] != reb[i]) total++;
                 total += Math.Abs(
                     orig.Length - reb.Length);
                 Console.WriteLine(
-                    $"    Total diff: " +
-                    $"{total:N0} bytes");
+                    $"    Total diff: {total:N0} bytes");
+
+                if (!slotsSame)
+                {
+                    Console.ForegroundColor =
+                        ConsoleColor.Yellow;
+                    Console.WriteLine(
+                        "    → Slot table mismatch." +
+                        " Run XRDTB on original" +
+                        " then CRDTB from that" +
+                        " folder.");
+                    Console.ResetColor();
+                }
             }
 
-            Console.WriteLine(
-                new string('═', 64));
+            Console.WriteLine(new string('═', 64));
         }
 
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
         // SCAN FOLDER
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
         private static void DoScanFolder(
             string folderPath)
         {
@@ -2420,11 +2518,10 @@ namespace HMSTHModdingTool.RDTB
             Console.ForegroundColor =
                 ConsoleColor.Cyan;
             Console.WriteLine(
-                "[+] RDTB Folder Scan v2.0: " +
+                "[+] RDTB Folder Scan v2.1: " +
                 folderPath);
             Console.ResetColor();
-            Console.WriteLine(
-                new string('═', 72));
+            Console.WriteLine(new string('═', 72));
 
             if (!Directory.Exists(folderPath))
             {
@@ -2436,11 +2533,9 @@ namespace HMSTHModdingTool.RDTB
                 return;
             }
 
-            string[] files =
-                Directory.GetFiles(
-                    folderPath,
-                    "*.rdtb",
-                    SearchOption.AllDirectories);
+            string[] files = Directory.GetFiles(
+                folderPath, "*.rdtb",
+                SearchOption.AllDirectories);
 
             if (files.Length == 0)
             {
@@ -2453,7 +2548,6 @@ namespace HMSTHModdingTool.RDTB
             }
 
             Array.Sort(files);
-
             Console.WriteLine(
                 $"  {"FILE",-32} " +
                 $"{"SIZE",12}  " +
@@ -2461,30 +2555,23 @@ namespace HMSTHModdingTool.RDTB
                 $"{"BONES",6}  " +
                 $"{"MATS",5}  " +
                 $"{"EMB",4}  NOTE");
-            Console.WriteLine(
-                new string('─', 80));
+            Console.WriteLine(new string('─', 80));
 
             foreach (string f in files)
             {
                 try
                 {
-                    var arc =
-                        new RDTBArchive(f);
+                    var arc = new RDTBArchive(f);
                     arc.Load();
-
                     string name =
                         Path.GetFileName(f);
                     if (name.Length > 32)
-                        name =
-                            name.Substring(0, 29)
-                            + "...";
-
-                    string note =
-                        ClassifyRDTB(
-                            arc._chunks,
-                            arc._boneCount,
-                            arc._data.Length);
-
+                        name = name.Substring(0, 29)
+                               + "...";
+                    string note = ClassifyRDTB(
+                        arc._chunks,
+                        arc._boneCount,
+                        arc._data.Length);
                     Console.ForegroundColor =
                         GetNoteColor(note);
                     Console.WriteLine(
@@ -2507,9 +2594,7 @@ namespace HMSTHModdingTool.RDTB
                     Console.ResetColor();
                 }
             }
-
-            Console.WriteLine(
-                new string('═', 72));
+            Console.WriteLine(new string('═', 72));
         }
 
         private static string ClassifyRDTB(
@@ -2519,19 +2604,17 @@ namespace HMSTHModdingTool.RDTB
         {
             if (fileSize < 50_000)
                 return "PROP/TOOL";
-            if (fileSize < 200_000 &&
-                boneCount < 20)
+            if (fileSize < 200_000 && boneCount < 20)
                 return "SIMPLE NPC";
-            if (fileSize < 700_000 &&
-                boneCount >= 20)
+            if (fileSize < 700_000 && boneCount >= 20)
                 return "NPC CHARACTER";
             if (fileSize >= 700_000)
                 return "PLAYER/COMPLEX";
             return "UNKNOWN";
         }
 
-        private static ConsoleColor
-            GetNoteColor(string note)
+        private static ConsoleColor GetNoteColor(
+            string note)
         {
             if (note.Contains("PLAYER"))
                 return ConsoleColor.Yellow;
@@ -2543,13 +2626,12 @@ namespace HMSTHModdingTool.RDTB
             return ConsoleColor.Gray;
         }
 
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
         // EOF CHECK
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
         private bool HasEofTerminator()
         {
-            if (_data == null ||
-                _data.Length < 16)
+            if (_data == null || _data.Length < 16)
                 return false;
             int o = _data.Length - 16;
             return
@@ -2563,9 +2645,10 @@ namespace HMSTHModdingTool.RDTB
                 _data[o + 7] == 0x00;
         }
 
-        // ═════════════════════════════════════
-        // MANIFEST READER
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
+        // MANIFEST READER - FIXED v2.1
+        // Reads slot_index and slot_table_raw
+        // ═══════════════════════════════════════
         private static RDTBManifest ReadManifest(
             string path)
         {
@@ -2591,6 +2674,36 @@ namespace HMSTHModdingTool.RDTB
             mf.BoneCount = JsonReadInt(
                 json, "bone_count");
 
+            // ── Read slot_table_raw ──────────
+            int slotTblIdx =
+                json.IndexOf("\"slot_table_raw\":");
+            if (slotTblIdx >= 0)
+            {
+                int ab = json.IndexOf('[', slotTblIdx);
+                int ae = json.IndexOf(']', ab);
+                if (ab >= 0 && ae > ab)
+                {
+                    string inner = json.Substring(
+                        ab + 1, ae - ab - 1);
+                    string[] parts =
+                        inner.Split(',');
+                    var slots =
+                        new List<int>();
+                    foreach (var p in parts)
+                    {
+                        string t = p.Trim();
+                        if (int.TryParse(
+                                t, out int sv))
+                            slots.Add(sv);
+                    }
+                    if (slots.Count ==
+                        OFFSET_TBL_SLOTS)
+                        mf.OriginalSlotTable =
+                            slots.ToArray();
+                }
+            }
+
+            // ── Read chunks array ────────────
             int chunksStart =
                 json.IndexOf("\"chunks\":");
             if (chunksStart < 0)
@@ -2599,7 +2712,6 @@ namespace HMSTHModdingTool.RDTB
 
             int arrStart =
                 json.IndexOf('[', chunksStart);
-            // Find matching ]
             int depth = 0;
             int arrEnd = -1;
             for (int i = arrStart;
@@ -2610,74 +2722,88 @@ namespace HMSTHModdingTool.RDTB
                 {
                     depth--;
                     if (depth == 0)
-                    {
-                        arrEnd = i;
-                        break;
-                    }
+                    { arrEnd = i; break; }
                 }
             }
 
             if (arrStart < 0 || arrEnd < 0)
                 throw new InvalidDataException(
-                    "Manifest: bad chunks");
+                    "Manifest: bad chunks array");
 
-            string chunksJson =
-                json.Substring(
-                    arrStart,
-                    arrEnd - arrStart + 1);
+            string chunksJson = json.Substring(
+                arrStart, arrEnd - arrStart + 1);
 
-            int pos = 0;
-            while (pos < chunksJson.Length)
+            int pos2 = 0;
+            while (pos2 < chunksJson.Length)
             {
                 int objStart =
-                    chunksJson.IndexOf(
-                        '{', pos);
+                    chunksJson.IndexOf('{', pos2);
                 if (objStart < 0) break;
-
                 int objEnd =
-                    chunksJson.IndexOf(
-                        '}', objStart);
+                    chunksJson.IndexOf('}', objStart);
                 if (objEnd < 0) break;
 
-                string obj =
-                    chunksJson.Substring(
-                        objStart,
-                        objEnd - objStart + 1);
+                string obj = chunksJson.Substring(
+                    objStart,
+                    objEnd - objStart + 1);
 
-                var chunk =
-                    new RDTBManifestChunk
-                    {
-                        Index = JsonReadInt(
-                            obj, "index"),
-                        Filename = JsonReadString(
-                            obj, "filename"),
-                        Label = JsonReadString(
-                            obj, "label"),
-                        Offset = JsonReadInt(
-                            obj, "offset"),
-                        Size = JsonReadInt(
-                            obj, "size"),
-                        HasEof = JsonReadBool(
-                            obj, "has_eof"),
-                        HasVIF = JsonReadBool(
-                            obj, "has_vif"),
-                        VIFCount = JsonReadInt(
-                            obj, "vif_count"),
-                    };
+                int sequentialIdx =
+                    JsonReadInt(obj, "index");
+                // ── Read slot_index if present
+                // Fall back to index if not ──
+                int slotIdx =
+                    JsonReadInt(obj, "slot_index");
+                if (slotIdx == 0 &&
+                    sequentialIdx != 0)
+                {
+                    // Old manifest without slot_index
+                    // Try to infer from filename
+                    string fn = JsonReadString(
+                        obj, "filename");
+                    // filename = "NN_label.bin"
+                    // NN is the slot number
+                    if (fn.Length >= 2 &&
+                        int.TryParse(
+                            fn.Substring(0, 2),
+                            out int fnSlot))
+                        slotIdx = fnSlot;
+                    else
+                        slotIdx = sequentialIdx;
+                }
+
+                var chunk = new RDTBManifestChunk
+                {
+                    Index = sequentialIdx,
+                    SlotIndex = slotIdx,
+                    Filename = JsonReadString(
+                        obj, "filename"),
+                    Label = JsonReadString(
+                        obj, "label"),
+                    Offset = JsonReadInt(
+                        obj, "offset"),
+                    Size = JsonReadInt(
+                        obj, "size"),
+                    HasEof = JsonReadBool(
+                        obj, "has_eof"),
+                    HasVIF = JsonReadBool(
+                        obj, "has_vif"),
+                    VIFCount = JsonReadInt(
+                        obj, "vif_count"),
+                };
 
                 mf.Chunks.Add(chunk);
-                pos = objEnd + 1;
+                pos2 = objEnd + 1;
             }
 
             mf.Chunks.Sort(
                 (a, b) =>
-                a.Index.CompareTo(b.Index));
+                a.SlotIndex.CompareTo(b.SlotIndex));
 
             return mf;
         }
 
         // ─────────────────────────────────────
-        // JSON helpers (simple, no dependency)
+        // JSON helpers
         // ─────────────────────────────────────
         private static string JsonReadString(
             string json, string key)
@@ -2685,17 +2811,13 @@ namespace HMSTHModdingTool.RDTB
             string search = $"\"{key}\"";
             int ki = json.IndexOf(search);
             if (ki < 0) return "";
-            int colon =
-                json.IndexOf(':', ki);
+            int colon = json.IndexOf(':', ki);
             if (colon < 0) return "";
-            int q1 =
-                json.IndexOf('"', colon + 1);
+            int q1 = json.IndexOf('"', colon + 1);
             if (q1 < 0) return "";
-            int q2 =
-                json.IndexOf('"', q1 + 1);
+            int q2 = json.IndexOf('"', q1 + 1);
             if (q2 < 0) return "";
-            return json.Substring(
-                q1 + 1, q2 - q1 - 1);
+            return json.Substring(q1 + 1, q2 - q1 - 1);
         }
 
         private static int JsonReadInt(
@@ -2708,8 +2830,8 @@ namespace HMSTHModdingTool.RDTB
             while (vs < json.Length &&
                    (json[vs] == ' ' ||
                     json[vs] == '\t' ||
-                    json[vs] == '\r' ||
-                    json[vs] == '\n'))
+                    json[vs] == '\n' ||
+                    json[vs] == '\r'))
                 vs++;
             if (vs >= json.Length) return 0;
             int ve = vs;
@@ -2720,8 +2842,8 @@ namespace HMSTHModdingTool.RDTB
             if (ve == vs) return 0;
             int.TryParse(
                 json.Substring(vs, ve - vs),
-                out int result);
-            return result;
+                out int result2);
+            return result2;
         }
 
         private static bool JsonReadBool(
@@ -2734,33 +2856,27 @@ namespace HMSTHModdingTool.RDTB
             while (vs < json.Length &&
                    json[vs] == ' ')
                 vs++;
-            return
-                vs < json.Length &&
-                json[vs] == 't';
+            return vs < json.Length &&
+                   json[vs] == 't';
         }
 
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
         // UTILITY
-        // ═════════════════════════════════════
+        // ═══════════════════════════════════════
         private static byte[] HexStringToBytes(
             string hex)
         {
             if (string.IsNullOrEmpty(hex))
                 return new byte[4];
-            hex = hex
-                .Replace(" ", "")
-                .Replace("-", "");
+            hex = hex.Replace(" ", "")
+                     .Replace("-", "");
             if (hex.Length % 2 != 0)
                 hex = "0" + hex;
             byte[] result =
                 new byte[hex.Length / 2];
-            for (int i = 0;
-                 i < result.Length; i++)
-            {
+            for (int i = 0; i < result.Length; i++)
                 result[i] = Convert.ToByte(
-                    hex.Substring(i * 2, 2),
-                    16);
-            }
+                    hex.Substring(i * 2, 2), 16);
             return result;
         }
     }
