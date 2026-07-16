@@ -2970,6 +2970,11 @@ namespace HMSTHModdingTool
                             .ApplyModV3(args);
                         break;
 
+                    case "boymodv4":
+                        BoyModPresets
+                            .ApplyModV4(args);
+                        break;
+
                     case "boyoriginal":
                     case "boyrestore":
                     case "boyback":
@@ -3198,6 +3203,7 @@ namespace HMSTHModdingTool
                     "xvag",       "rvag",
                     "boyscale",   "bonescale",
                     "boymodv2",   "boymodv3",
+                    "boymodv4",
                     "boyoriginal","boyrestore",
                     "boyback",    "boyorig",
                     "x3d",        "c3d",
@@ -4343,6 +4349,12 @@ namespace HMSTHModdingTool
             Console.WriteLine(
                 "  -boymodv3 -bin" +
                 " 00_skeleton.bin");
+            Console.WriteLine(
+                "  -boymodv4 -bin" +
+                " 00_skeleton.bin");
+            Console.WriteLine(
+                "  -boymodv4 -rdtb" +
+                " BOY_00000.rdtb");
             Console.WriteLine(
                 "  -boyoriginal" +
                 " BOY_00000.rdtb");
