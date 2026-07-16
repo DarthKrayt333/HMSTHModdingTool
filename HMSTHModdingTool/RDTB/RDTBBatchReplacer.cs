@@ -77,7 +77,9 @@ namespace HMSTHModdingTool.RDTB
             float[] customNormal,
             bool deleteAll,
             TargetRdtbFormat targetFormat
-                = TargetRdtbFormat.Mirror)
+                = TargetRdtbFormat.Mirror,
+            Dictionary<int, int> normalsCopyMap
+                = null)
         {
             Console.WriteLine();
             Console.ForegroundColor =
@@ -96,6 +98,31 @@ namespace HMSTHModdingTool.RDTB
             Console.WriteLine(
                 "    Normals: " +
                 normalsMode);
+
+            Console.WriteLine(
+                "    Normals: " +
+                normalsMode);
+
+            // ADDITIVE D: Show normals-copy
+            // operations queued for this build
+            if (normalsCopyMap != null
+                && normalsCopyMap.Count > 0)
+            {
+                Console.WriteLine(
+                    "    Normal copies: "
+                    + normalsCopyMap.Count);
+                foreach (var kv in
+                    normalsCopyMap)
+                {
+                    Console.WriteLine(
+                        "      batch " + kv.Key
+                        + " <- batch "
+                        + kv.Value);
+                }
+            }
+
+            Directory.CreateDirectory(
+                outDir);
 
             Directory.CreateDirectory(
                 outDir);
@@ -125,6 +152,9 @@ namespace HMSTHModdingTool.RDTB
                 Path.Combine(
                     folderPath,
                     "_info.txt");
+
+            float autoScaleInvert = 1.0f;
+
             if (File.Exists(infoPath))
             {
                 foreach (string line in
@@ -145,6 +175,31 @@ namespace HMSTHModdingTool.RDTB
                             t.Substring(
                                 12)
                             .Trim();
+                    if (t.StartsWith(
+                        "Auto Scale:"))
+                    {
+                        float sc;
+                        if (float.TryParse(
+                            t.Substring(11)
+                                .Trim(),
+                            System.Globalization
+                                .NumberStyles
+                                .Float,
+                            System.Globalization
+                                .CultureInfo
+                                .InvariantCulture,
+                            out sc) && sc > 0f)
+                        {
+                            autoScaleInvert =
+                                1.0f / sc;
+                            Console.WriteLine(
+                                "    [auto-scale"
+                                + " invert] x" +
+                                autoScaleInvert
+                                    .ToString(
+                                        "F4"));
+                        }
+                    }
                 }
             }
 
@@ -166,6 +221,117 @@ namespace HMSTHModdingTool.RDTB
             byte[] rdtbData =
                 File.ReadAllBytes(
                     srcRdtb);
+
+            // ── HOOK: EXPAND TABLES IF
+            // NEW BATCHES EXIST IN FOLDER ──
+            {
+                var adderScan =
+                    RDTBBatchAdder.ScanFolder(
+                        folderPath, rdtbData);
+
+                if (adderScan.NeedsRestructure)
+                {
+                    Console.ForegroundColor =
+                        ConsoleColor.Cyan;
+                    Console.WriteLine(
+                        "    [RESTRUCTURE]"
+                        + " New batches: [" +
+                        string.Join(", ",
+                            adderScan
+                                .NewBatchIndices)
+                        + "]  Deleted: [" +
+                        string.Join(", ",
+                            adderScan
+                                .DeletedBatchIndices)
+                        + "]");
+                    Console.ResetColor();
+
+                    // Process expands the
+                    // material table, mesh
+                    // chunk pointer table,
+                    // and lookup chunks to
+                    // fit the new batch count
+                    rdtbData =
+                        RDTBBatchAdder.Process(
+                            rdtbData, adderScan);
+
+                    // Overwrite _source.rdtb
+                    // so ALL downstream code
+                    // reads the expanded layout
+                    File.WriteAllBytes(
+                        srcRdtb, rdtbData);
+
+                    Console.ForegroundColor =
+                        ConsoleColor.Green;
+                    Console.WriteLine(
+                        "    [OK] Tables"
+                        + " expanded to " +
+                        (adderScan.MaxBatchIndex
+                         + 1) +
+                        " batches");
+                    Console.ResetColor();
+                }
+            }
+
+            // NOW read batch count from
+            // the (possibly expanded) data
+            int totalBatches =
+                GetBatchCount(rdtbData);
+
+            // ── CHECK FOR NEW/REMOVED BATCHES ──
+            // If the folder has batch indices
+            // beyond the original RDTB count,
+            // or original batches are missing,
+            // pre-process the RDTB to expand/
+            // shrink its tables BEFORE the
+            // normal cbatches rebuild runs.
+            {
+                var adderScan =
+                    RDTBBatchAdder.ScanFolder(
+                        folderPath, rdtbData);
+
+                if (adderScan.NeedsRestructure)
+                {
+                    Console.ForegroundColor =
+                        ConsoleColor.Cyan;
+                    Console.WriteLine(
+                        "    [RESTRUCTURE]"
+                        + " Expanding tables"
+                        + " for batch"
+                        + " add/remove...");
+                    Console.ResetColor();
+
+                    rdtbData =
+                        RDTBBatchAdder.Process(
+                            rdtbData, adderScan);
+
+                    // Overwrite _source.rdtb
+                    // with expanded version
+                    // so ALL downstream code
+                    // (mesh chunk reading,
+                    // material table parsing,
+                    // lookup chunk updates)
+                    // works on the correct
+                    // expanded byte layout.
+                    File.WriteAllBytes(
+                        srcRdtb, rdtbData);
+
+                    Console.ForegroundColor =
+                        ConsoleColor.Green;
+                    Console.WriteLine(
+                        "    [OK] Tables"
+                        + " expanded ("
+                        + adderScan
+                            .NewBatchIndices
+                            .Count +
+                        " new, " +
+                        adderScan
+                            .DeletedBatchIndices
+                            .Count +
+                        " deleted)");
+                    Console.ResetColor();
+                }
+            }
 
             // Find batch OBJs
             string[] modelDirs =
@@ -209,9 +375,8 @@ namespace HMSTHModdingTool.RDTB
                 batchObjs.Count +
                 " batch OBJ files");
 
-            // Missing batches
-            int totalBatches =
-                GetBatchCount(rdtbData);
+
+
             var missingBatches =
                 new List<int>();
             for (int i = 0;
@@ -334,6 +499,26 @@ namespace HMSTHModdingTool.RDTB
             int nPtrs =
                 (int)(firstPtr / 4);
 
+            // DEBUG
+            Console.WriteLine(
+                "    [DEBUG] nPtrs=" + nPtrs);
+            for (int dbgi = 0;
+                 dbgi < Math.Min(nPtrs, 5);
+                 dbgi++)
+            {
+                uint dbgp =
+                    BitConverter.ToUInt32(
+                        meshChunk,
+                        dbgi * 4);
+                Console.WriteLine(
+                    "      ptr[" + dbgi
+                    + "] = 0x" +
+                    dbgp.ToString("X8") +
+                    (dbgp == 0
+                        ? " NULL"
+                        : " OK"));
+            }
+
             // Read original normals
             var origNormals =
                 new Dictionary<int,
@@ -354,6 +539,35 @@ namespace HMSTHModdingTool.RDTB
                             meshChunk,
                             bi, nPtrs);
                 }
+            }
+
+            // ADDITIVE: If normals-copy map is
+            // provided, ensure we have original
+            // normals loaded for every SOURCE
+            // batch referenced in the map, even
+            // when normalsMode != "match".
+            if (normalsCopyMap != null
+                && normalsCopyMap.Count > 0)
+            {
+                var srcBatches =
+                    new HashSet<int>(
+                        normalsCopyMap.Values);
+                foreach (int srcBi in srcBatches)
+                {
+                    if (!origNormals.ContainsKey(
+                            srcBi))
+                    {
+                        origNormals[srcBi] =
+                            ReadBatchNormals(
+                                meshChunk,
+                                srcBi, nPtrs);
+                    }
+                }
+                Console.WriteLine(
+                    "    Loaded " +
+                    srcBatches.Count +
+                    " source batch normals"
+                    + " for copy operations");
             }
 
             // ═══════════════════════
@@ -388,9 +602,34 @@ namespace HMSTHModdingTool.RDTB
                     uvs, tris,
                     vertFlags);
 
+                // Invert auto-scale so
+                // game gets exact original
+                // coordinates back
+                if (autoScaleInvert != 1.0f)
+                {
+                    for (int si = 0;
+                         si < verts.Count;
+                         si++)
+                    {
+                        verts[si] =
+                            new float[]
+                            {
+                verts[si][0] *
+                    autoScaleInvert,
+                verts[si][1] *
+                    autoScaleInvert,
+                verts[si][2] *
+                    autoScaleInvert,
+                            };
+                    }
+                }
 
                 // Apply normals
                 if (normalsMode ==
+                    "zero")
+
+                    // Apply normals
+                    if (normalsMode ==
                     "zero")
                 {
                     for (int i = 0;
@@ -497,6 +736,90 @@ namespace HMSTHModdingTool.RDTB
                             normals[i] =
                                 new float[]
                                 { 0, 0, 0 };
+                    }
+                }
+
+
+                // ADDITIVE: normals-copy override.
+                // If this batch is a DEST in the
+                // copy map, replace its normals
+                // with normals from the SOURCE
+                // batch using nearest-vertex match.
+                // This overrides any prior mode.
+                if (normalsCopyMap != null
+                    && normalsCopyMap.TryGetValue(
+                        bi, out int srcBatchIdx)
+                    && origNormals.ContainsKey(
+                        srcBatchIdx))
+                {
+                    var srcSamples =
+                        origNormals[srcBatchIdx];
+                    if (srcSamples.Count > 0)
+                    {
+                        Console.WriteLine(
+                            "      [copy] batch "
+                            + bi + " normals <- "
+                            + "batch "
+                            + srcBatchIdx
+                            + " (" +
+                            srcSamples.Count
+                            + " src samples)");
+
+                        // Find nearest source
+                        // vertex for each dest
+                        // vertex and copy its
+                        // normal. This gives
+                        // best result when new
+                        // geometry is similar
+                        // shape (like hand vs
+                        // face).
+                        for (int i = 0;
+                             i < verts.Count; i++)
+                        {
+                            float vx = verts[i][0];
+                            float vy = verts[i][1];
+                            float vz = verts[i][2];
+                            float bestD =
+                                float.MaxValue;
+                            float[] bestN =
+                                new float[]
+                                { 0, 1, 0 };
+                            foreach (var s in
+                                srcSamples)
+                            {
+                                float dx =
+                                    vx - s.pos[0];
+                                float dy =
+                                    vy - s.pos[1];
+                                float dz =
+                                    vz - s.pos[2];
+                                float d =
+                                    dx * dx +
+                                    dy * dy +
+                                    dz * dz;
+                                if (d < bestD)
+                                {
+                                    bestD = d;
+                                    bestN = s.norm;
+                                }
+                            }
+                            if (i < normals.Count)
+                                normals[i] = bestN;
+                        }
+                    }
+                    else
+                    {
+                        Console.ForegroundColor =
+                            ConsoleColor.Yellow;
+                        Console.WriteLine(
+                            "      [!] batch "
+                            + bi
+                            + " normals-copy src"
+                            + " batch " +
+                            srcBatchIdx
+                            + " has no normals"
+                            + " - skipping");
+                        Console.ResetColor();
                     }
                 }
 
@@ -620,6 +943,14 @@ namespace HMSTHModdingTool.RDTB
                 finalRdtb.Length
                     .ToString("N0") +
                 " B");
+
+            // ═══════════════════════
+            // IN-PLACE SCALE/MOVE
+            // (standalone module)
+            // ═══════════════════════
+            RDTBInPlaceScaler.Apply(
+                folderPath, outRdtb);
+
 
             // ═══════════════════════
             // BUILD GDTB ONCE
@@ -1737,15 +2068,23 @@ namespace HMSTHModdingTool.RDTB
             }
 
             // Replace modified batches
-            // (never touch null slots)
+            // If the batch has new data,
+            // write it even if the original
+            // pointer was NULL (this handles
+            // newly added batches where
+            // the pointer table was expanded
+            // but the pointer slot was zero)
             foreach (var kv in
                 newBatches)
             {
-                if (kv.Key < nPtrs &&
-                    !isNull[kv.Key])
+                if (kv.Key < nPtrs)
                 {
                     batchData[kv.Key] =
                         kv.Value;
+                    // Mark as non-null so
+                    // it gets a real pointer
+                    // in the rebuilt table
+                    isNull[kv.Key] = false;
                 }
             }
 
