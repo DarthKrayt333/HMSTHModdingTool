@@ -65,6 +65,18 @@ namespace HMSTHModdingTool.RDTB
                 catch { }
             }
 
+            // DEBUG: show what was extracted
+            Console.WriteLine(
+                "    Textures in tempTex: " +
+                Directory.GetFiles(
+                    tempTex, "*.bmp").Length);
+            foreach (var dbgBmp in
+                Directory.GetFiles(
+                    tempTex, "*.bmp"))
+                Console.WriteLine(
+                    "      " +
+                    Path.GetFileName(dbgBmp));
+
             byte[] data =
                 File.ReadAllBytes(
                     rdtbPath);
@@ -327,6 +339,166 @@ namespace HMSTHModdingTool.RDTB
                 sortedPtrs.Count +
                 " unique ptrs");
 
+            // ── AUTO-SCALE ──────────────
+            float autoScale = 1.0f;
+            {
+                float mnx = float.MaxValue;
+                float mxx = float.MinValue;
+                float mny = float.MaxValue;
+                float mxy = float.MinValue;
+                float mnz = float.MaxValue;
+                float mxz = float.MinValue;
+                bool any = false;
+
+                for (int i = 0;
+                     i < safeBatchCount;
+                     i++)
+                {
+                    uint bPtr = batchPtrs[i];
+                    if (bPtr == 0 ||
+                        bPtr >= (uint)
+                            meshChunk.Length)
+                        continue;
+
+                    uint nPtr =
+                        (uint)meshChunk.Length;
+                    foreach (uint sp in
+                        sortedPtrs)
+                    {
+                        if (sp > bPtr)
+                        {
+                            nPtr = sp;
+                            break;
+                        }
+                    }
+
+                    int bSz =
+                        (int)(nPtr - bPtr);
+                    if (bSz <= 16) continue;
+
+                    byte[] bd =
+                        new byte[bSz];
+                    Array.Copy(meshChunk,
+                        (int)bPtr, bd, 0, bSz);
+
+                    int pos = 0;
+                    while (pos + 16 <=
+                        bd.Length)
+                    {
+                        if (bd[pos] != 0x00
+                            || bd[pos + 1]
+                                != 0x80
+                            || bd[pos + 3]
+                                != 0x6C)
+                        {
+                            pos += 4;
+                            continue;
+                        }
+                        int vcb = bd[pos + 4];
+                        if (vcb < 1 ||
+                            vcb > 96)
+                        {
+                            pos += 4;
+                            continue;
+                        }
+                        int vS = pos + 16;
+                        if (vS + vcb * 16 >
+                            bd.Length)
+                        {
+                            pos += 4;
+                            continue;
+                        }
+                        for (int vi = 0;
+                             vi < vcb; vi++)
+                        {
+                            int vo =
+                                vS + vi * 16;
+                            if (vo + 16 >
+                                bd.Length)
+                                break;
+                            float vx =
+                                BitConverter
+                                    .ToSingle(
+                                        bd,
+                                        vo + 4);
+                            float vy =
+                                BitConverter
+                                    .ToSingle(
+                                        bd,
+                                        vo + 8);
+                            float vz =
+                                BitConverter
+                                    .ToSingle(
+                                        bd,
+                                        vo + 12);
+                            if (float.IsNaN(vx)
+                                || float
+                                    .IsNaN(vy)
+                                || float
+                                    .IsNaN(vz)
+                                || float
+                                    .IsInfinity(
+                                        vx)
+                                || float
+                                    .IsInfinity(
+                                        vy)
+                                || float
+                                    .IsInfinity(
+                                        vz))
+                                continue;
+                            if (vx < mnx)
+                                mnx = vx;
+                            if (vx > mxx)
+                                mxx = vx;
+                            if (vy < mny)
+                                mny = vy;
+                            if (vy > mxy)
+                                mxy = vy;
+                            if (vz < mnz)
+                                mnz = vz;
+                            if (vz > mxz)
+                                mxz = vz;
+                            any = true;
+                        }
+                        int bSize =
+                            16 +
+                            3 * vcb * 16 +
+                            16;
+                        pos += bSize;
+                    }
+                }
+
+                if (any)
+                {
+                    float dx = mxx - mnx;
+                    float dy = mxy - mny;
+                    float dz = mxz - mnz;
+                    float maxDim =
+                        Math.Max(dx,
+                        Math.Max(dy, dz));
+                    const float TARGET = 100f;
+                    const float THRESHOLD =
+                        250f;
+                    if (maxDim > THRESHOLD)
+                    {
+                        autoScale =
+                            TARGET / maxDim;
+                        Console.WriteLine(
+                            "    [auto-scale]"
+                            + " " +
+                            autoScale
+                                .ToString(
+                                    "F4") +
+                            "x (was " +
+                            maxDim
+                                .ToString(
+                                    "F0") +
+                            " units)");
+                    }
+                }
+            }
+
+
             int totalWritten = 0;
             int totalSkipped = 0;
 
@@ -346,6 +518,10 @@ namespace HMSTHModdingTool.RDTB
                 Directory.CreateDirectory(
                     modelDir);
 
+                // Copy matching texture
+                // AND all textures as
+                // fallback so Blender
+                // can find them
                 string srcTex =
                     Path.Combine(
                         tempTex,
@@ -370,6 +546,35 @@ namespace HMSTHModdingTool.RDTB
                             true);
                     }
                     catch { }
+                }
+                else
+                {
+                    // Texture not found by
+                    // exact index - copy ALL
+                    // available textures so
+                    // at least one matches
+                    // (handles embedded RDTBs
+                    // from SRDB where tex_ids
+                    // may not start at 0)
+                    foreach (var anyBmp in
+                        Directory.GetFiles(
+                            tempTex,
+                            "texture_*.bmp"))
+                    {
+                        string anyDst =
+                            Path.Combine(
+                                modelDir,
+                                Path.GetFileName(
+                                    anyBmp));
+                        try
+                        {
+                            File.Copy(
+                                anyBmp,
+                                anyDst,
+                                true);
+                        }
+                        catch { }
+                    }
                 }
 
                 Console.WriteLine(
@@ -521,7 +726,8 @@ namespace HMSTHModdingTool.RDTB
                             bdata,
                             objFile,
                             mtlFile,
-                            bi, texId);
+                            bi, texId,
+                            autoScale);
                     if (ok)
                         totalWritten++;
                     else
@@ -539,6 +745,38 @@ namespace HMSTHModdingTool.RDTB
                 totalSkipped +
                 " skipped");
             Console.ResetColor();
+
+            // Also copy all textures
+            // to root output folder
+            // so combined viewers
+            // (x3d _all_obj) can
+            // find them too
+            string rootTexDir =
+                Path.Combine(
+                    outDir, "textures");
+            Directory.CreateDirectory(
+                rootTexDir);
+            foreach (var anyBmp in
+                Directory.GetFiles(
+                    tempTex,
+                    "texture_*.bmp"))
+            {
+                string rootDst =
+                    Path.Combine(
+                        rootTexDir,
+                        Path.GetFileName(
+                            anyBmp));
+                try
+                {
+                    if (!File.Exists(
+                            rootDst))
+                        File.Copy(
+                            anyBmp,
+                            rootDst,
+                            true);
+                }
+                catch { }
+            }
 
             File.Copy(rdtbPath,
                 Path.Combine(outDir,
@@ -636,6 +874,19 @@ namespace HMSTHModdingTool.RDTB
                     + " folder to"
                     + " change"
                     + " textures!");
+
+                // Save auto-scale to _info.txt
+                if (autoScale != 1.0f)
+                {
+                    sw.WriteLine(
+                        "Auto Scale: " +
+                        autoScale.ToString(
+                            "F6",
+                            System.Globalization
+                                .CultureInfo
+                                .InvariantCulture));
+                }
+
             }
 
             Console.ForegroundColor =
@@ -785,7 +1036,9 @@ namespace HMSTHModdingTool.RDTB
                 string normalsMode,
                 float[] customNormal,
                 bool deleteAll,
-                string targetFormat)
+                string targetFormat,
+                Dictionary<int, int>
+                    normalsCopyMap = null)
         {
             RDTBBatchReplacer
                 .TargetRdtbFormat fmt;
@@ -796,32 +1049,25 @@ namespace HMSTHModdingTool.RDTB
             {
                 case "big":
                     fmt = RDTBBatchReplacer
-                        .TargetRdtbFormat
-                        .Big;
+                        .TargetRdtbFormat.Big;
                     break;
                 case "small":
                     fmt = RDTBBatchReplacer
-                        .TargetRdtbFormat
-                        .Small;
+                        .TargetRdtbFormat.Small;
                     break;
                 case "mirror":
                 case "mirrored":
                     fmt = RDTBBatchReplacer
-                        .TargetRdtbFormat
-                        .Mirror;
+                        .TargetRdtbFormat.Mirror;
                     break;
                 case "match":
                 case "auto":
                     fmt = RDTBBatchReplacer
-                        .TargetRdtbFormat
-                        .Match;
+                        .TargetRdtbFormat.Match;
                     break;
                 default:
-                    // cbatches default
-                    // is ALWAYS mirror
                     fmt = RDTBBatchReplacer
-                        .TargetRdtbFormat
-                        .Mirror;
+                        .TargetRdtbFormat.Mirror;
                     break;
             }
             RDTBBatchReplacer.Build(
@@ -830,7 +1076,8 @@ namespace HMSTHModdingTool.RDTB
                 normalsMode,
                 customNormal,
                 deleteAll,
-                fmt);
+                fmt,
+                normalsCopyMap);
         }
 
         private static bool
@@ -839,7 +1086,8 @@ namespace HMSTHModdingTool.RDTB
                 string objPath,
                 string mtlPath,
                 int batchIdx,
-                int texId)
+                int texId,
+                float autoScale = 1.0f)
         {
             List<float[]> allV =
                 new List<float[]>();
@@ -899,13 +1147,22 @@ namespace HMSTHModdingTool.RDTB
                     if (uo + 16 >
                         bdata.Length)
                         break;
+
                     allV.Add(new float[]
                     {
-                        BitConverter.ToSingle(bdata, vo + 4),
-                        BitConverter.ToSingle(bdata, vo + 8),
-                        BitConverter.ToSingle(bdata, vo + 12),
-                        BitConverter.ToUInt32(bdata, vo + 0)   // bone weight flag
+                        BitConverter.ToSingle(
+                            bdata, vo + 4)
+                            * autoScale,
+                        BitConverter.ToSingle(
+                            bdata, vo + 8)
+                            * autoScale,
+                        BitConverter.ToSingle(
+                            bdata, vo + 12)
+                            * autoScale,
+                        BitConverter.ToUInt32(
+                            bdata, vo + 0)
                     });
+
                     allN.Add(new float[]
                     {
                         BitConverter
