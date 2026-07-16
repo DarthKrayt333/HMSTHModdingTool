@@ -36,8 +36,31 @@ with the new `xbatches`/`cbatches` per-batch workflow.*
 
 ## Changelog
 
-### Version v1.4.7-Beta
+### Version v1.4.8-Beta
 
+- **Fixed** SRDB modding — embedded RDTB texture
+  assignments in the `_obj` folder output now
+  correctly align to their real material IDs from
+  the RDTB material table. Previously, only the
+  first batch got the correct texture and all
+  other batches fell back to `mat_00`. Fix works
+  for both standalone `.rdtb` files AND `.srdb`
+  extracted embeds. Applies automatically after
+  `x3d` — no new commands needed.
+- **Fixed** Scaling & moving unchanged-vertex
+  batches — when you scale or move a batch in
+  Blender without changing its vertex count, the
+  edit now correctly applies in-game. Previously
+  the tool would skip these batches entirely
+  because it only detected vertex-count changes.
+  New standalone in-place XYZ overwrite runs
+  automatically after `cbatches`, preserves all
+  VIF structure (headers, GIF tags, EOF
+  terminators, bone weights, normals, UVs), and
+  works across BIG, SMALL, MIRRORED RDTBs, and
+  SRDB embedded RDTBs. Silent no-op when no
+  scale/move edits detected — zero risk to
+  unedited batches.
 - **Added** `fixps2logo` — replicates Disc Patcher
   v3.0 functionality directly inside the tool
   (fixes PS2 logo + Master Disc markers so PS2
