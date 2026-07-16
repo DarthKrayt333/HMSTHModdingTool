@@ -1,12 +1,13 @@
 using HMSTHModdingTool;
 using HMSTHModdingTool.BMP;
-using HMSTHModdingTool.RDTB;
+using HMSTHModdingTool.BoyMods;
 using HMSTHModdingTool.GDTB;
-using HMSTHModdingTool.SRDB;
 using HMSTHModdingTool.IO;
 using HMSTHModdingTool.IO.Compression;
-using HMSTHModdingTool.BoyMods;
+using HMSTHModdingTool.RDTB;
+using HMSTHModdingTool.SRDB;
 using System;
+using System.Collections.Generic;
 using System.IO;
 
 namespace HMSTHModdingTool
@@ -20,7 +21,7 @@ namespace HMSTHModdingTool
             "HMSTHModdingTool original as" +
             " HDATextTool by gdkchan";
         const string TOOL_VERSION =
-            "v1.4.7-Beta";
+            "v1.4.8-Beta";
         const string TOOL_AUTHOR =
             "gdkchan + DarthKrayt333" +
             " & HMSTH Community";
@@ -155,6 +156,266 @@ namespace HMSTHModdingTool
                     .ToLower();
             return cmd.ToLower();
         }
+
+        // ═════════════════════════════════════
+        // HELPERS FOR SRDB BATCHES
+        // ═════════════════════════════════════
+        static bool IsSRDBFile(string path)
+        {
+            if (!File.Exists(path))
+                return false;
+            try
+            {
+                byte[] hdr = new byte[4];
+                using (var fs =
+                    File.OpenRead(path))
+                {
+                    fs.Read(hdr, 0, 4);
+                }
+                return hdr[0] == 0x53 &&
+                       hdr[1] == 0x52 &&
+                       hdr[2] == 0x44 &&
+                       hdr[3] == 0x42;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        static bool IsSRDBFolder(
+            string folder)
+        {
+            if (!Directory.Exists(folder))
+                return false;
+            string src = Path.Combine(
+                folder, "_source.srdb");
+            return File.Exists(src);
+        }
+
+        static List<byte[]>
+    ParseSRDBForCSRDB(
+        byte[] data)
+        {
+            if (data.Length < 4 ||
+                data[0] != 0x53 ||
+                data[1] != 0x52 ||
+                data[2] != 0x44 ||
+                data[3] != 0x42)
+                throw new
+                    InvalidDataException(
+                    "Not SRDB");
+
+            uint firstOff =
+                BitConverter
+                    .ToUInt32(
+                        data, 0x0C);
+            var chunkOffs =
+                new List<uint>();
+            int pos = 0x0C;
+            while (pos + 4 <=
+                (int)firstOff)
+            {
+                uint v =
+                    BitConverter
+                        .ToUInt32(
+                            data, pos);
+                if (v == 0) break;
+                if (v > (uint)
+                    data.Length)
+                    break;
+                chunkOffs.Add(v);
+                pos += 4;
+            }
+
+            uint c2Start =
+                chunkOffs[2];
+            uint masterSize =
+                BitConverter
+                    .ToUInt32(
+                        data,
+                        (int)c2Start);
+
+            var masterPtrs =
+                new List<uint>();
+            pos = (int)c2Start;
+            while (pos <
+                (int)(c2Start +
+                      masterSize))
+            {
+                uint v =
+                    BitConverter
+                        .ToUInt32(
+                            data, pos);
+                if (v == 0) break;
+                masterPtrs.Add(v);
+                pos += 4;
+            }
+
+            var rdtbs =
+                new List<byte[]>();
+            for (int i = 0;
+                 i < masterPtrs
+                     .Count; i++)
+            {
+                uint s = c2Start +
+                    masterPtrs[i];
+                uint e;
+                if (i + 1 <
+                    masterPtrs.Count)
+                    e = c2Start +
+                        masterPtrs[
+                            i + 1];
+                else
+                    e = (uint)
+                        data.Length;
+                int sz =
+                    (int)(e - s);
+                if (sz <= 0)
+                    continue;
+                byte[] rdtb =
+                    new byte[sz];
+                Array.Copy(
+                    data, (int)s,
+                    rdtb, 0, sz);
+                rdtbs.Add(rdtb);
+            }
+            return rdtbs;
+        }
+
+        static byte[]
+            RebuildSRDBFromList(
+                byte[] original,
+                List<byte[]>
+                    newRdtbs)
+        {
+            uint firstOff =
+                BitConverter
+                    .ToUInt32(
+                        original,
+                        0x0C);
+            var chunkOffs =
+                new List<uint>();
+            int pos = 0x0C;
+            while (pos + 4 <=
+                (int)firstOff)
+            {
+                uint v =
+                    BitConverter
+                        .ToUInt32(
+                            original,
+                            pos);
+                if (v == 0) break;
+                if (v > (uint)
+                    original.Length)
+                    break;
+                chunkOffs.Add(v);
+                pos += 4;
+            }
+
+            int headerSize =
+                (int)chunkOffs[0];
+            byte[] chunk0 =
+                new byte[
+                    chunkOffs[1] -
+                    chunkOffs[0]];
+            Array.Copy(original,
+                (int)chunkOffs[0],
+                chunk0, 0,
+                chunk0.Length);
+            byte[] chunk1 =
+                new byte[
+                    chunkOffs[2] -
+                    chunkOffs[1]];
+            Array.Copy(original,
+                (int)chunkOffs[1],
+                chunk1, 0,
+                chunk1.Length);
+
+            uint masterSize =
+                BitConverter
+                    .ToUInt32(
+                        original,
+                        (int)chunkOffs[2]);
+
+            var nm =
+                new List<int>();
+            int cursor =
+                (int)masterSize;
+            foreach (var rdtb in
+                newRdtbs)
+            {
+                nm.Add(cursor);
+                cursor +=
+                    rdtb.Length;
+            }
+
+            byte[] nc2 =
+                new byte[cursor];
+            for (int i = 0;
+                 i < nm.Count; i++)
+            {
+                byte[] p =
+                    BitConverter
+                        .GetBytes(
+                            (uint)nm[i]);
+                Array.Copy(p, 0,
+                    nc2, i * 4, 4);
+            }
+            for (int i = 0;
+                 i < newRdtbs
+                     .Count; i++)
+                Array.Copy(
+                    newRdtbs[i], 0,
+                    nc2, nm[i],
+                    newRdtbs[i]
+                        .Length);
+
+            int total =
+                headerSize +
+                chunk0.Length +
+                chunk1.Length +
+                nc2.Length;
+            byte[] result =
+                new byte[total];
+            Array.Copy(original,
+                0, result, 0, 12);
+
+            int[] newOffs = {
+                headerSize,
+                headerSize +
+                    chunk0.Length,
+                headerSize +
+                    chunk0.Length +
+                    chunk1.Length,
+            };
+            int hp = 0x0C;
+            foreach (int off in
+                newOffs)
+            {
+                if (hp + 4 >
+                    headerSize)
+                    break;
+                byte[] p =
+                    BitConverter
+                        .GetBytes(
+                            (uint)off);
+                Array.Copy(p, 0,
+                    result, hp, 4);
+                hp += 4;
+            }
+            Array.Copy(chunk0, 0,
+                result, newOffs[0],
+                chunk0.Length);
+            Array.Copy(chunk1, 0,
+                result, newOffs[1],
+                chunk1.Length);
+            Array.Copy(nc2, 0,
+                result, newOffs[2],
+                nc2.Length);
+            return result;
+        }
+
 
         // ═════════════════════════════════════
         // RUN COMMAND
@@ -1378,10 +1639,158 @@ namespace HMSTHModdingTool
                     // ════════════════════════
                     case "xsrdb":
                         RequireArgs(args, 3,
-                            "-xsrdb <file.srdb>" +
-                            " <out_folder>");
-                        SRDBArchive.Extract(
-                            args[1], args[2]);
+                            "-xsrdb <file.srdb>"
+                            + " <out_folder>");
+                        {
+                            string xsIn =
+                                args[1];
+                            string xsOut =
+                                args[2];
+
+                            if (!File.Exists(
+                                    xsIn))
+                            {
+                                TextOut
+                                    .PrintError(
+                                    "File not "
+                                    + "found: "
+                                    + xsIn);
+                                break;
+                            }
+
+                            byte[] xsData =
+                                File
+                                    .ReadAllBytes(
+                                        xsIn);
+
+                            Console
+                                .ForegroundColor
+                                = ConsoleColor
+                                    .Cyan;
+                            Console.WriteLine(
+                                "[+] Extract "
+                                + "SRDB (master "
+                                + "table)");
+                            Console
+                                .ResetColor();
+                            Console.WriteLine(
+                                "    SRDB: "
+                                + Path
+                                    .GetFileName(
+                                        xsIn));
+                            Console.WriteLine(
+                                "    Out:  "
+                                + xsOut);
+
+                            Directory
+                                .CreateDirectory(
+                                    xsOut);
+
+                            File.Copy(xsIn,
+                                Path.Combine(
+                                    xsOut,
+                                    "_source.srdb"),
+                                true);
+
+                            var xsRdtbs =
+                                ParseSRDBForCSRDB(
+                                    xsData);
+
+                            Console.WriteLine(
+                                "    RDTBs: "
+                                + xsRdtbs.Count);
+                            Console.WriteLine();
+
+                            for (int i = 0;
+                                 i < xsRdtbs
+                                     .Count;
+                                 i++)
+                            {
+                                string fn =
+                                    "embedded_"
+                                    + i.ToString(
+                                        "D2")
+                                    + ".rdtb";
+                                string fp =
+                                    Path.Combine(
+                                        xsOut,
+                                        fn);
+                                File
+                                    .WriteAllBytes(
+                                        fp,
+                                        xsRdtbs[i]);
+                                Console
+                                    .ForegroundColor
+                                    = ConsoleColor
+                                        .Green;
+                                Console.WriteLine(
+                                    "    ["
+                                    + i.ToString(
+                                        "D2")
+                                    + "] " + fn
+                                    + "  "
+                                    + xsRdtbs[i]
+                                        .Length
+                                        .ToString(
+                                            "N0")
+                                    + " B");
+                                Console
+                                    .ResetColor();
+                            }
+
+                            // Write layout
+                            var layout =
+                                new System.Text
+                                    .StringBuilder();
+                            layout.AppendLine(
+                                "# SRDB Layout");
+                            layout.AppendLine(
+                                "source="
+                                + Path
+                                    .GetFileName(
+                                        xsIn));
+                            layout.AppendLine(
+                                "source_size="
+                                + xsData.Length);
+                            layout.AppendLine(
+                                "n_rdtbs="
+                                + xsRdtbs.Count);
+                            layout.AppendLine();
+                            layout.AppendLine(
+                                "# index size "
+                                + "filename");
+                            for (int i = 0;
+                                 i < xsRdtbs
+                                     .Count;
+                                 i++)
+                            {
+                                layout.AppendLine(
+                                    i + " "
+                                    + xsRdtbs[i]
+                                        .Length
+                                    + " embedded_"
+                                    + i.ToString(
+                                        "D2")
+                                    + ".rdtb");
+                            }
+                            File.WriteAllText(
+                                Path.Combine(
+                                    xsOut,
+                                    "_layout.txt"),
+                                layout.ToString());
+
+                            Console.WriteLine();
+                            Console
+                                .ForegroundColor
+                                = ConsoleColor
+                                    .Green;
+                            Console.WriteLine(
+                                "[OK] Extracted "
+                                + xsRdtbs.Count
+                                + " RDTBs");
+                            Console
+                                .ResetColor();
+                        }
                         break;
 
                     // ════════════════════════
@@ -1390,10 +1799,149 @@ namespace HMSTHModdingTool
                     // ════════════════════════
                     case "csrdb":
                         RequireArgs(args, 3,
-                            "-csrdb <in_folder>" +
-                            " <file.srdb>");
-                        SRDBArchive.Create(
-                            args[1], args[2]);
+                            "-csrdb <in_folder>"
+                            + " <file.srdb>");
+                        {
+                            string csrdbIn =
+                                args[1];
+                            string csrdbOut =
+                                args[2];
+
+                            // Check if folder
+                            // has _source.srdb
+                            // (new format from
+                            //  xsrdb extract)
+                            string srcSrdb =
+                                Path.Combine(
+                                    csrdbIn,
+                                    "_source.srdb");
+
+                            if (File.Exists(
+                                    srcSrdb))
+                            {
+                                // Use master
+                                // table method
+                                Console
+                                    .ForegroundColor
+                                    = ConsoleColor
+                                        .Cyan;
+                                Console.WriteLine(
+                                    "[CSRDB] Using"
+                                    + " master table"
+                                    + " rebuild");
+                                Console
+                                    .ResetColor();
+
+                                byte[] origData =
+                                    File
+                                        .ReadAllBytes(
+                                            srcSrdb);
+
+                                // Parse to get
+                                // RDTB count
+                                var sInfo =
+                                    ParseSRDBForCSRDB(
+                                        origData);
+
+                                // Load each
+                                // embedded RDTB
+                                var newList =
+                                    new List<
+                                        byte[]>();
+                                for (int i = 0;
+                                     i < sInfo
+                                         .Count;
+                                     i++)
+                                {
+                                    string fn =
+                                        Path.Combine(
+                                            csrdbIn,
+                                            "embedded_"
+                                            + i.ToString(
+                                                "D2")
+                                            + ".rdtb");
+                                    if (File.Exists(
+                                            fn))
+                                    {
+                                        byte[] rd =
+                                            File
+                                                .ReadAllBytes(
+                                                    fn);
+                                        newList.Add(
+                                            rd);
+                                        Console
+                                            .WriteLine(
+                                            "  ["
+                                            + i.ToString(
+                                                "D2")
+                                            + "] "
+                                            + Path
+                                                .GetFileName(
+                                                    fn)
+                                            + "  "
+                                            + rd.Length
+                                                .ToString(
+                                                    "N0")
+                                            + " B");
+                                    }
+                                    else
+                                    {
+                                        newList.Add(
+                                            sInfo[i]);
+                                        Console
+                                            .WriteLine(
+                                            "  ["
+                                            + i.ToString(
+                                                "D2")
+                                            + "] MISSING"
+                                            + " - using"
+                                            + " original");
+                                    }
+                                }
+
+                                byte[] result =
+                                    RebuildSRDBFromList(
+                                        origData,
+                                        newList);
+
+                                File.WriteAllBytes(
+                                    csrdbOut,
+                                    result);
+
+                                Console
+                                    .ForegroundColor
+                                    = ConsoleColor
+                                        .Green;
+                                Console.WriteLine(
+                                    "\n[OK] SRDB: "
+                                    + csrdbOut);
+                                Console
+                                    .ResetColor();
+                                Console.WriteLine(
+                                    "    Orig: "
+                                    + origData
+                                        .Length
+                                        .ToString(
+                                            "N0")
+                                    + " B");
+                                Console.WriteLine(
+                                    "    New:  "
+                                    + result
+                                        .Length
+                                        .ToString(
+                                            "N0")
+                                    + " B");
+                            }
+                            else
+                            {
+                                // Fall back to
+                                // old method
+                                SRDBArchive
+                                    .Create(
+                                        csrdbIn,
+                                        csrdbOut);
+                            }
+                        }
                         break;
 
                     // ════════════════════════
@@ -1636,7 +2184,6 @@ namespace HMSTHModdingTool
                                 // Auto-detect file type
                                 string fileType =
                                     DetectFileType(rem3d[0]);
-
                                 if (fileType == "srdb")
                                 {
                                     // Route to SRDB 3D extractor
@@ -1650,6 +2197,31 @@ namespace HMSTHModdingTool
                                         rem3d[0],
                                         rem3d[1],
                                         rem3d[2]);
+
+                                    // ═══════════════════════════
+                                    // FIX: Post-process to align
+                                    // textures in _obj folders
+                                    // ═══════════════════════════
+                                    string outDirFix =
+                                        Path.GetDirectoryName(
+                                            Path.GetFullPath(
+                                                rem3d[0]));
+                                    string[] folderSuffixes =
+                                        new string[]
+                                        {
+                                            "_embedded_rdtbs_obj",
+                                            "_all_obj",
+                                        };
+                                    foreach (string fSuffix in
+                                        folderSuffixes)
+                                    {
+                                        string fPath =
+                                            Path.Combine(
+                                                outDirFix,
+                                                rem3d[2] + fSuffix);
+                                        SRDBEmbedObjTextureFixer
+                                            .ApplyForSRDB(fPath);
+                                    }
                                 }
                                 else
                                 {
@@ -1672,6 +2244,36 @@ namespace HMSTHModdingTool
                                             rem3d[0],
                                             rem3d[1],
                                             rem3d[2]);
+
+                                    // ═══════════════════════════
+                                    // FIX: Post-process to align
+                                    // textures in _obj folder
+                                    // for embedded/small RDTBs
+                                    // ═══════════════════════════
+                                    string outDirFix2 =
+                                        Path.GetDirectoryName(
+                                            Path.GetFullPath(
+                                                rem3d[0]));
+                                    string[] rdtbSuffixes =
+                                        new string[]
+                                        {
+                                            "_obj",
+                                            "_all_obj",
+                                        };
+                                    foreach (string fSuffix in
+                                        rdtbSuffixes)
+                                    {
+                                        string fPath =
+                                            Path.Combine(
+                                                outDirFix2,
+                                                rem3d[2] + fSuffix);
+                                        HMSTHModdingTool.SRDB
+                                            .SRDBEmbedObjTextureFixer
+                                            .ApplyForRDTB(
+                                                rem3d[0],
+                                                fPath,
+                                                rem3d[2]);
+                                    }
                                 }
                             }
                             else
@@ -1772,6 +2374,21 @@ namespace HMSTHModdingTool
                     // ════════════════════════
                     case "xbatches":
                     case "extractbatches":
+                        if (IsSRDBFile(args[1]))
+                        {
+                            Console.ForegroundColor =
+                                ConsoleColor.Cyan;
+                            Console.WriteLine(
+                                "[Auto-detect] SRDB"
+                                + " -> SRDB extractor");
+                            Console.ResetColor();
+                            SRDBBatchExtractor
+                                .ExtractBatches(
+                                    args[1],
+                                    args[2],
+                                    args[3]);
+                            break;
+                        }
                         RequireArgs(args, 4,
                             "-xbatches <rdtb>"
                             + " <gdtb> <base>");
@@ -1784,10 +2401,38 @@ namespace HMSTHModdingTool
 
                     case "cbatches":
                     case "createbatches":
+                        if (args.Length >= 2 &&
+                            IsSRDBFolder(args[1]))
+                        {
+                            Console.ForegroundColor =
+                                ConsoleColor.Cyan;
+                            Console.WriteLine(
+                                "[Auto-detect] SRDB"
+                                + " folder -> SRDB"
+                                + " rebuilder");
+                            Console.ResetColor();
+                            RequireArgs(args, 3,
+                                "-cbatches <folder>"
+                                + " <out_folder>");
+                            string srdtGdtb =
+                                args.Length >= 4
+                                ? args[3] : null;
+                            SRDBBatchExtractor
+                                .RebuildSRDB(
+                                    args[1],
+                                    args[2],
+                                    srdtGdtb);
+                            break;
+                        }
                         {
                             string cbNormals = "match";
                             float[] cbCustom = null;
                             bool cbDelAll = false;
+
+                            var cbNormalsCopy =
+                                new System.Collections
+                                    .Generic.Dictionary<int, int>();
+
                             string cbFormat = "default";
                             var cbClean =
                                 new System.Collections
@@ -1866,6 +2511,50 @@ namespace HMSTHModdingTool
                                     icb++;
                                     continue;
                                 }
+
+                                if ((al == "--normals-copy"
+                                     || al == "-normals-copy"
+                                     || al == "--copy-normals"
+                                     || al == "-copy-normals")
+                                     && icb + 1 < args.Length)
+                                {
+                                    // Format: DEST:SRC or DEST=SRC
+                                    // Multiple: repeat the flag
+                                    //   --normals-copy 73:5
+                                    //   --normals-copy 74:5
+                                    string mapping =
+                                        args[icb + 1];
+                                    string[] parts =
+                                        mapping.Split(
+                                            new[] { ':', '=' },
+                                            2);
+                                    if (parts.Length == 2)
+                                    {
+                                        int destBi, srcBi;
+                                        if (int.TryParse(
+                                                parts[0].Trim(),
+                                                out destBi)
+                                            && int.TryParse(
+                                                parts[1].Trim(),
+                                                out srcBi))
+                                        {
+                                            cbNormalsCopy[destBi]
+                                                = srcBi;
+                                            Console.ForegroundColor =
+                                                ConsoleColor
+                                                    .DarkGray;
+                                            Console.WriteLine(
+                                                "  [normals-copy]"
+                                                + " batch " + destBi
+                                                + " <- batch "
+                                                + srcBi);
+                                            Console.ResetColor();
+                                        }
+                                    }
+                                    icb += 2;
+                                    continue;
+                                }
+
                                 cbClean.Add(a);
                                 icb++;
                             }
@@ -1887,7 +2576,8 @@ namespace HMSTHModdingTool
                                         cbNormals,
                                         cbCustom,
                                         cbDelAll,
-                                        cbFormat);
+                                        cbFormat,
+                                        cbNormalsCopy);
                             }
                             else
                             {
@@ -1897,11 +2587,54 @@ namespace HMSTHModdingTool
                                     + " <out_folder>"
                                     + " [--normals MODE]"
                                     + " [--normals-xyz X,Y,Z]"
+                                    + " [--normals-copy"
+                                    + " DEST:SRC]"
                                     + " [-all]"
                                     + " [--small]"
                                     + " [--mirrored]"
                                     + " [--big]");
                             }
+                        }
+                        break;
+
+                    // ════════════════════════
+                    // XSRDB - Extract SRDB
+                    // batches to per-RDTB
+                    // folders
+                    // ════════════════════════
+                    case "xsrdbbatches":
+                        RequireArgs(args, 4,
+                            "-xsrdbbatches" +
+                            " <file.srdb>" +
+                            " <file.gdtb>" +
+                            " <out_dir>");
+                        SRDBBatchExtractor
+                            .ExtractBatches(
+                                args[1],
+                                args[2],
+                                args[3]);
+                        break;
+
+                    // ════════════════════════
+                    // CSRDB - Rebuild SRDB
+                    // from per-RDTB folders
+                    // ════════════════════════
+                    case "csrdbbatches":
+                        RequireArgs(args, 3,
+                            "-csrdbbatches" +
+                            " <in_dir>" +
+                            " <out_folder>" +
+                            " [out.gdtb]");
+                        {
+                            string csGdtb =
+                                args.Length >= 4
+                                ? args[3]
+                                : null;
+                            SRDBBatchExtractor
+                                .RebuildSRDB(
+                                    args[1],
+                                    args[2],
+                                    csGdtb);
                         }
                         break;
 
@@ -2246,6 +2979,14 @@ namespace HMSTHModdingTool
                         break;
 
                     // ════════════════════════
+                    // NPC'S ADVANCED BONE SCALER
+                    // ════════════════════════
+                    case "bonescale":
+                        UniversalBoneScaler.Run(args);
+                        customFinish = true;
+                        break;
+
+                    // ════════════════════════
                     // UNKNOWN COMMAND
                     // ════════════════════════
                     default:
@@ -2455,7 +3196,7 @@ namespace HMSTHModdingTool
                     "dumpdiff",
                     "xsrdbrdtb",  "cmusic",
                     "xvag",       "rvag",
-                    "boyscale",
+                    "boyscale",   "bonescale",
                     "boymodv2",   "boymodv3",
                     "boyoriginal","boyrestore",
                     "boyback",    "boyorig",
@@ -2479,6 +3220,7 @@ namespace HMSTHModdingTool
                     "imodel",    "inspectmodel",
                     "iobj",      "inspectobj",
                     "idae",      "inspectdae",
+                    "xsrdbbatches", "csrdbbatches",
                 };
 
             bool firstIsCommand =
@@ -3004,6 +3746,80 @@ namespace HMSTHModdingTool
                 " RDTBs from SRDB");
             Console.WriteLine();
 
+            // ── SRDB 3D Batch Modding ──────────────────────
+            Console.WriteLine();
+            Console.ForegroundColor =
+                ConsoleColor.Cyan;
+            Console.WriteLine(
+                "=== SRDB Batch " +
+                "Modding ===");
+            Console.ResetColor();
+            Console.WriteLine(
+                "  -xsrdbbatches" +
+                " <srdb> <gdtb>" +
+                " <out_dir>");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    Extract SRDB into" +
+                " per-RDTB folders with" +
+                " OBJ+MTL+textures");
+            Console.WriteLine(
+                "    ready for CBATCHES" +
+                " modding workflow.");
+            Console.ResetColor();
+            Console.WriteLine();
+            Console.WriteLine(
+                "  -csrdbbatches" +
+                " <in_dir> <out.srdb>" +
+                " [out.gdtb]");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    Rebuild SRDB from" +
+                " folder. Uses" +
+                " _modded.rdtb if" +
+                " present in each");
+            Console.WriteLine(
+                "    embedded_NN/, else" +
+                " _source.rdtb." +
+                " Updates master table.");
+            Console.ResetColor();
+            Console.WriteLine();
+            Console.ForegroundColor =
+                ConsoleColor.DarkYellow;
+            Console.WriteLine(
+                "  SRDB Modding" +
+                " Workflow:");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    1. xsrdbbatches" +
+                " map.srdb map.gdtb" +
+                " srdb_out");
+            Console.WriteLine(
+                "    2. Edit OBJs in" +
+                " Blender under any" +
+                " embedded_NN/" +
+                "model_XX/");
+            Console.WriteLine(
+                "    3. cbatches" +
+                " srdb_out\\embedded_09" +
+                " embedded_09_out");
+            Console.WriteLine(
+                "    4. Copy the" +
+                " output .rdtb to" +
+                " srdb_out\\" +
+                "embedded_09\\" +
+                "_modded.rdtb");
+            Console.WriteLine(
+                "    5. csrdbbatches" +
+                " srdb_out final.srdb" +
+                " final.gdtb");
+            Console.ResetColor();
+            Console.WriteLine();
+
+
             // ── 3D Model ──────────────────────
             Console.ForegroundColor =
                 ConsoleColor.Magenta;
@@ -3183,16 +3999,28 @@ namespace HMSTHModdingTool
                 "=== BOY Advanced Bone" +
                 " Scaler ===");
             Console.ResetColor();
+
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
             Console.WriteLine(
-                "  -boyscale <skeleton.bin>" +
-                " [options]");
+                "  Scales BOY player"
+                + " bones only.");
             Console.WriteLine(
-                "    --b<N> <v>    all axes");
+                "  Uses BoyScaler"
+                + " (BOY-specific logic).");
+            Console.ResetColor();
             Console.WriteLine(
-                "    --b<N>x/y/z <v>  one axis");
+                "  -boyscale <skeleton.bin>"
+                + " [options]");
             Console.WriteLine(
-                "    --spine --neck" +
-                " --arms --legs ...");
+                "    --b<N> <v>"
+                + "        Bone N all axes");
+            Console.WriteLine(
+                "    --b<N>x/y/z <v>"
+                + "   Bone N one axis");
+            Console.WriteLine(
+                "    --spine --neck"
+                + " --arms --legs ...");
             Console.ForegroundColor =
                 ConsoleColor.DarkYellow;
             Console.WriteLine(
@@ -3200,13 +4028,303 @@ namespace HMSTHModdingTool
             Console.ForegroundColor =
                 ConsoleColor.DarkGray;
             Console.WriteLine(
-                "    tool.exe boyscale" +
-                " 00_skeleton.bin" +
-                " --b2y 1.20 --b3y 1.20");
+                "    tool.exe boyscale"
+                + " 00_skeleton.bin"
+                + " --b2y 1.20 --b3y 1.20");
             Console.WriteLine(
-                "    tool.exe boyscale" +
-                " 00_skeleton.bin" +
-                " --legsy 1.25");
+                "    tool.exe boyscale"
+                + " 00_skeleton.bin"
+                + " --legsy 1.25");
+            Console.ResetColor();
+            Console.WriteLine();
+
+            // ── NPC Universal Bone Scaler ─────
+            Console.ForegroundColor =
+                ConsoleColor.Magenta;
+
+            Console.WriteLine(
+                "=== NPC / Universal Bone"
+                + " Scaler v3.1 ===");
+            Console.ResetColor();
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "  Works with ANY RDTB"
+                + " skeleton (Boy, NPC,");
+            Console.WriteLine(
+                "  small RDTB, big RDTB,"
+                + " mirrored RDTB).");
+            Console.WriteLine(
+                "  Run on extracted"
+                + " 00_skeleton.bin");
+            Console.WriteLine(
+                "  from XRDTB output folder.");
+            Console.ResetColor();
+            Console.WriteLine();
+
+            Console.WriteLine(
+                "  -bonescale <skeleton.bin>"
+                + " [options]");
+            Console.WriteLine();
+
+            // Direct bone scaling
+            Console.ForegroundColor =
+                ConsoleColor.White;
+
+            Console.WriteLine(
+                "  Direct bone scaling"
+                + " (always accurate):");
+            Console.ResetColor();
+            Console.WriteLine(
+                "    --b<N> <v>"
+                + "        Scale bone N"
+                + " all axes");
+            Console.WriteLine(
+                "    --b<N>x <v>"
+                + "       Scale bone N"
+                + " X axis only");
+            Console.WriteLine(
+                "    --b<N>y <v>"
+                + "       Scale bone N"
+                + " Y axis only");
+            Console.WriteLine(
+                "    --b<N>z <v>"
+                + "       Scale bone N"
+                + " Z axis only");
+            Console.WriteLine();
+
+            // Group scaling
+            Console.ForegroundColor =
+                ConsoleColor.White;
+
+            Console.WriteLine(
+                "  Group scaling"
+                + " (world-position based):");
+            Console.ResetColor();
+            Console.WriteLine(
+                "    --spine <v>"
+                + "       Spine / chest bones");
+            Console.WriteLine(
+                "    --neck <v>"
+                + "        Neck bones");
+            Console.WriteLine(
+                "    --head <v>"
+                + "        Head bones");
+            Console.WriteLine(
+                "    --arms <v>"
+                + "        Both arms");
+            Console.WriteLine(
+                "    --larm <v>"
+                + "        Left arm");
+            Console.WriteLine(
+                "    --rarm <v>"
+                + "        Right arm");
+            Console.WriteLine(
+                "    --shoulders <v>"
+                + "   Shoulder bones");
+            Console.WriteLine(
+                "    --lshldr <v>"
+                + "      Left shoulder");
+            Console.WriteLine(
+                "    --rshldr <v>"
+                + "      Right shoulder");
+            Console.WriteLine(
+                "    --hands <v>"
+                + "       Both hands");
+            Console.WriteLine(
+                "    --lhand <v>"
+                + "       Left hand");
+            Console.WriteLine(
+                "    --rhand <v>"
+                + "       Right hand");
+            Console.WriteLine(
+                "    --fingers <v>"
+                + "     Finger bones");
+            Console.WriteLine(
+                "    --legs <v>"
+                + "        Both legs");
+            Console.WriteLine(
+                "    --lleg <v>"
+                + "        Left leg");
+            Console.WriteLine(
+                "    --rleg <v>"
+                + "        Right leg");
+            Console.WriteLine(
+                "    --hips <v>"
+                + "        Hip bones");
+            Console.WriteLine(
+                "    --lhip <v>"
+                + "        Left hip");
+            Console.WriteLine(
+                "    --rhip <v>"
+                + "        Right hip");
+            Console.WriteLine(
+                "    --thighs <v>"
+                + "      Thigh bones");
+            Console.WriteLine(
+                "    --lthigh <v>"
+                + "      Left thigh");
+            Console.WriteLine(
+                "    --rthigh <v>"
+                + "      Right thigh");
+            Console.WriteLine(
+                "    --shins <v>"
+                + "       Shin bones");
+            Console.WriteLine(
+                "    --lshin <v>"
+                + "       Left shin");
+            Console.WriteLine(
+                "    --rshin <v>"
+                + "       Right shin");
+            Console.WriteLine(
+                "    --ankles <v>"
+                + "      Ankle bones");
+            Console.WriteLine(
+                "    --lankle <v>"
+                + "      Left ankle");
+            Console.WriteLine(
+                "    --rankle <v>"
+                + "      Right ankle");
+            Console.WriteLine(
+                "    --feet <v>"
+                + "        Foot bones");
+            Console.WriteLine(
+                "    --lfoot <v>"
+                + "       Left foot");
+            Console.WriteLine(
+                "    --rfoot <v>"
+                + "       Right foot");
+            Console.WriteLine(
+                "    --upper <v>"
+                + "       Upper body");
+            Console.WriteLine(
+                "    --lower <v>"
+                + "       Lower body");
+            Console.WriteLine(
+                "    --all <v>"
+                + "         All bones");
+            Console.WriteLine();
+
+            // Axis suffix
+            Console.ForegroundColor =
+                ConsoleColor.White;
+
+            Console.WriteLine(
+                "  Add x/y/z for one axis:");
+            Console.ResetColor();
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    --legsy 1.25"
+                + "     → legs Y axis only");
+            Console.WriteLine(
+                "    --spiney 1.1"
+                + "     → spine Y axis only");
+            Console.WriteLine(
+                "    --armsx 0.9"
+                + "      → arms X axis only");
+            Console.ResetColor();
+            Console.WriteLine();
+
+            // Other flags
+            Console.ForegroundColor =
+                ConsoleColor.White;
+            Console.WriteLine(
+                "  Other flags:");
+            Console.ResetColor();
+
+            Console.WriteLine(
+                "    --info"
+                + "   Show raw bone data"
+                + " (WX, WY, LX, LY,"
+                + " POS%)");
+            Console.WriteLine();
+
+            // Boy bone reference
+            Console.ForegroundColor =
+                ConsoleColor.White;
+            Console.WriteLine(
+                "  Boy skeleton quick"
+                + " reference:");
+            Console.ResetColor();
+
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    Bone  2 = SPINE_BASE"
+                + "    Bone  3 = SPINE_MID");
+            Console.WriteLine(
+                "    Bone  4 = SPINE_TOP"
+                + "    Bone  5 = NECK");
+            Console.WriteLine(
+                "    Bone 15 = SHOULDER_R"
+                + "   Bone 32 = SHOULDER_L");
+            Console.WriteLine(
+                "    Bone 17 = UPPER_ARM_R"
+                + "  Bone 34 = UPPER_ARM_L");
+            Console.WriteLine(
+                "    Bone 18 = ELBOW_R"
+                + "      Bone 35 = ELBOW_L");
+            Console.WriteLine(
+                "    Bone 20 = HAND_R"
+                + "       Bone 37 = HAND_L");
+            Console.WriteLine(
+                "    Bone 50 = HIP_R"
+                + "        Bone 59 = HIP_L");
+            Console.WriteLine(
+                "    Bone 51 = THIGH_R"
+                + "     Bone 60 = THIGH_L");
+            Console.WriteLine(
+                "    Bone 52 = SHIN_R"
+                + "      Bone 61 = SHIN_L");
+            Console.WriteLine(
+                "    Bone 53 = ANKLE_R"
+                + "     Bone 62 = ANKLE_L");
+            Console.WriteLine(
+                "    Bone 54 = FOOT_R"
+                + "      Bone 63 = FOOT_L");
+            Console.ResetColor();
+            Console.WriteLine();
+
+            // Examples
+            Console.ForegroundColor =
+                ConsoleColor.DarkYellow;
+            Console.WriteLine(
+                "  bonescale Examples:");
+
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    tool.exe bonescale"
+                + " 00_skeleton.bin --info");
+            Console.WriteLine(
+                "    tool.exe bonescale"
+                + " 00_skeleton.bin"
+                + " --b2y 1.20 --b3y 1.20");
+            Console.WriteLine(
+                "    tool.exe bonescale"
+                + " 00_skeleton.bin"
+                + " --legsy 1.25");
+            Console.WriteLine(
+                "    tool.exe bonescale"
+                + " 00_skeleton.bin"
+                + " --all 1.1");
+            Console.WriteLine(
+                "    tool.exe bonescale"
+                + " 00_skeleton.bin"
+                + " --spine 1.1 --legs 0.9");
+            Console.WriteLine(
+                "    tool.exe bonescale"
+                + " 00_skeleton.bin"
+                + " --lleg 1.15 --rleg 1.15");
+            Console.WriteLine(
+                "    tool.exe bonescale"
+                + " 00_skeleton.bin"
+                + " --thighs 1.2 --shins 1.1");
+            Console.WriteLine(
+                "    tool.exe bonescale"
+                + " 00_skeleton.bin"
+                + " --b52y 1.3 --b61y 1.3");
             Console.ResetColor();
             Console.WriteLine();
 
