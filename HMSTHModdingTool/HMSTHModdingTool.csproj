@@ -50,6 +50,7 @@
     <Compile Include="BMP\BMPPalette.cs" />
     <Compile Include="BoyMods\BoyModPresets.cs" />
     <Compile Include="BoyMods\BoyScaler.cs" />
+    <Compile Include="BoyMods\UniversalBoneScaler.cs" />
     <Compile Include="IO\AudioBank.cs" />
     <Compile Include="IO\AudioConverter.cs" />
     <Compile Include="IO\Compression\HarvestCompression.cs" />
@@ -75,14 +76,18 @@
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
     <Compile Include="IO\TextOut.cs" />
+    <Compile Include="RDTB\RDTBBatchAdder.cs" />
     <Compile Include="RDTB\RDTBBatchFolder.cs" />
     <Compile Include="RDTB\RDTBBatchReplacer.cs" />
     <Compile Include="RDTB\RDTBBatchTools.cs" />
     <Compile Include="RDTB\RDTBConverter.cs" />
+    <Compile Include="RDTB\RDTBInPlaceScaler.cs" />
     <Compile Include="RDTB\RDTBInspector.cs" />
     <Compile Include="RDTB\RDTBObjFolderRouter.cs" />
     <Compile Include="SRDB\SRDB3D.cs" />
     <Compile Include="SRDB\SRDBArchive.cs" />
+    <Compile Include="SRDB\SRDBBatchExtractor.cs" />
+    <Compile Include="SRDB\SRDBEmbedObjTextureFixer.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
