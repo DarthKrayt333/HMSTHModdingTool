@@ -1587,14 +1587,6 @@ namespace HMSTHModdingTool.RDTB
                 ? new List<(int, int, byte[])>()
                 : ParseChunk8(c8);
 
-            Console.WriteLine(
-                "[DIAG] c8Idx=" + c8Idx +
-                " c8.Length=" + c8.Length +
-                " isSmall=" + isSmall +
-                " startsWithVif=" + startsWithVif +
-                " mats.Count=" + mats.Count +
-                " mc.Count=" + mc.Count +
-                " mci=" + mci);
 
             if (isSmall)
             {
@@ -1983,12 +1975,13 @@ namespace HMSTHModdingTool.RDTB
                     sub, "textures");
                 Directory.CreateDirectory(subTex);
 
-                Console.WriteLine(
-                  "    [debug] tp=" +
-                  (tp ?? "null") +
-                  " exists=" +
-                  (tp != null &&
-                   File.Exists(tp)));
+                //Console.WriteLine(
+                //  "    [debug] tp=" +
+                //  (tp ?? "null") +
+                //" exists=" +
+                //(tp != null &&
+                //File.Exists(tp)));
+
                 string subTp = null;
                 if (tp != null &&
                     File.Exists(tp))
@@ -4236,11 +4229,6 @@ namespace HMSTHModdingTool.RDTB
                     modified, mb,
                     rv, rn, ru);
 
-                Console.WriteLine(
-                    "[DoCreate] batch idx=" + mb.Index
-                    + " tex=" + mb.TexId
-                    + " siblings="
-                    + (mb.LodSiblings?.Count ?? 0));
 
                 if (mb.LodSiblings != null &&
                     mb.LodSiblings.Count > 0)
@@ -4438,15 +4426,6 @@ namespace HMSTHModdingTool.RDTB
                 Directory.GetFiles(
                     folder, "*.obj");
 
-            Console.WriteLine(
-                "[LoadObjFiles] folder=" + folder
-                + " objFilesFound=" + allObjFiles.Length);
-            foreach (var fp in allObjFiles)
-            {
-                Console.WriteLine(
-                    "  - "
-                    + Path.GetFileName(fp));
-            }
 
             // 1) model_NN.obj at root
             foreach (var fp in allObjFiles)
@@ -4705,21 +4684,7 @@ namespace HMSTHModdingTool.RDTB
                 {
                     var bodyObj = ObjParser.Parse(bodyPath);
 
-                    // DEBUG: show what groups parser found
-                    Console.WriteLine(
-                        "[LoadObjFiles] _body parsed: "
-                        + bodyObj.Verts.Count + "v, "
-                        + bodyObj.FacesByGroup.Count
-                        + " groups");
-                    int shownGroups = 0;
-                    foreach (var kv in bodyObj.FacesByGroup)
-                    {
-                        if (shownGroups++ < 5)
-                            Console.WriteLine(
-                                "    group '" + kv.Key
-                                + "': " + kv.Value.Count
-                                + " faces");
-                    }
+
                     var batchToTid =
                         new Dictionary<
                             int, int>();
@@ -5277,11 +5242,6 @@ namespace HMSTHModdingTool.RDTB
             bool useDirectCopy =
                 (primaryVerts.Count == sibTotal);
 
-            Console.WriteLine(
-                "[WTLS] sib.chunk=" + sib.ChunkIdx
-                + " primCount=" + primaryVerts.Count
-                + " sibTotal=" + sibTotal
-                + " direct=" + useDirectCopy);
 
             if (useDirectCopy)
             {
