@@ -95,9 +95,6 @@ namespace HMSTHModdingTool.RDTB
             Console.WriteLine(
                 "    Out    : " +
                 outDir);
-            Console.WriteLine(
-                "    Normals: " +
-                normalsMode);
 
             Console.WriteLine(
                 "    Normals: " +
@@ -499,25 +496,6 @@ namespace HMSTHModdingTool.RDTB
             int nPtrs =
                 (int)(firstPtr / 4);
 
-            // DEBUG
-            Console.WriteLine(
-                "    [DEBUG] nPtrs=" + nPtrs);
-            for (int dbgi = 0;
-                 dbgi < Math.Min(nPtrs, 5);
-                 dbgi++)
-            {
-                uint dbgp =
-                    BitConverter.ToUInt32(
-                        meshChunk,
-                        dbgi * 4);
-                Console.WriteLine(
-                    "      ptr[" + dbgi
-                    + "] = 0x" +
-                    dbgp.ToString("X8") +
-                    (dbgp == 0
-                        ? " NULL"
-                        : " OK"));
-            }
 
             // Read original normals
             var origNormals =
@@ -944,12 +922,40 @@ namespace HMSTHModdingTool.RDTB
                     .ToString("N0") +
                 " B");
 
-            // ═══════════════════════
+            // ═══════════════════════════════
             // IN-PLACE SCALE/MOVE
-            // (standalone module)
-            // ═══════════════════════
-            RDTBInPlaceScaler.Apply(
-                folderPath, outRdtb);
+            // Only active when NO auto-scale
+            // was applied during extraction.
+            // When autoScaleInvert != 1.0 the
+            // scale was already corrected by
+            // the autoScaleInvert path above.
+            // Calling the scaler on top of
+            // that would re-apply the display-
+            // scale coordinates and shrink
+            // every batch back to Blender
+            // display size in game.
+            // ═══════════════════════════════
+            if (autoScaleInvert == 1.0f)
+            {
+                RDTBInPlaceScaler.Apply(
+                    folderPath, outRdtb);
+            }
+            else
+            {
+                Console.ForegroundColor =
+                    ConsoleColor.DarkGray;
+                Console.WriteLine(
+                    "    [scale] Skipping"
+                    + " in-place scaler"
+                    + " (auto-scale active,"
+                    + " coords already"
+                    + " corrected by"
+                    + " autoScaleInvert x"
+                    + autoScaleInvert
+                        .ToString("F4")
+                    + ")");
+                Console.ResetColor();
+            }
 
 
             // ═══════════════════════
