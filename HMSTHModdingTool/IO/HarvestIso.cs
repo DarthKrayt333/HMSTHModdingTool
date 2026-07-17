@@ -163,6 +163,45 @@ namespace HMSTHModdingTool.IO
             @"\SYSTEM.CNF", @"\SLUS_202.51",
         };
 
+        public static string GetRealPath(
+    string path)
+        {
+            if (string.IsNullOrEmpty(path))
+                return path;
+
+            if (!File.Exists(path))
+                return path;
+
+            try
+            {
+                string dir =
+                    Path.GetDirectoryName(
+                        Path.GetFullPath(path));
+                string typed =
+                    Path.GetFileName(path);
+
+                if (string.IsNullOrEmpty(dir))
+                    dir = Directory
+                        .GetCurrentDirectory();
+
+                string[] matches =
+                    Directory.GetFiles(
+                        dir, typed);
+
+                if (matches.Length > 0)
+                {
+                    string realName =
+                        Path.GetFileName(
+                            matches[0]);
+                    return Path.Combine(
+                        dir, realName);
+                }
+            }
+            catch { }
+
+            return path;
+        }
+
         private class IsoEntry
         {
             public uint Lba;
