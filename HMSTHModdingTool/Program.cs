@@ -1017,6 +1017,10 @@ namespace HMSTHModdingTool
                                         Directory
                                             .GetCurrentDirectory(),
                                         isoPath);
+                            // Preserve real filename case
+                            isoPath =
+                                HarvestIso.GetRealPath(
+                                    isoPath);
 
                             Console.ForegroundColor =
                                 ConsoleColor.Cyan;
@@ -1078,6 +1082,10 @@ namespace HMSTHModdingTool
                                         Directory
                                             .GetCurrentDirectory(),
                                         isoPath);
+                            // Preserve real filename case
+                            isoPath =
+                                HarvestIso.GetRealPath(
+                                    isoPath);
 
                             Console.ForegroundColor =
                                 ConsoleColor.Cyan;
@@ -1111,6 +1119,10 @@ namespace HMSTHModdingTool
                                         Directory
                                             .GetCurrentDirectory(),
                                         isoPath);
+                            // Preserve real filename case
+                            isoPath =
+                                HarvestIso.GetRealPath(
+                                    isoPath);
 
                             Console.ForegroundColor =
                                 ConsoleColor.Cyan;
@@ -1269,6 +1281,10 @@ namespace HMSTHModdingTool
                                         Directory
                                             .GetCurrentDirectory(),
                                         isoPath);
+                            // Preserve real filename case
+                            isoPath =
+                                HarvestIso.GetRealPath(
+                                    isoPath);
 
                             IsoLogoPatcher.PatchIso(
                                 isoPath);
@@ -1369,6 +1385,10 @@ namespace HMSTHModdingTool
                                         Directory
                                             .GetCurrentDirectory(),
                                         isoPath);
+                            // Preserve real filename case
+                            isoPath =
+                                HarvestIso.GetRealPath(
+                                    isoPath);
 
                             IsoFakeYear.Run(
                                 isoPath,
@@ -2424,6 +2444,7 @@ namespace HMSTHModdingTool
                                     srdtGdtb);
                             break;
                         }
+
                         {
                             string cbNormals = "match";
                             float[] cbCustom = null;
