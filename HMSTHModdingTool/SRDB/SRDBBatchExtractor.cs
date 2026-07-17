@@ -986,35 +986,22 @@ namespace HMSTHModdingTool.SRDB
         // ═════════════════════
         // XSRDBBATCHES
         // ═════════════════════
-        public static void
-            ExtractBatches(
-                string srdbPath,
-                string gdtbPath,
-                string baseName)
+        public static void ExtractBatches(
+            string srdbPath,
+            string gdtbPath,
+            string baseName)
         {
-            if (!File.Exists(srdbPath))
-                throw new
-                    FileNotFoundException(
-                    "SRDB: " + srdbPath);
-            if (!File.Exists(gdtbPath))
-                throw new
-                    FileNotFoundException(
-                    "GDTB: " + gdtbPath);
-
             string outDir =
-                baseName + "_3d_batches";
+                baseName + "_3d_batches_obj";
 
             byte[] srdbData =
                 File.ReadAllBytes(srdbPath);
             byte[] gdtbData =
                 File.ReadAllBytes(gdtbPath);
 
-            var rdtbs =
-                ParseMasterTable(srdbData);
+            Directory.CreateDirectory(outDir);
 
-            Directory.CreateDirectory(
-                outDir);
-
+            // ── Step 1: Save source files ──
             File.WriteAllBytes(
                 Path.Combine(outDir,
                     "_source.srdb"),
@@ -1023,11 +1010,6 @@ namespace HMSTHModdingTool.SRDB
                 Path.Combine(outDir,
                     "_source.gdtb"),
                 gdtbData);
-
-            // ── FIX: Write _srdb_info.txt
-            // so RebuildSRDB can recover
-            // the correct output SRDB and
-            // GDTB names automatically
             File.WriteAllText(
                 Path.Combine(outDir,
                     "_srdb_info.txt"),
@@ -1039,15 +1021,15 @@ namespace HMSTHModdingTool.SRDB
                 + "\n",
                 Encoding.UTF8);
 
-            string tmpTex =
-                Path.Combine(outDir,
-                    "_tex_tmp");
+            // ── Step 2: Extract textures
+            // to shared temp folder ────────
+            string tmpTex = Path.Combine(
+                outDir, "_tex_tmp");
+            Directory.CreateDirectory(tmpTex);
             Console.WriteLine(
                 "\n[+] Extract textures...");
             try
             {
-                Directory.CreateDirectory(
-                    tmpTex);
                 GDTBArchive.Extract(
                     gdtbPath, tmpTex);
             }
@@ -1056,6 +1038,13 @@ namespace HMSTHModdingTool.SRDB
                 Console.WriteLine(
                     "    [!] " + ex.Message);
             }
+
+            // ── Step 3: Extract each
+            // embedded RDTB using xsrdb ────
+            // (preserves original offsets
+            //  for byte-identical csrdb)
+            var rdtbs = ParseMasterTable(
+                srdbData);
 
             Console.WriteLine(
                 "\n[+] Extract SRDB");
@@ -1069,43 +1058,57 @@ namespace HMSTHModdingTool.SRDB
                  idx < rdtbs.Count; idx++)
             {
                 byte[] rdtb = rdtbs[idx];
-                string sub =
-                    "embedded_" +
+                string sub = "embedded_" +
                     idx.ToString("D2");
-                string sp =
-                    Path.Combine(outDir, sub);
-                Directory.CreateDirectory(sp);
+                string subPath = Path.Combine(
+                    outDir, sub);
+                Directory.CreateDirectory(
+                    subPath);
 
+                // Save the raw RDTB blob
+                // exactly as xsrdb would
+                string rdtbBlobPath =
+                    Path.Combine(subPath,
+                        "_source.rdtb");
                 File.WriteAllBytes(
-                    Path.Combine(sp,
-                        "_source.rdtb"),
-                    rdtb);
+                    rdtbBlobPath, rdtb);
+
+                // Save shared GDTB ref
                 File.WriteAllBytes(
-                    Path.Combine(sp,
+                    Path.Combine(subPath,
                         "_source.gdtb"),
                     gdtbData);
 
-                int mc =
-                    ExtractRDTBBatches(
-                        rdtb, sp, tmpTex);
-
-                using (var sw =
-                    new StreamWriter(
-                        Path.Combine(sp,
-                            "_info.txt")))
+                // Write _info.txt with
+                // source names
+                // (cbatches reads this for
+                //  output file names)
+                using (var sw = new StreamWriter(
+                    Path.Combine(subPath,
+                        "_info.txt")))
                 {
                     sw.WriteLine(
                         "HMSTH Batch Folder");
                     sw.WriteLine(
                         "Source RDTB:"
-                        + " embedded_" +
-                        idx.ToString("D2")
-                        + ".rdtb");
+                        + " _source.rdtb");
                     sw.WriteLine(
                         "Source GDTB: " +
                         Path.GetFileName(
                             gdtbPath));
                 }
+
+                // ── Step 4: Run xbatches
+                // on this embedded RDTB
+                // exactly like the working
+                // manual workflow ──────────
+                // This calls the EXACT SAME
+                // code path as:
+                //   xbatches embedded_09.rdtb
+                //             gdtb outfolder
+                // which you confirmed works.
+                int mc = ExtractRDTBBatches(
+                    rdtb, subPath, tmpTex);
 
                 Console.WriteLine(
                     "  [" +
@@ -1217,10 +1220,10 @@ namespace HMSTHModdingTool.SRDB
                 string baseName = inDirName;
                 string[] suffixes =
                 {
-            "_3d_batches_obj",
-            "_3d_batches",
-            "_batches",
-        };
+                    "_3d_batches_obj",
+                    "_3d_batches",
+                    "_batches",
+                };
                 foreach (string sfx in
                     suffixes)
                 {
@@ -1241,11 +1244,11 @@ namespace HMSTHModdingTool.SRDB
 
                 string[] tryNames =
                 {
-            baseName + "_00000.srdb",
-            baseName + ".srdb",
-            baseName + "_00000.SRDB",
-            baseName + ".SRDB",
-        };
+                    baseName + "_00000.srdb",
+                    baseName + ".srdb",
+                    baseName + "_00000.SRDB",
+                    baseName + ".SRDB",
+                };
                 foreach (string tn in
                     tryNames)
                 {
@@ -1340,42 +1343,51 @@ namespace HMSTHModdingTool.SRDB
             int moddedCount = 0;
 
             for (int idx = 0;
-                 idx < rdtbs.Count; idx++)
+                idx < rdtbs.Count; idx++)
             {
                 string sub =
                     "embedded_" +
                     idx.ToString("D2");
                 string subPath =
-                    Path.Combine(
-                        inDir, sub);
+                    Path.Combine(inDir, sub);
                 string moddedPath =
-                    Path.Combine(
-                        subPath,
+                    Path.Combine(subPath,
                         "_modded.rdtb");
-                string sourcePath =
-                    Path.Combine(
-                        subPath,
-                        "_source.rdtb");
 
                 byte[] rdtbBytes;
                 string status;
 
-                if (File.Exists(
-                        moddedPath))
+                if (File.Exists(moddedPath))
                 {
+                    // User explicitly placed
+                    // _modded.rdtb here
                     rdtbBytes =
-                        File
-                            .ReadAllBytes(
-                                moddedPath);
+                        File.ReadAllBytes(
+                            moddedPath);
                     status = "MODDED";
                     moddedCount++;
                 }
                 else if (
-                    Directory.Exists(
-                        subPath) &&
-                    HasBatchOBJs(
-                        subPath))
+                    Directory.Exists(subPath) &&
+                    HasBatchOBJs(subPath))
                 {
+                    // Has batch OBJs.
+                    // Run cbatches and use result.
+                    // The HasUserEdits check was
+                    // removed because floating point
+                    // comparison with large auto-scale
+                    // invert values (e.g. x1050)
+                    // caused false positives making
+                    // ALL blobs rebuild unnecessarily.
+                    //
+                    // Instead we always rebuild from
+                    // batch OBJs when they exist, but
+                    // use the original blob bytes when
+                    // cbatches produces identical
+                    // output. This is safe because
+                    // cbatches with "match" format
+                    // preserves the source RDTB format
+                    // exactly when no edits exist.
                     try
                     {
                         string tempOut =
@@ -1383,133 +1395,125 @@ namespace HMSTHModdingTool.SRDB
                                 subPath,
                                 "_rebuild_tmp");
 
-                        RDTB
-                            .RDTBBatchFolder
-                            .BuildFromBatchFolder(
-                                subPath,
-                                tempOut,
-                                "match",
-                                null,
-                                false,
-                                "mirrored",
-                                null);
-
-                        string foundRdtb =
-                            null;
-                        if (Directory
-                                .Exists(
-                                    tempOut))
+                        // Silence per-blob rebuild spam
+                        var savedOut = Console.Out;
+                        Console.SetOut(TextWriter.Null);
+                        try
                         {
-                            foreach (
-                                string f in
-                                Directory
-                                    .GetFiles(
-                                        tempOut,
-                                        "*.rdtb"))
+                            RDTB
+                                .RDTBBatchFolder
+                                .BuildFromBatchFolder(
+                                    subPath,
+                                    tempOut,
+                                    "match",
+                                    null,
+                                    false,
+                                    "mirrored",
+                                    null);
+                        }
+                        finally
+                        {
+                            Console.SetOut(savedOut);
+                        }
+
+                        string foundRdtb = null;
+                        if (Directory.Exists(
+                                tempOut))
+                        {
+                            foreach (string f in
+                                Directory.GetFiles(
+                                    tempOut,
+                                    "*.rdtb"))
                             {
                                 foundRdtb = f;
                                 break;
                             }
                         }
 
-                        if (foundRdtb !=
-                                null &&
-                            File.Exists(
-                                foundRdtb))
+                        if (foundRdtb != null &&
+                            File.Exists(foundRdtb))
                         {
-                            rdtbBytes =
-                                File
-                                    .ReadAllBytes(
-                                        foundRdtb);
-                            status =
-                                "REBUILT";
-                            moddedCount++;
+                            byte[] rebuilt =
+                                File.ReadAllBytes(
+                                    foundRdtb);
+
+                            // KEY FIX: Compare rebuilt
+                            // against original blob.
+                            // If only the 4 sentinel
+                            // slots differ (ApplySlotMirror
+                            // changed 0xFFFFFFFF to real
+                            // offsets) and nothing else
+                            // changed, use original bytes.
+                            // This gives byte-identical
+                            // roundtrip for unmodded blobs
+                            // while still applying real
+                            // user edits.
+                            if (IsOnlySlotTableDiff(
+                                    rebuilt,
+                                    rdtbs[idx]))
+                            {
+                                // No real edits.
+                                // Use original bytes.
+                                rdtbBytes = rdtbs[idx];
+                                status = "source";
+                            }
+                            else
+                            {
+                                // Real edits exist.
+                                // Use rebuilt bytes.
+                                rdtbBytes = rebuilt;
+                                status = "REBUILT";
+                                moddedCount++;
+                            }
                         }
                         else
                         {
-                            rdtbBytes =
-                                File.Exists(
-                                    sourcePath)
-                                ? File
-                                    .ReadAllBytes(
-                                        sourcePath)
-                                : rdtbs[idx];
-                            status =
-                                "source"
-                                + "(no output)";
+                            rdtbBytes = rdtbs[idx];
+                            status = "source(no output)";
                         }
 
                         try
                         {
-                            Directory
-                                .Delete(
-                                    tempOut,
-                                    true);
+                            Directory.Delete(
+                                tempOut, true);
                         }
                         catch { }
                     }
                     catch (Exception ex)
                     {
-                        Console
-                            .ForegroundColor
-                            = ConsoleColor
-                                .Yellow;
+                        Console.ForegroundColor =
+                            ConsoleColor.Yellow;
                         Console.WriteLine(
                             "    [" +
-                            idx.ToString(
-                                "D2") +
-                            "] rebuild "
-                            + "err: " +
+                            idx.ToString("D2") +
+                            "] rebuild err: " +
                             ex.Message);
-                        Console
-                            .ResetColor();
-                        rdtbBytes =
-                            File.Exists(
-                                sourcePath)
-                            ? File
-                                .ReadAllBytes(
-                                    sourcePath)
-                            : rdtbs[idx];
-                        status =
-                            "source(err)";
+                        Console.ResetColor();
+                        rdtbBytes = rdtbs[idx];
+                        status = "source(err)";
                     }
-                }
-                else if (File.Exists(
-                        sourcePath))
-                {
-                    rdtbBytes =
-                        File
-                            .ReadAllBytes(
-                                sourcePath);
-                    status = "source";
                 }
                 else
                 {
-                    rdtbBytes =
-                        rdtbs[idx];
-                    status = "MISSING";
+                    // No batch OBJs and no
+                    // _modded.rdtb. Use original.
+                    rdtbBytes = rdtbs[idx];
+                    status = "source";
                 }
 
                 int pad = (16 -
-                    rdtbBytes.Length
-                    % 16) % 16;
+                    rdtbBytes.Length % 16) % 16;
                 if (pad > 0)
                 {
                     var padded =
                         new byte[
-                            rdtbBytes
-                                .Length
-                            + pad];
-                    Array.Copy(
-                        rdtbBytes,
-                        padded,
-                        rdtbBytes
-                            .Length);
+                            rdtbBytes.Length + pad];
+                    Array.Copy(rdtbBytes, padded,
+                        rdtbBytes.Length);
                     rdtbBytes = padded;
                 }
 
-                finalRdtbs.Add(
-                    rdtbBytes);
+                finalRdtbs.Add(rdtbBytes);
 
                 int change =
                     rdtbBytes.Length -
@@ -1518,10 +1522,8 @@ namespace HMSTHModdingTool.SRDB
                     change == 0
                     ? "same"
                     : (change > 0
-                       ? "+" + change
-                         + " B"
-                       : change
-                         + " B");
+                       ? "+" + change + " B"
+                       : change + " B");
 
                 Console.WriteLine(
                     "  [" +
@@ -1530,15 +1532,13 @@ namespace HMSTHModdingTool.SRDB
                     status.PadRight(20) +
                     " " +
                     rdtbs[idx].Length
-                        .ToString()
-                        .PadLeft(7) +
+                        .ToString().PadLeft(7) +
                     " B -> " +
                     rdtbBytes.Length
-                        .ToString()
-                        .PadLeft(7) +
-                    " B  (" +
-                    csv + ")");
+                        .ToString().PadLeft(7) +
+                    " B  (" + csv + ")");
             }
+
 
             Console.WriteLine(
                 "\n  Total modded: "
@@ -1580,17 +1580,19 @@ namespace HMSTHModdingTool.SRDB
                 + " B (" +
                 dstr + ")");
 
-            string srcGdtb =
-                Path.Combine(inDir,
-                    "_source.gdtb");
-            if (File.Exists(srcGdtb))
-            {
-                File.Copy(srcGdtb,
-                    outGdtb, true);
-                Console.WriteLine(
-                    "\n[OK] GDTB: "
-                    + outGdtb);
-            }
+            // ── Build unified GDTB ───────────
+            // Collect ALL textures from ALL
+            // embedded dirs. Detect modded ones
+            // by comparing file hashes across
+            // copies of the same texture index.
+            // Use modded version if found,
+            // original otherwise.
+            // This ensures the shared GDTB
+            // contains all textures, not just
+            // the subset of one embedded RDTB.
+            BuildUnifiedGdtb(
+                inDir, outGdtb, outFolder,
+                rdtbs.Count);
         }
 
         static bool HasBatchOBJs(
@@ -1613,6 +1615,785 @@ namespace HMSTHModdingTool.SRDB
                     return true;
             }
             return false;
+        }
+
+        // ═════════════════════════════════
+        // BUILD UNIFIED GDTB
+        // Collects all textures from all
+        // embedded_NN/model_XX/ subfolders.
+        // For each texture index, uses the
+        // modded version if it differs from
+        // the majority of copies. Otherwise
+        // uses the original.
+        // Builds one complete GDTB with all
+        // textures in correct index order.
+        // ═════════════════════════════════
+        private static void BuildUnifiedGdtb(
+            string inDir,
+            string outGdtb,
+            string outFolder,
+            int nEmbedded)
+        {
+            Console.WriteLine();
+            Console.ForegroundColor =
+                ConsoleColor.Cyan;
+            Console.WriteLine(
+                "[+] Building unified GDTB"
+                + " (all textures)");
+            Console.ResetColor();
+
+            // Step 1: Collect all copies of
+            // each texture index across all
+            // embedded_NN/model_XX/ folders.
+            // Key = tex_idx
+            // Value = list of (file_path,
+            //                  file_size)
+            var texCopies =
+                new Dictionary<int,
+                    List<string>>();
+
+            for (int ei = 0;
+                 ei < nEmbedded; ei++)
+            {
+                string sub = Path.Combine(
+                    inDir,
+                    "embedded_" +
+                    ei.ToString("D2"));
+                if (!Directory.Exists(sub))
+                    continue;
+
+                foreach (string mDir in
+                    Directory.GetDirectories(
+                        sub, "model_*"))
+                {
+                    foreach (string bmp in
+                        Directory.GetFiles(
+                            mDir,
+                            "texture_*.bmp"))
+                    {
+                        string fn =
+                            Path.GetFileName(
+                                bmp);
+                        // texture_XX.bmp
+                        string idxStr =
+                            fn.Length > 12
+                            ? fn.Substring(
+                                8, fn.Length
+                                   - 12)
+                            : "";
+                        int tidx;
+                        if (!int.TryParse(
+                                idxStr,
+                                out tidx))
+                            continue;
+
+                        if (!texCopies
+                                .ContainsKey(
+                                    tidx))
+                            texCopies[tidx] =
+                                new List<
+                                    string>();
+                        texCopies[tidx]
+                            .Add(bmp);
+                    }
+                }
+            }
+
+            if (texCopies.Count == 0)
+            {
+                Console.ForegroundColor =
+                    ConsoleColor.Yellow;
+                Console.WriteLine(
+                    "    [!] No textures"
+                    + " found in any"
+                    + " embedded folder."
+                    + " Copying source"
+                    + " GDTB.");
+                Console.ResetColor();
+                string srcG = Path.Combine(
+                    inDir, "_source.gdtb");
+                if (File.Exists(srcG))
+                    File.Copy(
+                        srcG, outGdtb, true);
+                return;
+            }
+
+            Console.WriteLine(
+                "    Texture indices found: ["
+                + string.Join(", ",
+                    texCopies.Keys
+                        .OrderBy(k => k))
+                + "]");
+
+            // Step 2: For each texture index,
+            // pick the best copy.
+            // If all copies have the same
+            // byte size AND content hash,
+            // they are unmodded — use any.
+            // If one copy has a different
+            // hash from the majority, it is
+            // modded — use it.
+            string tempDir = Path.Combine(
+                inDir, "_unified_tex_tmp");
+            try
+            {
+                if (Directory.Exists(tempDir))
+                    Directory.Delete(
+                        tempDir, true);
+                Directory.CreateDirectory(
+                    tempDir);
+
+                int modded = 0;
+                int unmodded = 0;
+
+                foreach (int tidx in
+                    texCopies.Keys
+                        .OrderBy(k => k))
+                {
+                    var copies =
+                        texCopies[tidx];
+                    string chosen = null;
+
+                    if (copies.Count == 1)
+                    {
+                        // Only one copy —
+                        // use it regardless
+                        chosen = copies[0];
+                        unmodded++;
+                    }
+                    else
+                    {
+                        // Multiple copies.
+                        // Compute file sizes
+                        // as fast comparator.
+                        var groups =
+                            new Dictionary<
+                                long,
+                                List<string>>();
+                        foreach (string c in
+                            copies)
+                        {
+                            long sz;
+                            try
+                            {
+                                sz = new FileInfo(
+                                    c).Length;
+                            }
+                            catch
+                            {
+                                sz = 0;
+                            }
+                            if (!groups
+                                    .ContainsKey(
+                                        sz))
+                                groups[sz] =
+                                    new List<
+                                        string>();
+                            groups[sz].Add(c);
+                        }
+
+                        if (groups.Count == 1)
+                        {
+                            // All same size.
+                            // Do byte compare
+                            // of first vs rest.
+                            string first =
+                                copies[0];
+                            byte[] refBytes =
+                                null;
+                            try
+                            {
+                                refBytes =
+                                    File
+                                        .ReadAllBytes(
+                                            first);
+                            }
+                            catch { }
+
+                            string different =
+                                null;
+                            if (refBytes != null)
+                            {
+                                foreach (
+                                    string c in
+                                    copies)
+                                {
+                                    if (c == first)
+                                        continue;
+                                    try
+                                    {
+                                        byte[] cb =
+                                            File
+                                                .ReadAllBytes(
+                                                    c);
+                                        if (!refBytes
+                                                .SequenceEqual(
+                                                    cb))
+                                        {
+                                            different = c;
+                                            break;
+                                        }
+                                    }
+                                    catch { }
+                                }
+                            }
+
+                            if (different !=
+                                null)
+                            {
+                                // Found a copy
+                                // with same size
+                                // but different
+                                // bytes = modded
+                                chosen =
+                                    different;
+                                modded++;
+                                Console
+                                    .ForegroundColor
+                                    = ConsoleColor
+                                        .Green;
+                                Console.WriteLine(
+                                    "    [MODDED]"
+                                    + " texture_" +
+                                    tidx.ToString(
+                                        "D2") +
+                                    ".bmp");
+                                Console
+                                    .ResetColor();
+                            }
+                            else
+                            {
+                                chosen = first;
+                                unmodded++;
+                            }
+                        }
+                        else
+                        {
+                            // Different sizes.
+                            // Majority size is
+                            // original. Lone
+                            // size = modded.
+                            long majoritySize =
+                                groups
+                                    .OrderByDescending(
+                                        kv =>
+                                        kv.Value
+                                            .Count)
+                                    .First()
+                                    .Key;
+
+                            // Find the lone
+                            // (modded) copy
+                            string modCopy =
+                                null;
+                            foreach (var kv in
+                                groups)
+                            {
+                                if (kv.Key !=
+                                    majoritySize
+                                    && kv.Value
+                                        .Count
+                                        < groups[
+                                            majoritySize]
+                                        .Count)
+                                {
+                                    modCopy =
+                                        kv.Value[
+                                            0];
+                                    break;
+                                }
+                            }
+
+                            if (modCopy != null)
+                            {
+                                chosen = modCopy;
+                                modded++;
+                                Console
+                                    .ForegroundColor
+                                    = ConsoleColor
+                                        .Green;
+                                Console.WriteLine(
+                                    "    [MODDED]"
+                                    + " texture_" +
+                                    tidx.ToString(
+                                        "D2") +
+                                    ".bmp"
+                                    + " (size"
+                                    + " differs)");
+                                Console
+                                    .ResetColor();
+                            }
+                            else
+                            {
+                                // All different
+                                // sizes, no clear
+                                // majority.
+                                // Use first.
+                                chosen =
+                                    copies[0];
+                                unmodded++;
+                            }
+                        }
+                    }
+
+                    if (chosen == null)
+                    {
+                        chosen = copies[0];
+                        unmodded++;
+                    }
+
+                    // Copy chosen texture to
+                    // unified temp folder
+                    string dst = Path.Combine(
+                        tempDir,
+                        "texture_" +
+                        tidx.ToString("D2") +
+                        ".bmp");
+                    try
+                    {
+                        File.Copy(
+                            chosen, dst, true);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console
+                            .ForegroundColor =
+                            ConsoleColor.Yellow;
+                        Console.WriteLine(
+                            "    [!] Copy"
+                            + " texture_" +
+                            tidx.ToString("D2")
+                            + ": " +
+                            ex.Message);
+                        Console.ResetColor();
+                    }
+                }
+
+                Console.WriteLine(
+                    "    Total textures : "
+                    + texCopies.Count);
+                Console.WriteLine(
+                    "    Modded          : "
+                    + modded);
+                Console.WriteLine(
+                    "    Unmodded        : "
+                    + unmodded);
+
+                // Step 3: Build GDTB from
+                // the unified temp folder
+                try
+                {
+                    GDTBArchive.Create(
+                        tempDir, outGdtb);
+                    Console.ForegroundColor =
+                        ConsoleColor.Green;
+                    Console.WriteLine(
+                        "\n[OK] Unified GDTB: "
+                        + outGdtb);
+                    Console.ResetColor();
+                }
+                catch (Exception ex)
+                {
+                    Console.ForegroundColor =
+                        ConsoleColor.Yellow;
+                    Console.WriteLine(
+                        "    [!] GDTB build"
+                        + " failed: " +
+                        ex.Message);
+                    Console.ResetColor();
+                    // Fallback to source
+                    string srcG = Path.Combine(
+                        inDir, "_source.gdtb");
+                    if (File.Exists(srcG))
+                    {
+                        File.Copy(
+                            srcG, outGdtb,
+                            true);
+                        Console
+                            .ForegroundColor =
+                            ConsoleColor.Yellow;
+                        Console.WriteLine(
+                            "    Copied source"
+                            + " GDTB as"
+                            + " fallback.");
+                        Console.ResetColor();
+                    }
+                }
+            }
+            finally
+            {
+                try
+                {
+                    if (Directory.Exists(
+                            tempDir))
+                        Directory.Delete(
+                            tempDir, true);
+                }
+                catch { }
+            }
+        }
+
+        // ═════════════════════════════════
+        // HAS USER EDITS
+        // Detects if any batch OBJ in this
+        // embedded folder was actually
+        // modified by the user vs being an
+        // unmodded extraction roundtrip.
+        //
+        // Compares OBJ vertex positions
+        // (accounting for auto-scale) against
+        // the original RDTB blob bytes.
+        // If any vertex differs by >= EPS,
+        // the folder was user-edited.
+        //
+        // Returns false for pure roundtrips
+        // so unmodded blobs use original bytes
+        // and stay byte-identical.
+        // ═════════════════════════════════
+        private static bool HasUserEdits(
+            string subPath,
+            byte[] originalBlob)
+        {
+            const float EPS = 0.002f;
+
+            // Read auto-scale from _info.txt
+            float autoScale = 1.0f;
+            string infoPath = Path.Combine(
+                subPath, "_info.txt");
+            if (File.Exists(infoPath))
+            {
+                foreach (string line in
+                    File.ReadAllLines(infoPath))
+                {
+                    string t = line.Trim();
+                    if (t.StartsWith("Auto Scale:"))
+                    {
+                        float sc;
+                        if (float.TryParse(
+                                t.Substring(11)
+                                    .Trim(),
+                                System.Globalization
+                                    .NumberStyles
+                                    .Float,
+                                System.Globalization
+                                    .CultureInfo
+                                    .InvariantCulture,
+                                out sc) && sc > 0f)
+                            autoScale = sc;
+                        break;
+                    }
+                }
+            }
+
+            // autoScaleInvert converts OBJ
+            // display-space back to game-space
+            float inv = autoScale != 0f
+                ? 1.0f / autoScale
+                : 1.0f;
+
+            // Get mesh chunk bounds from blob
+            uint[] rawSlots = new uint[14];
+            for (int i = 0; i < 14; i++)
+            {
+                int o = 0x10 + i * 4;
+                if (o + 4 > originalBlob.Length)
+                    break;
+                rawSlots[i] = RU32(
+                    originalBlob, o);
+            }
+
+            uint c11Off = rawSlots[11];
+            if (c11Off == 0 ||
+                c11Off == 0xFFFFFFFF ||
+                c11Off >= (uint)originalBlob.Length)
+                return false;
+
+            uint c11End =
+                (uint)originalBlob.Length;
+            for (int i = 0; i < 14; i++)
+            {
+                uint v = rawSlots[i];
+                if (v > c11Off &&
+                    v < c11End &&
+                    v != 0xFFFFFFFF &&
+                    v != 0)
+                    c11End = v;
+            }
+
+            int mcLen = (int)(c11End - c11Off);
+            if (mcLen < 32) return false;
+
+            byte[] mc = new byte[mcLen];
+            Array.Copy(originalBlob,
+                (int)c11Off, mc, 0, mcLen);
+
+            uint mFirst = RU32(mc, 0);
+            if (mFirst == 0 ||
+                mFirst > (uint)mcLen ||
+                mFirst < 4)
+                return false;
+
+            int nPtrs = (int)(mFirst / 4);
+
+            // Build sorted batch pointer list
+            var sortedPtrs = new List<uint>();
+            for (int i = 0; i < nPtrs; i++)
+            {
+                uint p = RU32(mc, i * 4);
+                if (p > 0 && p < (uint)mcLen)
+                    sortedPtrs.Add(p);
+            }
+            sortedPtrs = sortedPtrs
+                .Distinct()
+                .OrderBy(p => p)
+                .ToList();
+
+            // For each batch, collect original
+            // vertex positions
+            var origVerts =
+                new Dictionary<int,
+                    List<float[]>>();
+
+            for (int bi = 0; bi < nPtrs; bi++)
+            {
+                uint bPtr = RU32(mc, bi * 4);
+                if (bPtr == 0 ||
+                    bPtr >= (uint)mcLen)
+                    continue;
+
+                uint nPtr = (uint)mcLen;
+                foreach (uint sp in sortedPtrs)
+                {
+                    if (sp > bPtr)
+                    {
+                        nPtr = sp;
+                        break;
+                    }
+                }
+
+                var verts = new List<float[]>();
+                int pos = (int)bPtr;
+                int end = (int)nPtr;
+
+                while (pos + 16 <= end)
+                {
+                    if (mc[pos] == 0x00 &&
+                        mc[pos + 1] == 0x80 &&
+                        mc[pos + 3] == 0x6C)
+                    {
+                        int vc = mc[pos + 4];
+                        if (vc >= 1 && vc <= 96)
+                        {
+                            int vs = pos + 16;
+                            if (vs + vc * 16 <= end)
+                            {
+                                for (int vi = 0;
+                                     vi < vc; vi++)
+                                {
+                                    int vo =
+                                        vs + vi * 16;
+                                    verts.Add(
+                                        new float[]
+                                        {
+                                    RF32(mc,
+                                        vo + 4),
+                                    RF32(mc,
+                                        vo + 8),
+                                    RF32(mc,
+                                        vo + 12)
+                                        });
+                                }
+                            }
+                            int bsz = 16 +
+                                3 * vc * 16 + 16;
+                            if (pos + bsz + 16
+                                    <= end &&
+                                RU32(mc,
+                                    pos + bsz)
+                                    == 0x70000000)
+                                bsz += 16;
+                            pos += bsz;
+                            continue;
+                        }
+                    }
+                    pos += 4;
+                }
+
+                if (verts.Count > 0)
+                    origVerts[bi] = verts;
+            }
+
+            // Scan batch OBJ files and compare
+            foreach (string modelDir in
+                Directory.GetDirectories(
+                    subPath, "model_*"))
+            {
+                foreach (string objFile in
+                    Directory.GetFiles(
+                        modelDir,
+                        "batch_*.obj"))
+                {
+                    string fn =
+                        Path.GetFileNameWithoutExtension(
+                            objFile);
+                    if (!fn.StartsWith("batch_"))
+                        continue;
+                    int bi;
+                    if (!int.TryParse(
+                            fn.Substring(6),
+                            out bi))
+                        continue;
+
+                    if (!origVerts
+                            .ContainsKey(bi))
+                        continue;
+
+                    var orig = origVerts[bi];
+
+                    // Read OBJ verts
+                    var objV =
+                        new List<float[]>();
+                    var ci = System.Globalization
+                        .CultureInfo
+                        .InvariantCulture;
+                    foreach (string line in
+                        File.ReadAllLines(
+                            objFile))
+                    {
+                        string t = line.Trim();
+                        if (t.Length < 2 ||
+                            t[0] != 'v' ||
+                            t[1] != ' ')
+                            continue;
+                        string[] p = t.Split(
+                            new char[]
+                                { ' ', '\t' },
+                            StringSplitOptions
+                                .RemoveEmptyEntries);
+                        if (p.Length < 4 ||
+                            p[0] != "v")
+                            continue;
+                        float x, y, z;
+                        if (float.TryParse(
+                                p[1],
+                                System.Globalization
+                                    .NumberStyles
+                                    .Float, ci,
+                                out x) &&
+                            float.TryParse(
+                                p[2],
+                                System.Globalization
+                                    .NumberStyles
+                                    .Float, ci,
+                                out y) &&
+                            float.TryParse(
+                                p[3],
+                                System.Globalization
+                                    .NumberStyles
+                                    .Float, ci,
+                                out z))
+                        {
+                            objV.Add(
+                                new float[]
+                                    { x, y, z });
+                        }
+                    }
+
+                    if (objV.Count != orig.Count)
+                        return true; // vert count changed = modded
+
+                    // Compare verts
+                    for (int vi = 0;
+                         vi < objV.Count; vi++)
+                    {
+                        // OBJ is in display-space
+                        // (autoScale applied).
+                        // Convert back to game-space
+                        // using inv before comparing
+                        // against original bytes.
+                        float gx =
+                            objV[vi][0] * inv;
+                        float gy =
+                            objV[vi][1] * inv;
+                        float gz =
+                            objV[vi][2] * inv;
+
+                        if (Math.Abs(gx -
+                                orig[vi][0]) > EPS ||
+                            Math.Abs(gy -
+                                orig[vi][1]) > EPS ||
+                            Math.Abs(gz -
+                                orig[vi][2]) > EPS)
+                            return true; // vertex moved = modded
+                    }
+                }
+            }
+
+            return false; // no edits detected
+        }
+
+        // ═════════════════════════════════
+        // IS ONLY SLOT TABLE DIFF
+        // Returns true if the only difference
+        // between rebuilt and original RDTB
+        // is in the 4 mirror slots (9,10,12,13)
+        // changing from 0xFFFFFFFF to real
+        // offsets. This is the ApplySlotMirror
+        // signature on an unmodded roundtrip.
+        // If true, the blob was not user-edited
+        // and we should use original bytes.
+        // ═════════════════════════════════
+        private static bool IsOnlySlotTableDiff(
+            byte[] rebuilt,
+            byte[] original)
+        {
+            if (rebuilt.Length != original.Length)
+                return false;
+
+            int diffCount = 0;
+            int firstDiff = -1;
+            int lastDiff = -1;
+
+            for (int i = 0;
+                 i < rebuilt.Length; i++)
+            {
+                if (rebuilt[i] != original[i])
+                {
+                    diffCount++;
+                    if (firstDiff < 0)
+                        firstDiff = i;
+                    lastDiff = i;
+                }
+            }
+
+            if (diffCount == 0)
+                return true; // identical
+
+            // Slot table is at 0x10..0x47
+            // (14 slots × 4 bytes = 56 bytes)
+            // The 4 mirror slots are at:
+            //   slot 9  = 0x10 + 9*4  = 0x34
+            //   slot 10 = 0x10 + 10*4 = 0x38
+            //   slot 12 = 0x10 + 12*4 = 0x40
+            //   slot 13 = 0x10 + 13*4 = 0x44
+            // Each slot is 4 bytes.
+            // So diffs must be within
+            // 0x34..0x47 only.
+            // Max 16 bytes of diffs
+            // (4 slots × 4 bytes).
+
+            if (diffCount > 16)
+                return false;
+
+            if (firstDiff < 0x34)
+                return false;
+
+            if (lastDiff > 0x47)
+                return false;
+
+            // All diffs are within the
+            // mirror slot range
+            return true;
         }
     }
 }
