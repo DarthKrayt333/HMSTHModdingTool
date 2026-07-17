@@ -746,38 +746,6 @@ namespace HMSTHModdingTool.RDTB
                 " skipped");
             Console.ResetColor();
 
-            // Also copy all textures
-            // to root output folder
-            // so combined viewers
-            // (x3d _all_obj) can
-            // find them too
-            string rootTexDir =
-                Path.Combine(
-                    outDir, "textures");
-            Directory.CreateDirectory(
-                rootTexDir);
-            foreach (var anyBmp in
-                Directory.GetFiles(
-                    tempTex,
-                    "texture_*.bmp"))
-            {
-                string rootDst =
-                    Path.Combine(
-                        rootTexDir,
-                        Path.GetFileName(
-                            anyBmp));
-                try
-                {
-                    if (!File.Exists(
-                            rootDst))
-                        File.Copy(
-                            anyBmp,
-                            rootDst,
-                            true);
-                }
-                catch { }
-            }
-
             File.Copy(rdtbPath,
                 Path.Combine(outDir,
                     "_source.rdtb"),
