@@ -727,7 +727,7 @@ namespace HMSTHModdingTool.RDTB
                             objFile,
                             mtlFile,
                             bi, texId,
-                            autoScale);
+                            1.0f);
                     if (ok)
                         totalWritten++;
                     else
@@ -843,17 +843,6 @@ namespace HMSTHModdingTool.RDTB
                     + " change"
                     + " textures!");
 
-                // Save auto-scale to _info.txt
-                if (autoScale != 1.0f)
-                {
-                    sw.WriteLine(
-                        "Auto Scale: " +
-                        autoScale.ToString(
-                            "F6",
-                            System.Globalization
-                                .CultureInfo
-                                .InvariantCulture));
-                }
 
             }
 
