@@ -2473,6 +2473,26 @@ namespace HMSTHModdingTool
                                     icb += 2;
                                     continue;
                                 }
+
+                                if (al == "--normals--forcenew"
+                                    || al == "--forcenew"
+                                    || al == "--normals-forcenew")
+                                {
+                                    cbNormals = "forcenew";
+                                    icb++;
+                                    continue;
+                                }
+
+                                if (al == "--verbose" || al == "-v")
+                                {
+                                    // Verbose flag - passed through
+                                    // to Build via environment
+                                    Environment.SetEnvironmentVariable(
+                                        "HMSTH_VERBOSE", "1");
+                                    icb++;
+                                    continue;
+                                }
+
                                 if (al ==
                                     "--normals-xyz"
                                     && icb + 1
@@ -2521,7 +2541,7 @@ namespace HMSTHModdingTool
                                     || al == "--mirror"
                                     || al == "-mirror")
                                 {
-                                    cbFormat = "mirrored";
+                                    cbFormat = "auto";
                                     icb++;
                                     continue;
                                 }
@@ -2585,7 +2605,14 @@ namespace HMSTHModdingTool
                             // source format
                             if (cbFormat == "default")
                             {
-                                cbFormat = "mirrored";
+                                cbFormat = "auto";
+                            }
+
+                            // Force match normals as default
+                            if (cbNormals == "match" ||
+                                string.IsNullOrEmpty(cbNormals))
+                            {
+                                cbNormals = "match";
                             }
 
                             if (cbClean.Count == 2)
@@ -3923,6 +3950,17 @@ namespace HMSTHModdingTool
                 + " [--normals MODE]"
                 + " [--normals-xyz X,Y,Z]"
                 + " [-all]");
+            Console.WriteLine(
+                "    --normals--forcenew");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "      Use Blender normals"
+                + " as-is. Skips the"
+                + " automatic nearest-"
+                + "neighbor transfer from"
+                + " the original batch.");
+            Console.ResetColor();
 
             // ── RDTB FORMAT CONVERTERS ──
             Console.ForegroundColor =
