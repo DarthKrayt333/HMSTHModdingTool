@@ -67,6 +67,10 @@ namespace HMSTHModdingTool.RDTB
             0x00, 0x00, 0x00, 0x00
         };
 
+        static bool IsVerbose =>
+            Environment.GetEnvironmentVariable(
+                "HMSTH_VERBOSE") == "1";
+
         // ═════════════════════════════
         // MAIN ENTRY POINT
         // ═════════════════════════════
@@ -96,9 +100,10 @@ namespace HMSTHModdingTool.RDTB
                 "    Out    : " +
                 outDir);
 
-            Console.WriteLine(
-                "    Normals: " +
-                normalsMode);
+            if (IsVerbose)
+                Console.WriteLine(
+                    "    Normals: " +
+                    normalsMode);
 
             // ADDITIVE D: Show normals-copy
             // operations queued for this build
@@ -189,12 +194,12 @@ namespace HMSTHModdingTool.RDTB
                         {
                             autoScaleInvert =
                                 1.0f / sc;
-                            Console.WriteLine(
-                                "    [auto-scale"
-                                + " invert] x" +
-                                autoScaleInvert
-                                    .ToString(
-                                        "F4"));
+                            if (IsVerbose)
+                                Console.WriteLine(
+                                    "    [auto-scale"
+                                    + " invert] x" +
+                                    autoScaleInvert
+                                        .ToString("F4"));
                         }
                     }
                 }
@@ -327,6 +332,9 @@ namespace HMSTHModdingTool.RDTB
                             .Count +
                         " deleted)");
                     Console.ResetColor();
+
+                    Environment.SetEnvironmentVariable(
+                        "HMSTH_VERBOSE", null);
                 }
             }
 
@@ -456,19 +464,43 @@ namespace HMSTHModdingTool.RDTB
                 meshRawOffset.ToString("X") +
                 ")");
 
-            // Resolve target format
+            // Resolve target format.
+            // If user did not explicitly
+            // set a format flag, auto-
+            // detect from source RDTB.
+            // SMALL sources default to
+            // SMALL output. BIG and
+            // MIRROR sources default
+            // to MIRROR output.
             TargetRdtbFormat outFmt =
                 targetFormat;
             if (outFmt ==
                 TargetRdtbFormat.Match)
             {
-                outFmt = sourceIsBig
-                    ? TargetRdtbFormat.Big
-                    : sourceIsSmall
-                        ? TargetRdtbFormat
-                            .Small
-                        : TargetRdtbFormat
-                            .Mirror;
+                // Match mode: SMALL stays
+                // SMALL, everything else
+                // becomes MIRROR
+                outFmt = sourceIsSmall
+                    ? TargetRdtbFormat.Small
+                    : TargetRdtbFormat.Mirror;
+            }
+            else if (outFmt ==
+                TargetRdtbFormat.Mirror
+                && sourceIsSmall)
+            {
+                // Default mirror mode but
+                // source is SMALL: auto-
+                // switch to SMALL output
+                outFmt =
+                    TargetRdtbFormat.Small;
+                Console.ForegroundColor =
+                    ConsoleColor.Cyan;
+                Console.WriteLine(
+                    "    [auto] Source"
+                    + " is SMALL RDTB,"
+                    + " output set to"
+                    + " SMALL");
+                Console.ResetColor();
             }
             Console.WriteLine(
                 "    Output format: " +
@@ -503,20 +535,27 @@ namespace HMSTHModdingTool.RDTB
                     List<(float[] pos,
                           float[] norm)>>();
 
-            if (normalsMode == "match")
-            {
+            // Always read original normals
+            // regardless of mode.
+            // This is needed for "match" mode
+            // which is now the default.
+            if (IsVerbose)
                 Console.WriteLine(
-                    "    Reading"
-                    + " original"
-                    + " normals...");
-                foreach (int bi in
-                    batchObjs.Keys)
-                {
-                    origNormals[bi] =
-                        ReadBatchNormals(
-                            meshChunk,
-                            bi, nPtrs);
-                }
+                    "    Reading original"
+                    + " normals for all"
+                    + " batches...");
+            foreach (int bi in batchObjs.Keys)
+            {
+                origNormals[bi] =
+                    ReadBatchNormals(
+                        meshChunk,
+                        bi, nPtrs);
+                if (IsVerbose)
+                    Console.WriteLine(
+                        "      batch " + bi
+                        + ": "
+                        + origNormals[bi].Count
+                        + " samples");
             }
 
             // ADDITIVE: If normals-copy map is
@@ -603,40 +642,136 @@ namespace HMSTHModdingTool.RDTB
                 }
 
                 // Apply normals
-                if (normalsMode ==
-                    "zero")
+                // ─────────────────────────────
+                // NORMALS PROCESSING
+                // Priority:
+                //   1. forcenew  → keep OBJ
+                //   2. zero      → all zeros
+                //   3. up        → all (0,1,0)
+                //   4. custom    → user vector
+                //   5. default   → nearest
+                //                  neighbor
+                //                  from original
+                // ─────────────────────────────
 
-                    // Apply normals
-                    if (normalsMode ==
-                    "zero")
+                // forcenew only applies to
+                // batches that were actually
+                // modified by the user.
+                // Unmodified batches always
+                // use original RDTB normals
+                // regardless of the flag.
+                bool batchWasModified =
+                    newBatchData.ContainsKey(bi)
+                    || tris.Count !=
+                        CountOrigBatchTris(
+                            meshChunk, bi, nPtrs);
+
+                if (normalsMode == "forcenew"
+                    && batchWasModified)
+                {
+                    // User explicitly wants their
+                    // Blender normals kept as-is
+                    // for this specific batch.
+                    Console.ForegroundColor =
+                        ConsoleColor.Cyan;
+                    Console.WriteLine(
+                        "      [normals] batch "
+                        + bi
+                        + ": forcenew"
+                        + " (OBJ normals kept,"
+                        + " batch was modified)");
+                    Console.ResetColor();
+                }
+                else if (normalsMode == "forcenew"
+                    && !batchWasModified)
+                {
+                    // Batch is unchanged roundtrip.
+                    // Even with forcenew active,
+                    // restore original normals so
+                    // unmodded body parts look
+                    // correct in game.
+                    if (origNormals.ContainsKey(bi)
+                        && origNormals[bi].Count > 0)
+                    {
+                        var samples =
+                            origNormals[bi];
+
+                        for (int i = 0;
+                             i < verts.Count;
+                             i++)
+                        {
+                            float vx = verts[i][0];
+                            float vy = verts[i][1];
+                            float vz = verts[i][2];
+
+                            float bestD =
+                                float.MaxValue;
+                            float[] bestN =
+                                new float[]
+                                { 0f, 1f, 0f };
+
+                            foreach (var s in samples)
+                            {
+                                float dx =
+                                    vx - s.pos[0];
+                                float dy =
+                                    vy - s.pos[1];
+                                float dz =
+                                    vz - s.pos[2];
+
+                                float d =
+                                    dx * dx
+                                    + dy * dy
+                                    + dz * dz;
+
+                                if (d < bestD)
+                                {
+                                    bestD = d;
+                                    bestN = s.norm;
+                                }
+                            }
+
+                            if (i < normals.Count)
+                                normals[i] = bestN;
+                            else
+                                normals.Add(bestN);
+                        }
+
+                        Console.ForegroundColor =
+                            ConsoleColor.DarkGray;
+                        Console.WriteLine(
+                            "      [normals] batch "
+                            + bi
+                            + ": roundtrip,"
+                            + " original normals"
+                            + " restored");
+                        Console.ResetColor();
+                    }
+                }
+
+                else if (normalsMode == "zero")
                 {
                     for (int i = 0;
-                         i < normals
-                             .Count;
+                         i < normals.Count;
                          i++)
                         normals[i] =
                             new float[]
-                            { 0, 0, 0 };
+                            { 0f, 0f, 0f };
                 }
-                else if (normalsMode
-                    == "up")
+                else if (normalsMode == "up")
                 {
                     for (int i = 0;
-                         i < normals
-                             .Count;
+                         i < normals.Count;
                          i++)
                         normals[i] =
                             new float[]
-                            { 0, 1, 0 };
+                            { 0f, 1f, 0f };
                 }
-                else if (normalsMode
-                    == "custom" &&
-                    customNormal !=
-                    null)
+                else if (normalsMode == "custom"
+                    && customNormal != null)
                 {
                     for (int i = 0;
-                         i < normals
-                             .Count;
+                         i < normals.Count;
                          i++)
                         normals[i] =
                             new float[]
@@ -646,124 +781,147 @@ namespace HMSTHModdingTool.RDTB
                                 customNormal[2]
                             };
                 }
-                else if (normalsMode
-                    == "match" &&
-                    origNormals
-                        .ContainsKey(
-                            bi))
+                else
                 {
-                    var samples =
-                        origNormals[bi];
-                    if (samples.Count
-                        > 0)
+                    // DEFAULT: Nearest-neighbor
+                    // transfer from original
+                    // RDTB batch normals.
+                    if (origNormals
+                            .ContainsKey(bi)
+                        && origNormals[bi]
+                            .Count > 0)
                     {
+                        var samples =
+                            origNormals[bi];
+
                         for (int i = 0;
-                             i < verts
-                                 .Count;
+                             i < verts.Count;
                              i++)
                         {
-                            float bestD
-                                = float
-                                    .MaxValue;
-                            float[] bestN
-                                = new float[]
-                                { 0, 1, 0 };
                             float vx =
                                 verts[i][0];
                             float vy =
                                 verts[i][1];
                             float vz =
                                 verts[i][2];
-                            foreach (var s
-                                in samples)
-                            {
-                                float dx =
-                                    vx -
-                                    s.pos[0];
-                                float dy =
-                                    vy -
-                                    s.pos[1];
-                                float dz =
-                                    vz -
-                                    s.pos[2];
-                                float d =
-                                    dx * dx +
-                                    dy * dy +
-                                    dz * dz;
-                                if (d <
-                                    bestD)
-                                {
-                                    bestD =
-                                        d;
-                                    bestN =
-                                        s.norm;
-                                }
-                            }
-                            if (i < normals
-                                    .Count)
-                                normals[i]
-                                    = bestN;
-                        }
-                    }
-                    else
-                    {
-                        for (int i = 0;
-                             i < normals
-                                 .Count;
-                             i++)
-                            normals[i] =
-                                new float[]
-                                { 0, 0, 0 };
-                    }
-                }
 
-
-                // ADDITIVE: normals-copy override.
-                // If this batch is a DEST in the
-                // copy map, replace its normals
-                // with normals from the SOURCE
-                // batch using nearest-vertex match.
-                // This overrides any prior mode.
-                if (normalsCopyMap != null
-                    && normalsCopyMap.TryGetValue(
-                        bi, out int srcBatchIdx)
-                    && origNormals.ContainsKey(
-                        srcBatchIdx))
-                {
-                    var srcSamples =
-                        origNormals[srcBatchIdx];
-                    if (srcSamples.Count > 0)
-                    {
-                        Console.WriteLine(
-                            "      [copy] batch "
-                            + bi + " normals <- "
-                            + "batch "
-                            + srcBatchIdx
-                            + " (" +
-                            srcSamples.Count
-                            + " src samples)");
-
-                        // Find nearest source
-                        // vertex for each dest
-                        // vertex and copy its
-                        // normal. This gives
-                        // best result when new
-                        // geometry is similar
-                        // shape (like hand vs
-                        // face).
-                        for (int i = 0;
-                             i < verts.Count; i++)
-                        {
-                            float vx = verts[i][0];
-                            float vy = verts[i][1];
-                            float vz = verts[i][2];
                             float bestD =
                                 float.MaxValue;
                             float[] bestN =
                                 new float[]
-                                { 0, 1, 0 };
-                            foreach (var s in
-                                srcSamples)
+                                { 0f, 1f, 0f };
+
+                            foreach (var s
+                                in samples)
+                            {
+                                float dx =
+                                    vx - s.pos[0];
+                                float dy =
+                                    vy - s.pos[1];
+                                float dz =
+                                    vz - s.pos[2];
+
+                                float d =
+                                    dx * dx
+                                    + dy * dy
+                                    + dz * dz;
+
+                                if (d < bestD)
+                                {
+                                    bestD = d;
+                                    bestN =
+                                        s.norm;
+                                }
+                            }
+
+                            if (i <
+                                normals.Count)
+                                normals[i] =
+                                    bestN;
+                            else
+                                normals.Add(
+                                    bestN);
+                        }
+
+                        Console.ForegroundColor =
+                            ConsoleColor.Green;
+                        Console.WriteLine(
+                            "      [normals]"
+                            + " batch " + bi
+                            + ": matched "
+                            + verts.Count
+                            + " verts from "
+                            + samples.Count
+                            + " original"
+                            + " samples");
+                        Console.ResetColor();
+                    }
+                    else
+                    {
+                        Console.ForegroundColor =
+                            ConsoleColor.Yellow;
+                        Console.WriteLine(
+                            "      [normals]"
+                            + " batch " + bi
+                            + ": no original"
+                            + " samples,"
+                            + " keeping"
+                            + " OBJ normals");
+                        Console.ResetColor();
+                    }
+                }
+
+                // ─────────────────────────────
+                // NORMALS-COPY MAP OVERRIDE
+                // Only runs if forcenew is NOT
+                // active. Prevents the copy map
+                // from overwriting OBJ normals
+                // when forcenew is requested.
+                // ─────────────────────────────
+                if (normalsMode != "forcenew"
+                    && normalsCopyMap != null
+                    && normalsCopyMap
+                        .TryGetValue(
+                            bi,
+                            out int srcBatchIdx)
+                    && origNormals
+                        .ContainsKey(
+                            srcBatchIdx))
+                {
+                    var srcSamples =
+                        origNormals[srcBatchIdx];
+
+                    if (srcSamples.Count > 0)
+                    {
+                        Console.WriteLine(
+                            "      [copy]"
+                            + " batch " + bi
+                            + " normals <-"
+                            + " batch "
+                            + srcBatchIdx
+                            + " ("
+                            + srcSamples.Count
+                            + " src samples)");
+
+                        for (int i = 0;
+                             i < verts.Count;
+                             i++)
+                        {
+                            float vx =
+                                verts[i][0];
+                            float vy =
+                                verts[i][1];
+                            float vz =
+                                verts[i][2];
+
+                            float bestD =
+                                float.MaxValue;
+                            float[] bestN =
+                                new float[]
+                                { 0f, 1f, 0f };
+
+                            foreach (var s
+                                in srcSamples)
                             {
                                 float dx =
                                     vx - s.pos[0];
@@ -772,17 +930,22 @@ namespace HMSTHModdingTool.RDTB
                                 float dz =
                                     vz - s.pos[2];
                                 float d =
-                                    dx * dx +
-                                    dy * dy +
-                                    dz * dz;
+                                    dx * dx
+                                    + dy * dy
+                                    + dz * dz;
+
                                 if (d < bestD)
                                 {
                                     bestD = d;
-                                    bestN = s.norm;
+                                    bestN =
+                                        s.norm;
                                 }
                             }
-                            if (i < normals.Count)
-                                normals[i] = bestN;
+
+                            if (i <
+                                normals.Count)
+                                normals[i] =
+                                    bestN;
                         }
                     }
                     else
@@ -792,9 +955,9 @@ namespace HMSTHModdingTool.RDTB
                         Console.WriteLine(
                             "      [!] batch "
                             + bi
-                            + " normals-copy src"
-                            + " batch " +
-                            srcBatchIdx
+                            + " normals-copy"
+                            + " src batch "
+                            + srcBatchIdx
                             + " has no normals"
                             + " - skipping");
                         Console.ResetColor();
@@ -1870,94 +2033,104 @@ namespace HMSTHModdingTool.RDTB
             uint bPtr = BitConverter
                 .ToUInt32(chunk,
                     batchIdx * 4);
-            uint nPtr =
-                (batchIdx + 1 < nPtrs
-                ? BitConverter
-                    .ToUInt32(chunk,
-                        (batchIdx + 1)
-                        * 4)
-                : (uint)chunk.Length);
+
+            // If the batch pointer is
+            // null, this slot is empty.
+            if (bPtr == 0)
+                return result;
+
+            // Find the next VALID pointer
+            // that is greater than bPtr.
+            // Skip null pointers and
+            // pointers equal to bPtr.
+            uint nPtr = (uint)chunk.Length;
+            for (int j = batchIdx + 1;
+                 j < nPtrs; j++)
+            {
+                uint candidate =
+                    BitConverter.ToUInt32(
+                        chunk, j * 4);
+                if (candidate > bPtr &&
+                    candidate <
+                        (uint)chunk.Length)
+                {
+                    nPtr = candidate;
+                    break;
+                }
+            }
+
+            // Safety: if nPtr is invalid
+            // or same as bPtr, use full
+            // chunk end.
+            if (nPtr <= bPtr ||
+                nPtr > (uint)chunk.Length)
+                nPtr = (uint)chunk.Length;
 
             int pos = (int)bPtr;
             int end = (int)nPtr;
 
             while (pos + 16 <= end)
             {
-                if (chunk[pos] !=
-                    VIF_B0 ||
-                    chunk[pos + 1] !=
-                    VIF_B1 ||
-                    chunk[pos + 3] !=
-                    VIF_B3)
+                if (chunk[pos] != VIF_B0 ||
+                    chunk[pos + 1] != VIF_B1
+                    || chunk[pos + 3]
+                        != VIF_B3)
                 {
                     pos += 4;
                     continue;
                 }
 
                 int vc = chunk[pos + 4];
-                int vStart = pos + 16;
-                int nStart = vStart +
-                    vc * 16;
-
-                for (int i = 0;
-                     i < vc; i++)
+                if (vc < 1 || vc > 96)
                 {
-                    int vOff = vStart +
-                        i * 16;
-                    int nOff = nStart +
-                        i * 16;
-                    if (nOff + 16 > end)
-                        break;
-
-                    float[] vp =
-                        new float[]
-                        {
-                            BitConverter
-                                .ToSingle(
-                                    chunk,
-                                    vOff + 4),
-                            BitConverter
-                                .ToSingle(
-                                    chunk,
-                                    vOff + 8),
-                            BitConverter
-                                .ToSingle(
-                                    chunk,
-                                    vOff + 12)
-                        };
-                    float[] np =
-                        new float[]
-                        {
-                            BitConverter
-                                .ToSingle(
-                                    chunk,
-                                    nOff + 4),
-                            BitConverter
-                                .ToSingle(
-                                    chunk,
-                                    nOff + 8),
-                            BitConverter
-                                .ToSingle(
-                                    chunk,
-                                    nOff + 12)
-                        };
-                    result.Add(
-                        (vp, np));
+                    pos += 4;
+                    continue;
                 }
 
-                int bSize = 16 +
-                    3 * vc * 16 + 16;
-                if (pos + bSize + 16
-                    <= end)
+                int vStart = pos + 16;
+                int nStart = vStart + vc * 16;
+
+                // Safety check
+                if (nStart + vc * 16 > end)
+                {
+                    pos += 4;
+                    continue;
+                }
+
+                for (int i = 0; i < vc; i++)
+                {
+                    int vOff = vStart + i * 16;
+                    int nOff = nStart + i * 16;
+                    if (nOff + 16 > end) break;
+
+                    float[] vp = new float[]
+                    {
+                BitConverter.ToSingle(
+                    chunk, vOff + 4),
+                BitConverter.ToSingle(
+                    chunk, vOff + 8),
+                BitConverter.ToSingle(
+                    chunk, vOff + 12)
+                    };
+                    float[] np = new float[]
+                    {
+                BitConverter.ToSingle(
+                    chunk, nOff + 4),
+                BitConverter.ToSingle(
+                    chunk, nOff + 8),
+                BitConverter.ToSingle(
+                    chunk, nOff + 12)
+                    };
+                    result.Add((vp, np));
+                }
+
+                int bSize = 16 + 3 * vc * 16 + 16;
+                if (pos + bSize + 16 <= end)
                 {
                     uint eof =
-                        BitConverter
-                            .ToUInt32(
-                                chunk,
-                                pos +
-                                bSize);
-                    if (eof ==
-                        EOF_FLAG)
+                        BitConverter.ToUInt32(
+                            chunk, pos + bSize);
+                    if (eof == EOF_FLAG)
                         bSize += 16;
                 }
                 pos += bSize;
