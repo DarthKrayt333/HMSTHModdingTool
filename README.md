@@ -617,9 +617,9 @@ Skeleton export with mesh in progress.
 
     Rebuild RDTB + GDTB from edited model files.
     
-    Reads model_NN.obj OR model_NN.dae files.
+    Reads model_NN.obj files
     
-    OBJ takes priority if both exist.
+    Builds new RDTB + GDTB in the output folder.
 
 -xbatches <file.srdb> <file.gdtb> <base_name>
 
@@ -633,9 +633,9 @@ Skeleton export with mesh in progress.
 
     Rebuild SRDB + GDTB from edited model files.
     
-    Reads model_NN.obj OR model_NN.dae files.
+    Reads model_NN.obj files
     
-    OBJ takes priority if both exist.
+    Builds new SRDB + GDTB in the output folder.
 
 -x3d <file.rdtb> <file.gdtb> <base_name>
 
