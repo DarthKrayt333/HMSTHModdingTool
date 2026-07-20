@@ -24,6 +24,8 @@ namespace HMSTHModdingTool.IO
         private static readonly byte[] MAGIC_ELF =
             { 0x7F, 0x45, 0x4C, 0x46 };
 
+        // HDA container magic: first 4 bytes
+        // = 0x10 00 00 00, next 12 bytes = 00
         private static readonly byte[] MAGIC_HDA =
         {
             0x10, 0x00, 0x00, 0x00,
@@ -32,17 +34,37 @@ namespace HMSTHModdingTool.IO
             0x00, 0x00, 0x00, 0x00
         };
 
+        // HD soundbank header magic
         private static readonly byte[] MAGIC_HD_START =
-            { 0x49, 0x45, 0x43, 0x53, 0x73, 0x72, 0x65, 0x56 };
+            { 0x49, 0x45, 0x43, 0x53,
+              0x73, 0x72, 0x65, 0x56 };
 
+        // SQ sequence second-line magic
         private static readonly byte[] MAGIC_SQ_LINE2 =
-            { 0x49, 0x45, 0x43, 0x53, 0x75, 0x71, 0x65, 0x53 };
+            { 0x49, 0x45, 0x43, 0x53,
+              0x75, 0x71, 0x65, 0x53 };
+
+        // ═══════════════════════════════════════════════════════════
+        // SLOT ROLE CONSTANTS
+        //
+        //   0 = regular file (not audio)
+        //   1 = .BD  — slot immediately before .HD
+        //   2 = .HD  — confirmed by magic header
+        //   3 = .SQ  — confirmed by magic header
+        // ═══════════════════════════════════════════════════════════
+
+        private const int ROLE_REGULAR = 0;
+        private const int ROLE_BD = 1;
+        private const int ROLE_HD = 2;
+        private const int ROLE_SQ = 3;
 
         // ═══════════════════════════════════════════════════════════
         // UNPACK — PUBLIC ENTRY POINTS
         // ═══════════════════════════════════════════════════════════
 
-        public static void Unpack(string Data, string OutputFolder)
+        public static void Unpack(
+            string Data,
+            string OutputFolder)
         {
             using (FileStream Input =
                 new FileStream(Data, FileMode.Open))
@@ -62,14 +84,16 @@ namespace HMSTHModdingTool.IO
             if (!Directory.Exists(OutputFolder))
                 Directory.CreateDirectory(OutputFolder);
 
-            BinaryReader Reader = new BinaryReader(Data);
+            BinaryReader Reader =
+                new BinaryReader(Data);
 
-            // ── Step 1: Read file header ────────────────────────
+            // ── Step 1: Read file header ─────────────────────────
             uint BaseOffset = Reader.ReadUInt32();
 
             if (BaseOffset == 0 || BaseOffset > 0x1000)
             {
-                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.ForegroundColor =
+                    ConsoleColor.Yellow;
                 Console.WriteLine(
                     "  [WARN] Unexpected BaseOffset = 0x" +
                     BaseOffset.ToString("X") +
@@ -79,36 +103,41 @@ namespace HMSTHModdingTool.IO
 
             Data.Seek(BaseOffset, SeekOrigin.Begin);
 
-            // ── Step 2: Read first offset to find table size ───
+            // ── Step 2: Read first offset ────────────────────────
             uint firstRelOffset = Reader.ReadUInt32();
 
             if (firstRelOffset == 0)
             {
-                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.ForegroundColor =
+                    ConsoleColor.Yellow;
                 Console.WriteLine(
-                    "  [WARN] HDA first entry offset is zero." +
-                    " Archive may be empty.");
+                    "  [WARN] HDA first entry offset" +
+                    " is zero. Archive may be empty.");
                 Console.ResetColor();
                 return;
             }
 
-            int maxPossibleSlots = (int)(firstRelOffset / 4);
-            uint[] tempTable = new uint[maxPossibleSlots];
+            int maxPossibleSlots =
+                (int)(firstRelOffset / 4);
+            uint[] tempTable =
+                new uint[maxPossibleSlots];
             tempTable[0] = firstRelOffset;
 
             for (int i = 1; i < maxPossibleSlots; i++)
                 tempTable[i] = Reader.ReadUInt32();
 
-            // ── Step 3: Trim trailing padding zeros ────────────
+            // ── Step 3: Trim trailing padding zeros ──────────────
             int lastRealSlot = 0;
             for (int i = 0; i < maxPossibleSlots; i++)
-                if (tempTable[i] != 0) lastRealSlot = i;
+                if (tempTable[i] != 0)
+                    lastRealSlot = i;
 
             int tableSlots = lastRealSlot + 1;
 
             int realFileCount = 0;
             for (int i = 0; i < tableSlots; i++)
-                if (tempTable[i] != 0) realFileCount++;
+                if (tempTable[i] != 0)
+                    realFileCount++;
 
             Console.ForegroundColor = ConsoleColor.Cyan;
             Console.WriteLine(
@@ -118,7 +147,160 @@ namespace HMSTHModdingTool.IO
             Console.ResetColor();
             Console.WriteLine();
 
-            // ── Step 4: Read each entry ─────────────────────────
+            // ── Step 4: Pre-scan — build slotRole[] ─────────────
+            //
+            // We scan every slot ONCE before extracting.
+            // This tells us the role of every slot purely
+            // from magic headers and position:
+            //
+            //   ROLE_HD  → slot has magic "IECSsreV"
+            //               and is NOT an SQ file
+            //
+            //   ROLE_SQ  → slot has magic "IECSsreV"
+            //               AND second-line "IECSuqeS"
+            //
+            //   ROLE_BD  → the nearest non-empty slot
+            //               that comes BEFORE an HD slot.
+            //               No content check needed at all.
+            //               Position relative to HD is the
+            //               only rule that matters.
+            //
+            //   ROLE_REGULAR → everything else.
+            //               Never assigned .BD regardless
+            //               of what its bytes look like.
+            // ────────────────────────────────────────────────────
+
+            int[] slotRole = new int[tableSlots];
+
+            {
+                long savedPos = Data.Position;
+
+                for (int i = 0; i < tableSlots; i++)
+                {
+                    uint peekOff = tempTable[i];
+                    if (peekOff == 0) continue;
+
+                    long peekAbs =
+                        (long)BaseOffset +
+                        (long)peekOff;
+
+                    if (peekAbs + 0x10 > Data.Length)
+                        continue;
+
+                    Data.Seek(
+                        peekAbs, SeekOrigin.Begin);
+
+                    uint pkComp = Reader.ReadUInt32();
+                    uint pkDecomp = Reader.ReadUInt32();
+                    uint pkStored = Reader.ReadUInt32();
+                    Reader.ReadUInt32(); // padding
+
+                    if (pkStored == 0) continue;
+                    if (peekAbs + 0x10 + pkStored
+                        > Data.Length) continue;
+
+                    // Read up to 64 bytes to sniff
+                    // magic. SQ needs 0x18 (24) bytes,
+                    // HD needs 8, so 64 is enough for
+                    // both even with slack.
+                    int sniffLen =
+                        (int)Math.Min(64u, pkStored);
+                    byte[] sniff = new byte[sniffLen];
+                    int sread = 0;
+                    while (sread < sniffLen)
+                    {
+                        int rd = Data.Read(
+                            sniff, sread,
+                            sniffLen - sread);
+                        if (rd <= 0) break;
+                        sread += rd;
+                    }
+
+                    byte[] checkBuf = sniff;
+
+                    // If this entry is compressed we
+                    // must decompress it before we can
+                    // read the real magic bytes.
+                    if (pkComp == 1)
+                    {
+                        try
+                        {
+                            Data.Seek(
+                                peekAbs + 0x10,
+                                SeekOrigin.Begin);
+                            byte[] full =
+                                new byte[pkStored];
+                            int fr = 0;
+                            while (fr < (int)pkStored)
+                            {
+                                int rr = Data.Read(
+                                    full, fr,
+                                    (int)pkStored - fr);
+                                if (rr <= 0) break;
+                                fr += rr;
+                            }
+                            checkBuf =
+                                HarvestCompression
+                                    .Decompress(full);
+                        }
+                        catch
+                        {
+                            // Decompress failed —
+                            // keep raw sniff bytes.
+                            // It won't match HD/SQ
+                            // magic so it will stay
+                            // ROLE_REGULAR which is safe.
+                            checkBuf = sniff;
+                        }
+                    }
+
+                    // ── Check magic ──────────────────────────────
+                    if (IsSQFile(checkBuf))
+                    {
+                        // SQ check must come FIRST because
+                        // SQ files also start with the HD
+                        // magic — IsHDFile() excludes SQ,
+                        // but we check SQ first anyway for
+                        // clarity and safety.
+                        slotRole[i] = ROLE_SQ;
+                    }
+                    else if (IsHDFile(checkBuf))
+                    {
+                        slotRole[i] = ROLE_HD;
+
+                        // ── KEY RULE ─────────────────────────────
+                        // The slot immediately before this HD
+                        // (walking backwards over any empty
+                        // gap slots) is the .BD body file.
+                        // No content inspection needed at all.
+                        for (int j = i - 1; j >= 0; j--)
+                        {
+                            if (tempTable[j] != 0)
+                            {
+                                // Only mark it BD if it
+                                // hasn't already been
+                                // identified as something
+                                // with a real magic header.
+                                // (Protects against weird
+                                // edge-case archives where
+                                // an HD follows another HD.)
+                                if (slotRole[j] ==
+                                    ROLE_REGULAR)
+                                {
+                                    slotRole[j] = ROLE_BD;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    // ROLE_REGULAR (0) is already the
+                    // default so nothing to do for that.
+                }
+
+                Data.Seek(savedPos, SeekOrigin.Begin);
+            }
+
+            // ── Step 5: Extract each entry ───────────────────────
             var buffers = new List<byte[]>();
             string[] slotMap = new string[tableSlots];
             int fileIndex = 0;
@@ -131,17 +313,16 @@ namespace HMSTHModdingTool.IO
                 if (relOffset == 0)
                 {
                     slotMap[i] = null;
-
                     continue;
                 }
 
                 long entryAbsPos =
-                    (long)BaseOffset + (long)relOffset;
+                    (long)BaseOffset +
+                    (long)relOffset;
 
                 if (entryAbsPos >= Data.Length)
                 {
                     slotMap[i] = null;
-
                     Console.ForegroundColor =
                         ConsoleColor.Red;
                     Console.WriteLine(
@@ -153,19 +334,31 @@ namespace HMSTHModdingTool.IO
                     continue;
                 }
 
-                Data.Seek(entryAbsPos, SeekOrigin.Begin);
+                Data.Seek(
+                    entryAbsPos, SeekOrigin.Begin);
 
                 // ── Read 16-byte entry header ──────────────────
-                uint compressedFlag = Reader.ReadUInt32();
-                uint decompressedSize = Reader.ReadUInt32();
-                uint storedSize = Reader.ReadUInt32();
-                uint entryPadding = Reader.ReadUInt32();
+                uint compressedFlag =
+                    Reader.ReadUInt32();
+                uint decompressedSize =
+                    Reader.ReadUInt32();
+                uint storedSize =
+                    Reader.ReadUInt32();
+                uint entryPadding =
+                    Reader.ReadUInt32();
 
                 bool isCompressed = (compressedFlag == 1);
 
                 if (storedSize == 0)
                 {
                     slotMap[i] = null;
+                    Console.ForegroundColor =
+                        ConsoleColor.Yellow;
+                    Console.WriteLine(
+                        "  [WARN] Slot " + i +
+                        " has storedSize=0. Skipping.");
+                    Console.ResetColor();
+                    continue;
                 }
 
                 long dataEnd =
@@ -174,17 +367,17 @@ namespace HMSTHModdingTool.IO
                 if (dataEnd > Data.Length)
                 {
                     slotMap[i] = null;
-
                     Console.ForegroundColor =
                         ConsoleColor.Red;
                     Console.WriteLine(
                         "  [ERROR] Entry " + i +
-                        " data past end of file. Skipping.");
+                        " data past end of file." +
+                        " Skipping.");
                     Console.ResetColor();
                     continue;
                 }
 
-                // ── Read file data ─────────────────────────────
+                // ── Read raw stored bytes ──────────────────────
                 byte[] buffer = new byte[storedSize];
                 int totalRead = 0;
                 while (totalRead < (int)storedSize)
@@ -196,7 +389,6 @@ namespace HMSTHModdingTool.IO
                     totalRead += n;
                 }
 
-                // ── Detect V2 before decompress ───────────────
                 bool isV2Compression = false;
 
                 // ── Decompress if needed ───────────────────────
@@ -218,8 +410,8 @@ namespace HMSTHModdingTool.IO
                             Console.WriteLine(
                                 string.Format(
                                     "  [WARN] Entry {0}:" +
-                                    " expected {1:N0} decomp," +
-                                    " got {2:N0}.",
+                                    " expected {1:N0}" +
+                                    " decomp, got {2:N0}.",
                                     i,
                                     decompressedSize,
                                     decompressed.Length));
@@ -242,201 +434,121 @@ namespace HMSTHModdingTool.IO
 
                 buffers.Add(buffer);
 
-                // ── Build filename ─────────────────────────────
+                // ── Determine extension from slotRole ─────────
+                //
+                // This is the ENTIRE detection logic for audio:
+                //
+                //   ROLE_BD → ".BD"  (position-based, no sniff)
+                //   ROLE_HD → ".HD"  (magic confirmed in pre-scan)
+                //   ROLE_SQ → ".SQ"  (magic confirmed in pre-scan)
+                //   ROLE_REGULAR → DetectExtension(buffer)
+                //                  which checks all known magic
+                //                  headers but NEVER returns .BD
+                //
+                // Result: .BD is 100% position-based.
+                //         Zero heuristics. Zero false positives.
+                // ─────────────────────────────────────────────
 
-                // ADDITIVE: pre-scan ALL future
-                // slots in this archive for an
-                // .HD file so .BD slots that
-                // appear BEFORE the HD in the
-                // table still get detected.
-                bool archiveHasHD = false;
-                foreach (var b2 in buffers)
+                string detectedExt;
+
+                switch (slotRole[i])
                 {
-                    if (IsHDFile(b2))
-                    {
-                        archiveHasHD = true;
+                    case ROLE_BD:
+                        detectedExt = ".BD";
                         break;
-                    }
-                }
-                if (!archiveHasHD)
-                {
-                    // Look-ahead: peek remaining
-                    // entries in the offset table
-                    long savedPos = Data.Position;
-                    for (int j = i + 1;
-                         j < tableSlots; j++)
-                    {
-                        uint peekOff = tempTable[j];
-                        if (peekOff == 0) continue;
-                        long peekAbs =
-                            (long)BaseOffset
-                            + (long)peekOff;
-                        if (peekAbs + 0x10
-                            > Data.Length)
-                            continue;
-                        Data.Seek(peekAbs,
-                            SeekOrigin.Begin);
-                        uint pkComp =
-                            Reader.ReadUInt32();
-                        uint pkDecomp =
-                            Reader.ReadUInt32();
-                        uint pkStored =
-                            Reader.ReadUInt32();
-                        Reader.ReadUInt32();
-                        if (pkStored == 0)
-                            continue;
-                        if (peekAbs + 0x10
-                            + pkStored
-                            > Data.Length)
-                            continue;
 
-                        // Read just enough to
-                        // check HD magic (8 bytes
-                        // is enough — IECSsreV)
-                        int sniffLen =
-                            (int)Math.Min(
-                                64u, pkStored);
-                        byte[] sniff =
-                            new byte[sniffLen];
-                        int sread = 0;
-                        while (sread < sniffLen)
-                        {
-                            int rd = Data.Read(
-                                sniff, sread,
-                                sniffLen - sread);
-                            if (rd <= 0) break;
-                            sread += rd;
-                        }
+                    case ROLE_HD:
+                        detectedExt = ".HD";
+                        break;
 
-                        // If this entry is
-                        // compressed, we can't
-                        // cheaply sniff without
-                        // decompressing. So just
-                        // try magic on raw — if
-                        // it doesn't match,
-                        // decompress the small
-                        // header portion to check.
-                        bool isHd =
-                            sniff.Length >= 8
-                            && StartsWith(
-                                sniff,
-                                MAGIC_HD_START);
+                    case ROLE_SQ:
+                        detectedExt = ".SQ";
+                        break;
 
-                        if (!isHd && pkComp == 1)
-                        {
-                            // Read full entry &
-                            // decompress to check
-                            try
-                            {
-                                Data.Seek(
-                                    peekAbs + 0x10,
-                                    SeekOrigin
-                                        .Begin);
-                                byte[] full =
-                                    new byte[
-                                        pkStored];
-                                int fr = 0;
-                                while (fr
-                                    < pkStored)
-                                {
-                                    int rr =
-                                        Data.Read(
-                                            full,
-                                            fr,
-                                            (int)
-                                            pkStored
-                                            - fr);
-                                    if (rr <= 0)
-                                        break;
-                                    fr += rr;
-                                }
-                                byte[] dec =
-                                    HarvestCompression
-                                        .Decompress(
-                                            full);
-                                if (IsHDFile(dec))
-                                    isHd = true;
-                            }
-                            catch { }
-                        }
-
-                        if (isHd)
-                        {
-                            archiveHasHD = true;
-                            break;
-                        }
-                    }
-                    Data.Seek(savedPos,
-                        SeekOrigin.Begin);
+                    default:
+                        // ROLE_REGULAR — use magic headers only.
+                        // DetectExtension() never returns .BD.
+                        detectedExt =
+                            DetectExtension(buffer);
+                        break;
                 }
 
-                // ── Build filename ─────────────────────────────
-                string detectedExt =
-                    DetectExtension(
-                        buffer, archiveHasHD);
-
+                // ── Build output filename ──────────────────────
                 string fileName;
 
-                // ── Audio files (.BD .HD .SQ) get clean names
-                // without index numbers, matching game style
-                if (detectedExt == ".BD" ||
-                    detectedExt == ".HD" ||
-                    detectedExt == ".SQ")
+                switch (detectedExt)
                 {
-                    fileName = archiveName + detectedExt;
-                }
-                else if (detectedExt == ".HDA")
-                {
-                    fileName = string.Format(
-                        "{0}_{1:D2}{2}",
-                        archiveName,
-                        fileIndex,
-                        detectedExt);
-                }
-                else
-                {
-                    fileName = string.Format(
-                        "{0}_{1:D5}{2}",
-                        archiveName,
-                        fileIndex,
-                        detectedExt);
+                    case ".BD":
+                    case ".HD":
+                    case ".SQ":
+                        // Audio files: clean name
+                        // matching game convention,
+                        // e.g. "BGM.BD", "BGM.HD"
+                        fileName = archiveName + detectedExt;
+                        break;
+
+                    case ".HDA":
+                        // Nested HDA archives get a
+                        // two-digit index suffix
+                        fileName = string.Format(
+                            "{0}_{1:D2}{2}",
+                            archiveName,
+                            fileIndex,
+                            detectedExt);
+                        break;
+
+                    default:
+                        // Everything else gets a
+                        // five-digit index suffix
+                        fileName = string.Format(
+                            "{0}_{1:D5}{2}",
+                            archiveName,
+                            fileIndex,
+                            detectedExt);
+                        break;
                 }
 
                 slotMap[i] = fileName;
                 fileIndex++;
 
-                // ── Write file ─────────────────────────────────
+                // ── Write output file ──────────────────────────
                 string filePath =
                     Path.Combine(OutputFolder, fileName);
                 File.WriteAllBytes(filePath, buffer);
 
-                // (ext ) in Magenta
-                Console.ForegroundColor = ConsoleColor.Green;
+                // ── Console output ─────────────────────────────
+                Console.ForegroundColor =
+                    ConsoleColor.Green;
                 Console.Write(
                     "  [" +
                     detectedExt.TrimStart('.')
                                .PadRight(4) +
                     "] ");
 
-                // Slot N in Cyan
-                Console.ForegroundColor = ConsoleColor.Cyan;
-                Console.Write("Slot " + i.ToString("D2").PadRight(4) + " ");
+                Console.ForegroundColor =
+                    ConsoleColor.Cyan;
+                Console.Write(
+                    "Slot " +
+                    i.ToString("D2").PadRight(4) +
+                    " ");
 
-                // → in Green
-                Console.ForegroundColor = ConsoleColor.Green;
+                Console.ForegroundColor =
+                    ConsoleColor.Green;
                 Console.Write("→ ");
 
-                // Filename in White
-                Console.ForegroundColor = ConsoleColor.White;
-                Console.Write(fileName.PadRight(26) + "  ");
+                Console.ForegroundColor =
+                    ConsoleColor.White;
+                Console.Write(
+                    fileName.PadRight(26) + "  ");
 
-                // (stored=... decomp=... comp=...) in Blue
-                // ── CHANGED: show comp_v2=YES when V2 detected ─
-                Console.ForegroundColor = ConsoleColor.Blue;
+                Console.ForegroundColor =
+                    ConsoleColor.Blue;
+
                 string compLabel =
                     !isCompressed ? "comp=NO" :
                     isV2Compression ? "comp_v2=YES" :
                                       "comp=YES";
+
                 Console.WriteLine(
                     string.Format(
                         "(stored={0:N0}" +
@@ -451,10 +563,9 @@ namespace HMSTHModdingTool.IO
                 Console.ResetColor();
             }
 
-            // ── Blank line after file list ──────────────────────
             Console.WriteLine();
 
-            // ── Step 5: Write manifest ONLY if there are gaps ───
+            // ── Step 6: Write manifest if there are gap slots ────
             bool hasEmptyGaps = false;
             for (int i = 0; i < tableSlots; i++)
             {
@@ -478,9 +589,11 @@ namespace HMSTHModdingTool.IO
                     tableSlots,
                     slotMap);
 
-                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.ForegroundColor =
+                    ConsoleColor.Cyan;
                 Console.WriteLine(
-                    "  Manifest saved: " + manifestName);
+                    "  Manifest saved: " +
+                    manifestName);
                 Console.WriteLine(
                     "  Keep this file in the folder" +
                     " for repacking!");
@@ -502,16 +615,17 @@ namespace HMSTHModdingTool.IO
             string path =
                 Path.Combine(folder, manifestName);
 
-            using (StreamWriter sw = new StreamWriter(path))
+            using (StreamWriter sw =
+                new StreamWriter(path))
             {
                 sw.WriteLine("SLOTS=" + totalSlots);
-
                 for (int i = 0; i < totalSlots; i++)
                 {
                     if (string.IsNullOrEmpty(slotMap[i]))
                         sw.WriteLine(i + "=EMPTY");
                     else
-                        sw.WriteLine(i + "=" + slotMap[i]);
+                        sw.WriteLine(
+                            i + "=" + slotMap[i]);
                 }
             }
         }
@@ -520,42 +634,37 @@ namespace HMSTHModdingTool.IO
         // MANIFEST — DETECT BY CONTENT
         // ═══════════════════════════════════════════════════════════
 
-        private static bool IsManifestFile(string filePath)
+        private static bool IsManifestFile(
+            string filePath)
         {
             try
             {
                 string firstLine =
                     File.ReadLines(filePath)
                         .FirstOrDefault();
-
                 return firstLine != null &&
                        firstLine.Trim()
                                 .StartsWith("SLOTS=");
             }
-            catch
-            {
-                return false;
-            }
+            catch { return false; }
         }
 
         // ═══════════════════════════════════════════════════════════
         // MANIFEST — READ
-        // Returns the manifest file path via out parameter so
-        // callers can exclude it from directory scans.
         // ═══════════════════════════════════════════════════════════
 
         private static bool ReadManifest(
             string folder,
             out int totalSlots,
             out string[] slotFiles,
-            out string manifestPath)   // ← NEW out param
+            out string manifestPath)
         {
             totalSlots = 0;
             slotFiles = null;
             manifestPath = null;
 
-            // ── Find the manifest file ─────────────────────────
-            foreach (string f in Directory.GetFiles(folder))
+            foreach (string f in
+                Directory.GetFiles(folder))
             {
                 if (IsManifestFile(f))
                 {
@@ -564,10 +673,10 @@ namespace HMSTHModdingTool.IO
                 }
             }
 
-            if (manifestPath == null)
-                return false;
+            if (manifestPath == null) return false;
 
-            Console.ForegroundColor = ConsoleColor.Green;
+            Console.ForegroundColor =
+                ConsoleColor.Green;
             Console.WriteLine(
                 "  Manifest found: " +
                 Path.GetFileName(manifestPath));
@@ -575,9 +684,7 @@ namespace HMSTHModdingTool.IO
 
             string[] lines =
                 File.ReadAllLines(manifestPath);
-
-            if (lines.Length == 0)
-                return false;
+            if (lines.Length == 0) return false;
 
             string firstLine = lines[0].Trim();
             if (!firstLine.StartsWith("SLOTS="))
@@ -588,15 +695,15 @@ namespace HMSTHModdingTool.IO
                     out totalSlots))
                 return false;
 
-            if (totalSlots <= 0)
-                return false;
+            if (totalSlots <= 0) return false;
 
             slotFiles = new string[totalSlots];
 
             for (int i = 1; i < lines.Length; i++)
             {
                 string line = lines[i].Trim();
-                if (string.IsNullOrEmpty(line)) continue;
+                if (string.IsNullOrEmpty(line))
+                    continue;
 
                 int eq = line.IndexOf('=');
                 if (eq < 0) continue;
@@ -607,14 +714,13 @@ namespace HMSTHModdingTool.IO
                         out slotIdx))
                     continue;
 
-                if (slotIdx < 0 || slotIdx >= totalSlots)
+                if (slotIdx < 0 ||
+                    slotIdx >= totalSlots)
                     continue;
 
                 string val =
                     line.Substring(eq + 1).Trim();
 
-                // null = empty gap, otherwise stores the
-                // original filename (informational only now)
                 slotFiles[slotIdx] =
                     (val == "EMPTY" ||
                      string.IsNullOrEmpty(val))
@@ -625,7 +731,7 @@ namespace HMSTHModdingTool.IO
             return true;
         }
 
-        // ── Backward-compat overload (no manifest path) ────────
+        // Backward-compat overload (no manifest path out)
         private static bool ReadManifest(
             string folder,
             out int totalSlots,
@@ -640,22 +746,7 @@ namespace HMSTHModdingTool.IO
         }
 
         // ═══════════════════════════════════════════════════════════
-        // RESOLVE SLOT FILES BY ORDER  ← KEY NEW METHOD
-        //
-        // Given:
-        //   • slotFiles[]  — the manifest layout (null = EMPTY)
-        //   • inputFolder  — the folder to scan
-        //   • manifestPath — excluded from file list
-        //
-        // Returns a new slotFiles[] where every non-null entry
-        // is replaced with the FULL PATH of the matching file
-        // from the folder, matched by ORDER (1st real file →
-        // 1st non-empty slot, 2nd real file → 2nd non-empty
-        // slot, etc.).
-        //
-        // This means it works even when the user has renamed
-        // files, or is repacking files from a different archive
-        // into the same HDA slot layout.
+        // RESOLVE SLOT FILES BY ORDER
         // ═══════════════════════════════════════════════════════════
 
         private static string[] ResolveSlotFilesByOrder(
@@ -665,20 +756,19 @@ namespace HMSTHModdingTool.IO
         {
             int totalSlots = slotFiles.Length;
 
-            // ── Get sorted non-manifest files in the folder ────
             string[] folderFiles =
                 GetSortedFilesExcluding(
                     inputFolder, manifestPath);
 
-            // ── Count how many non-empty slots the manifest has
             int expectedFiles = 0;
             for (int i = 0; i < totalSlots; i++)
-                if (slotFiles[i] != null) expectedFiles++;
+                if (slotFiles[i] != null)
+                    expectedFiles++;
 
-            // ── Warn if counts don't match ─────────────────────
             if (folderFiles.Length != expectedFiles)
             {
-                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.ForegroundColor =
+                    ConsoleColor.Yellow;
                 Console.WriteLine(
                     "  [WARN] Manifest expects " +
                     expectedFiles +
@@ -689,28 +779,27 @@ namespace HMSTHModdingTool.IO
                 Console.ResetColor();
             }
 
-            // ── Build resolved slot map ────────────────────────
-            // resolved[slot] = full path, or null for gaps
-            string[] resolved = new string[totalSlots];
+            string[] resolved =
+                new string[totalSlots];
             int fileIdx = 0;
 
-            for (int slot = 0; slot < totalSlots; slot++)
+            for (int slot = 0;
+                 slot < totalSlots; slot++)
             {
                 if (slotFiles[slot] == null)
                 {
-                    // Empty gap — keep null
                     resolved[slot] = null;
                     continue;
                 }
 
                 if (fileIdx < folderFiles.Length)
                 {
-                    resolved[slot] = folderFiles[fileIdx];
+                    resolved[slot] =
+                        folderFiles[fileIdx];
                     fileIdx++;
                 }
                 else
                 {
-                    // More slots than files — treat as missing
                     resolved[slot] = null;
                 }
             }
@@ -722,7 +811,9 @@ namespace HMSTHModdingTool.IO
         // PACK — UNCOMPRESSED
         // ═══════════════════════════════════════════════════════════
 
-        public static void Pack(string Data, string InputFolder)
+        public static void Pack(
+            string Data,
+            string InputFolder)
         {
             using (FileStream Output =
                 new FileStream(Data, FileMode.Create))
@@ -731,7 +822,9 @@ namespace HMSTHModdingTool.IO
             }
         }
 
-        public static void Pack(Stream Data, string InputFolder)
+        public static void Pack(
+            Stream Data,
+            string InputFolder)
         {
             int totalSlots;
             string[] slotFiles;
@@ -745,13 +838,13 @@ namespace HMSTHModdingTool.IO
 
             if (hasManifest)
             {
-                Console.ForegroundColor = ConsoleColor.Green;
+                Console.ForegroundColor =
+                    ConsoleColor.Green;
                 Console.WriteLine(
                     "  Using original table layout (" +
                     totalSlots + " slots).");
                 Console.ResetColor();
 
-                // ── Resolve files by ORDER, not filename ───────
                 string[] resolvedPaths =
                     ResolveSlotFilesByOrder(
                         slotFiles,
@@ -790,13 +883,13 @@ namespace HMSTHModdingTool.IO
             if (hasManifest)
             {
                 Console.WriteLine();
-                Console.ForegroundColor = ConsoleColor.Green;
+                Console.ForegroundColor =
+                    ConsoleColor.Green;
                 Console.WriteLine(
                     "  Using original table layout (" +
                     totalSlots + " slots).");
                 Console.ResetColor();
 
-                // ── Resolve files by ORDER, not filename ───────
                 string[] resolvedPaths =
                     ResolveSlotFilesByOrder(
                         slotFiles,
@@ -805,7 +898,8 @@ namespace HMSTHModdingTool.IO
 
                 using (FileStream fs =
                     new FileStream(
-                        outputHda, FileMode.Create))
+                        outputHda,
+                        FileMode.Create))
                 {
                     PackWithManifest(
                         fs, inputFolder,
@@ -822,27 +916,25 @@ namespace HMSTHModdingTool.IO
 
         // ═══════════════════════════════════════════════════════════
         // PACK WITH MANIFEST
-        //
-        // slotFiles[] now contains FULL PATHS (or null for gaps),
-        // already resolved by ResolveSlotFilesByOrder.
-        // The inputFolder param is kept for the summary display.
         // ═══════════════════════════════════════════════════════════
 
         private static void PackWithManifest(
             Stream Data,
             string inputFolder,
             int totalSlots,
-            string[] slotFiles,   // full paths now
+            string[] slotFiles,
             bool compress)
         {
             BinaryWriter wr = new BinaryWriter(Data);
 
             int realCount = 0;
             foreach (string s in slotFiles)
-                if (!string.IsNullOrEmpty(s)) realCount++;
+                if (!string.IsNullOrEmpty(s))
+                    realCount++;
 
             Console.WriteLine();
-            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.ForegroundColor =
+                ConsoleColor.Cyan;
             Console.WriteLine(
                 "  Packing " + realCount +
                 " file(s) into " + totalSlots +
@@ -854,12 +946,15 @@ namespace HMSTHModdingTool.IO
             Console.WriteLine();
 
             int indexWidth =
-                Math.Max(2, realCount.ToString().Length);
+                Math.Max(2,
+                    realCount.ToString().Length);
 
-            // ── Phase 1: Load and compress ──────────────────────
-            byte[][] rawDatas = new byte[totalSlots][];
-            byte[][] storedDatas = new byte[totalSlots][];
-            bool[] compFlags = new bool[totalSlots];
+            byte[][] rawDatas =
+                new byte[totalSlots][];
+            byte[][] storedDatas =
+                new byte[totalSlots][];
+            bool[] compFlags =
+                new bool[totalSlots];
 
             long totalRaw = 0;
             long totalStored = 0;
@@ -867,11 +962,11 @@ namespace HMSTHModdingTool.IO
             int rawCount = 0;
             int fileNum = 0;
 
-            for (int slot = 0; slot < totalSlots; slot++)
+            for (int slot = 0;
+                 slot < totalSlots; slot++)
             {
                 string fullPath = slotFiles[slot];
 
-                // ── Empty gap ──────────────────────────────────
                 if (string.IsNullOrEmpty(fullPath))
                 {
                     rawDatas[slot] = null;
@@ -887,7 +982,6 @@ namespace HMSTHModdingTool.IO
                     continue;
                 }
 
-                // ── File missing from folder ───────────────────
                 if (!File.Exists(fullPath))
                 {
                     Console.ForegroundColor =
@@ -909,25 +1003,28 @@ namespace HMSTHModdingTool.IO
                 totalRaw += rawLen;
                 fileNum++;
 
-                string fname = Path.GetFileName(fullPath);
+                string fname =
+                    Path.GetFileName(fullPath);
                 string currentText =
-                    fileNum.ToString("D" + indexWidth);
+                    fileNum.ToString(
+                        "D" + indexWidth);
                 string totalText =
-                    realCount.ToString("D" + indexWidth);
+                    realCount.ToString(
+                        "D" + indexWidth);
 
                 Console.ForegroundColor =
                     ConsoleColor.White;
                 Console.Write(
-                    "  [{0}/{1}] Slot {2}: {3,-28}  ",
-                    currentText,
-                    totalText,
+                    "  [{0}/{1}] Slot {2}:" +
+                    " {3,-28}  ",
+                    currentText, totalText,
                     slot,
                     fname.Length > 28
-                        ? fname.Substring(0, 25) + "..."
+                        ? fname.Substring(0, 25)
+                          + "..."
                         : fname);
                 Console.ResetColor();
 
-                // ── RAW or compress ────────────────────────────
                 if (!compress || rawLen <= 64)
                 {
                     storedDatas[slot] = rawDatas[slot];
@@ -940,7 +1037,8 @@ namespace HMSTHModdingTool.IO
                     Console.WriteLine(
                         rawLen <= 64
                             ? "OK RAW (<= 64 bytes)"
-                            : "OK RAW (uncompressed mode)");
+                            : "OK RAW" +
+                              " (uncompressed mode)");
                     Console.ResetColor();
                 }
                 else
@@ -949,16 +1047,16 @@ namespace HMSTHModdingTool.IO
                         HarvestCompression.Compress(
                             rawDatas[slot]);
                     bool verified =
-                        HarvestCompression.VerifyRoundTrip(
-                            rawDatas[slot], comp);
+                        HarvestCompression
+                            .VerifyRoundTrip(
+                                rawDatas[slot],
+                                comp);
 
-                    // ── If compressed >= raw size,
-                    // store truly RAW like the game does
-                    // (compressedFlag = 0, no headers)
                     if (!verified ||
                         comp.Length >= rawLen)
                     {
-                        storedDatas[slot] = rawDatas[slot];
+                        storedDatas[slot] =
+                            rawDatas[slot];
                         compFlags[slot] = false;
                         totalStored += rawLen;
                         rawCount++;
@@ -980,8 +1078,8 @@ namespace HMSTHModdingTool.IO
 
                         double ratio = rawLen == 0
                             ? 0
-                            : (double)comp.Length /
-                              rawLen * 100.0;
+                            : (double)comp.Length
+                              / rawLen * 100.0;
 
                         Console.ForegroundColor =
                             ConsoleColor.Green;
@@ -996,14 +1094,16 @@ namespace HMSTHModdingTool.IO
                 }
             }
 
-                // ── Phase 2: Calculate offsets ───────────────────────
-                int tableSize = totalSlots * 4;
+            // ── Phase 2: Calculate offsets ───────────────────────
+            int tableSize = totalSlots * 4;
             int dataAreaStart = Align(tableSize);
 
-            uint[] entryRelOffsets = new uint[totalSlots];
+            uint[] entryRelOffsets =
+                new uint[totalSlots];
             int cursor = dataAreaStart;
 
-            for (int slot = 0; slot < totalSlots; slot++)
+            for (int slot = 0;
+                 slot < totalSlots; slot++)
             {
                 if (storedDatas[slot] == null)
                 {
@@ -1011,34 +1111,43 @@ namespace HMSTHModdingTool.IO
                 }
                 else
                 {
-                    entryRelOffsets[slot] = (uint)cursor;
+                    entryRelOffsets[slot] =
+                        (uint)cursor;
                     cursor += Align(
-                        0x10 + storedDatas[slot].Length);
+                        0x10 +
+                        storedDatas[slot].Length);
                 }
             }
 
-            // ── Phase 3: Write HDA ──────────────────────────────
+            // ── Phase 3: Write HDA ───────────────────────────────
             wr.Write(0x10u);
             wr.Write(0u);
             wr.Write(0u);
             wr.Write(0u);
 
             Data.Seek(0x10, SeekOrigin.Begin);
-            for (int slot = 0; slot < totalSlots; slot++)
+            for (int slot = 0;
+                 slot < totalSlots; slot++)
                 wr.Write(entryRelOffsets[slot]);
 
-            for (int slot = 0; slot < totalSlots; slot++)
+            for (int slot = 0;
+                 slot < totalSlots; slot++)
             {
                 if (storedDatas[slot] == null)
                     continue;
 
                 long absPos =
-                    0x10L + entryRelOffsets[slot];
-                Data.Seek(absPos, SeekOrigin.Begin);
+                    0x10L +
+                    entryRelOffsets[slot];
+                Data.Seek(
+                    absPos, SeekOrigin.Begin);
 
-                wr.Write(compFlags[slot] ? 1u : 0u);
-                wr.Write((uint)rawDatas[slot].Length);
-                wr.Write((uint)storedDatas[slot].Length);
+                wr.Write(
+                    compFlags[slot] ? 1u : 0u);
+                wr.Write(
+                    (uint)rawDatas[slot].Length);
+                wr.Write(
+                    (uint)storedDatas[slot].Length);
                 wr.Write(0u);
 
                 Data.Write(
@@ -1049,9 +1158,10 @@ namespace HMSTHModdingTool.IO
                     Data.WriteByte(0);
             }
 
-            // ── Summary ────────────────────────────────────────
+            // ── Summary ──────────────────────────────────────────
             Console.WriteLine();
-            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.ForegroundColor =
+                ConsoleColor.Cyan;
             Console.WriteLine(
                 "  ── Summary ──────────────────────────────");
             Console.WriteLine(
@@ -1081,16 +1191,18 @@ namespace HMSTHModdingTool.IO
             }
 
             Console.WriteLine(
-                "  ─────────────────────────────────────────");
+                "  ────────────────────────────────────────");
             Console.ResetColor();
 
-            // ── Show offset table layout ───────────────────────
             Console.WriteLine();
-            Console.ForegroundColor = ConsoleColor.White;
-            Console.WriteLine("  Offset table layout:");
+            Console.ForegroundColor =
+                ConsoleColor.White;
+            Console.WriteLine(
+                "  Offset table layout:");
             Console.ResetColor();
 
-            for (int slot = 0; slot < totalSlots; slot++)
+            for (int slot = 0;
+                 slot < totalSlots; slot++)
             {
                 if (entryRelOffsets[slot] == 0)
                 {
@@ -1098,7 +1210,8 @@ namespace HMSTHModdingTool.IO
                         ConsoleColor.Cyan;
                     Console.WriteLine(
                         "    Slot " + slot +
-                        ": 00 00 00 00  (EMPTY GAP)");
+                        ": 00 00 00 00" +
+                        "  (EMPTY GAP)");
                 }
                 else
                 {
@@ -1108,7 +1221,8 @@ namespace HMSTHModdingTool.IO
 
                     string displayName =
                         slotFiles[slot] != null
-                            ? Path.GetFileName(slotFiles[slot])
+                            ? Path.GetFileName(
+                                slotFiles[slot])
                             : "?";
 
                     Console.ForegroundColor =
@@ -1116,12 +1230,17 @@ namespace HMSTHModdingTool.IO
                     Console.WriteLine(
                         string.Format(
                             "    Slot {0}:" +
-                            " {1:X2} {2:X2} {3:X2} {4:X2}" +
-                            "  → abs 0x{5:X8}  ({6})",
+                            " {1:X2} {2:X2}" +
+                            " {3:X2} {4:X2}" +
+                            "  → abs 0x{5:X8}" +
+                            "  ({6})",
                             slot,
-                            offBytes[0], offBytes[1],
-                            offBytes[2], offBytes[3],
-                            0x10 + entryRelOffsets[slot],
+                            offBytes[0],
+                            offBytes[1],
+                            offBytes[2],
+                            offBytes[3],
+                            0x10 +
+                            entryRelOffsets[slot],
                             displayName));
                 }
 
@@ -1137,8 +1256,10 @@ namespace HMSTHModdingTool.IO
             Stream Data,
             string InputFolder)
         {
-            string[] Files = GetSortedFiles(InputFolder);
-            BinaryWriter Writer = new BinaryWriter(Data);
+            string[] Files =
+                GetSortedFiles(InputFolder);
+            BinaryWriter Writer =
+                new BinaryWriter(Data);
 
             Writer.Write(0x10u);
             Writer.Write(0u);
@@ -1148,19 +1269,23 @@ namespace HMSTHModdingTool.IO
             int tableSize = Files.Length * 4;
             int dataAreaStart = Align(tableSize);
 
-            var entryRelOffsets = new int[Files.Length];
+            var entryRelOffsets =
+                new int[Files.Length];
             int cursor = dataAreaStart;
 
             for (int i = 0; i < Files.Length; i++)
             {
                 entryRelOffsets[i] = cursor;
-                byte[] raw = File.ReadAllBytes(Files[i]);
-                cursor += Align(0x10 + raw.Length);
+                byte[] raw =
+                    File.ReadAllBytes(Files[i]);
+                cursor +=
+                    Align(0x10 + raw.Length);
             }
 
             Data.Seek(0x10, SeekOrigin.Begin);
             for (int i = 0; i < Files.Length; i++)
-                Writer.Write((uint)entryRelOffsets[i]);
+                Writer.Write(
+                    (uint)entryRelOffsets[i]);
 
             for (int i = 0; i < Files.Length; i++)
             {
@@ -1176,7 +1301,8 @@ namespace HMSTHModdingTool.IO
                 Writer.Write((uint)Buffer.Length);
                 Writer.Write(0u);
 
-                Data.Write(Buffer, 0, Buffer.Length);
+                Data.Write(
+                    Buffer, 0, Buffer.Length);
 
                 while ((Data.Position & 0xF) != 0)
                     Data.WriteByte(0);
@@ -1191,10 +1317,12 @@ namespace HMSTHModdingTool.IO
             string outputHda,
             string inputFolder)
         {
-            string[] files = GetSortedFiles(inputFolder);
+            string[] files =
+                GetSortedFiles(inputFolder);
 
             Console.WriteLine();
-            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.ForegroundColor =
+                ConsoleColor.Cyan;
             Console.WriteLine(
                 "  Packing " + files.Length +
                 " file(s) with Smart Compression → " +
@@ -1202,9 +1330,12 @@ namespace HMSTHModdingTool.IO
             Console.ResetColor();
             Console.WriteLine();
 
-            var rawDatas = new byte[files.Length][];
-            var storedDatas = new byte[files.Length][];
-            var compressedFlags = new bool[files.Length];
+            var rawDatas =
+                new byte[files.Length][];
+            var storedDatas =
+                new byte[files.Length][];
+            var compressedFlags =
+                new bool[files.Length];
 
             long totalRaw = 0;
             long totalStored = 0;
@@ -1212,9 +1343,11 @@ namespace HMSTHModdingTool.IO
             int rawCount = 0;
 
             int indexWidth =
-                Math.Max(2, files.Length.ToString().Length);
+                Math.Max(2,
+                    files.Length.ToString().Length);
             string totalText =
-                files.Length.ToString("D" + indexWidth);
+                files.Length.ToString(
+                    "D" + indexWidth);
 
             for (int i = 0; i < files.Length; i++)
             {
@@ -1226,7 +1359,8 @@ namespace HMSTHModdingTool.IO
                 totalRaw += rawLen;
 
                 string currentText =
-                    (i + 1).ToString("D" + indexWidth);
+                    (i + 1).ToString(
+                        "D" + indexWidth);
 
                 Console.ForegroundColor =
                     ConsoleColor.White;
@@ -1234,7 +1368,8 @@ namespace HMSTHModdingTool.IO
                     "  [{0}/{1}] {2,-30}  ",
                     currentText, totalText,
                     fname.Length > 30
-                        ? fname.Substring(0, 27) + "..."
+                        ? fname.Substring(0, 27)
+                          + "..."
                         : fname);
                 Console.ResetColor();
 
@@ -1260,9 +1395,6 @@ namespace HMSTHModdingTool.IO
                     HarvestCompression.VerifyRoundTrip(
                         rawDatas[i], comp);
 
-                // ── If compressed >= raw size,
-                // store truly RAW like the game does
-                // (compressedFlag = 0, no headers)
                 if (!verified ||
                     comp.Length >= rawLen)
                 {
@@ -1303,9 +1435,12 @@ namespace HMSTHModdingTool.IO
                 }
             }
 
-                using (FileStream fs =
-                new FileStream(outputHda, FileMode.Create))
-            using (BinaryWriter wr = new BinaryWriter(fs))
+            using (FileStream fs =
+                new FileStream(
+                    outputHda,
+                    FileMode.Create))
+            using (BinaryWriter wr =
+                new BinaryWriter(fs))
             {
                 wr.Write(0x10u);
                 wr.Write(0u);
@@ -1318,25 +1453,33 @@ namespace HMSTHModdingTool.IO
                     new int[files.Length];
                 int cursor = dataStart;
 
-                for (int i = 0; i < files.Length; i++)
+                for (int i = 0;
+                     i < files.Length; i++)
                 {
                     entryOffsets[i] = cursor;
                     cursor += Align(
-                        0x10 + storedDatas[i].Length);
+                        0x10 +
+                        storedDatas[i].Length);
                 }
 
                 fs.Seek(0x10, SeekOrigin.Begin);
-                for (int i = 0; i < files.Length; i++)
-                    wr.Write((uint)entryOffsets[i]);
+                for (int i = 0;
+                     i < files.Length; i++)
+                    wr.Write(
+                        (uint)entryOffsets[i]);
 
-                for (int i = 0; i < files.Length; i++)
+                for (int i = 0;
+                     i < files.Length; i++)
                 {
                     long absPos =
                         0x10L + entryOffsets[i];
-                    fs.Seek(absPos, SeekOrigin.Begin);
+                    fs.Seek(
+                        absPos,
+                        SeekOrigin.Begin);
 
                     wr.Write(
-                        compressedFlags[i] ? 1u : 0u);
+                        compressedFlags[i]
+                            ? 1u : 0u);
                     wr.Write(
                         (uint)rawDatas[i].Length);
                     wr.Write(
@@ -1353,7 +1496,8 @@ namespace HMSTHModdingTool.IO
             }
 
             Console.WriteLine();
-            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.ForegroundColor =
+                ConsoleColor.Cyan;
             Console.WriteLine(
                 "  ── Summary ──────────────────────────────");
             Console.WriteLine(
@@ -1375,177 +1519,53 @@ namespace HMSTHModdingTool.IO
             Console.WriteLine(
                 "  Output         : " + outputHda);
             Console.WriteLine(
-                "  ─────────────────────────────────────────");
+                "  ────────────────────────────────────────");
             Console.ResetColor();
         }
 
         // ═══════════════════════════════════════════════════════════
-        // AUDIO HDA DETECTION
+        // EXTENSION DETECTION — magic headers only
+        //
+        // This method NEVER returns ".BD".
+        // .BD is assigned exclusively by slotRole[]
+        // which uses position relative to a confirmed
+        // .HD slot. No heuristics. No guessing.
         // ═══════════════════════════════════════════════════════════
 
-        private static bool DetectAudioHDA(
-            List<byte[]> buffers)
-        {
-            if (buffers.Count < 2 || buffers.Count > 3)
-                return false;
-            if (!IsHDFile(buffers[1])) return false;
-            if (buffers.Count == 3 &&
-                !IsSQFile(buffers[2]))
-                return false;
-            return true;
-        }
-
-        // ═══════════════════════════════════════════════════════════
-        // WRITE HELPERS
-        // ═══════════════════════════════════════════════════════════
-
-        private static void WriteAudioFiles(
-            List<byte[]> buffers,
-            string outputFolder,
-            string archiveName)
-        {
-            string[] audioExt = { ".BD", ".HD", ".SQ" };
-
-            for (int i = 0; i < buffers.Count; i++)
-            {
-                string ext = (i < audioExt.Length)
-                    ? audioExt[i]
-                    : string.Format("_{0:D5}.bin", i);
-
-                string fileName = archiveName + ext;
-                string filePath =
-                    Path.Combine(outputFolder, fileName);
-
-                File.WriteAllBytes(filePath, buffers[i]);
-
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine(
-                    "  [AUDIO] " + fileName);
-                Console.ResetColor();
-            }
-        }
-
-        private static void WriteDataFiles(
-            List<byte[]> buffers,
-            string outputFolder,
-            string archiveName)
-        {
-            for (int i = 0; i < buffers.Count; i++)
-            {
-                string detectedExt =
-                    DetectExtension(buffers[i]);
-
-                string fileName = (detectedExt == ".HDA")
-                    ? string.Format("{0}_{1:D2}{2}",
-                        archiveName, i, detectedExt)
-                    : string.Format("{0}_{1:D5}{2}",
-                        archiveName, i, detectedExt);
-
-                string filePath =
-                    Path.Combine(outputFolder, fileName);
-
-                File.WriteAllBytes(filePath, buffers[i]);
-
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine(
-                    "  [" +
-                    detectedExt.TrimStart('.')
-                               .PadRight(4) +
-                    "] " + fileName);
-                Console.ResetColor();
-            }
-        }
-
-        // ═══════════════════════════════════════════════════════════
-        // EXTENSION DETECTION
-        // ═══════════════════════════════════════════════════════════
-
-        private static string DetectExtension(byte[] data)
+        private static string DetectExtension(
+            byte[] data)
         {
             if (data == null || data.Length < 4)
                 return ".bin";
 
-            if (StartsWith(data, MAGIC_GDTB)) return ".gdtb";
-            if (StartsWith(data, MAGIC_RDTB)) return ".rdtb";
-            if (StartsWith(data, MAGIC_SRDB)) return ".srdb";
-            if (StartsWith(data, MAGIC_ELF))  return ".elf";
+            if (StartsWith(data, MAGIC_GDTB))
+                return ".gdtb";
+            if (StartsWith(data, MAGIC_RDTB))
+                return ".rdtb";
+            if (StartsWith(data, MAGIC_SRDB))
+                return ".srdb";
+            if (StartsWith(data, MAGIC_ELF))
+                return ".elf";
 
             if (data.Length >= 16 &&
                 StartsWith(data, MAGIC_HDA))
                 return ".HDA";
 
+            // SQ check must come before HD check
+            // because SQ files also begin with the
+            // HD magic header bytes.
             if (IsSQFile(data)) return ".SQ";
             if (IsHDFile(data)) return ".HD";
 
-            // ADDITIVE: detect .BD (PS2 ADPCM
-            // audio body). No magic header, so
-            // we use structural heuristics:
-            //   - size is multiple of 16
-            //   - starts with 16 zero bytes
-            //     (silent first block)
-            //   - contains valid ADPCM block
-            //     structure (every 16-byte
-            //     block has a predictor/shift
-            //     byte in range 0x00-0xFF and
-            //     a flag byte 0x00-0x07)
-            if (IsBDFile(data)) return ".BD";
-
+            // .BD is NEVER returned here.
+            // It is assigned only by slotRole[]
+            // in the Unpack() pre-scan step.
             return ".bin";
         }
 
-        // ADDITIVE: overload that accepts
-        // archive context. When archiveHasHD
-        // is true, unidentified 16-byte
-        // aligned binary files are treated
-        // as .BD audio bodies.
-        private static string DetectExtension(
-            byte[] data, bool archiveHasHD)
-        {
-            string ext = DetectExtension(data);
-            if (ext == ".bin"
-                && archiveHasHD
-                && IsLikelyBD(data))
-            {
-                return ".BD";
-            }
-            return ext;
-        }
-
-        // ADDITIVE: relaxed .BD detection
-        // (used when archive context confirms
-        // an .HD file is present)
-        private static bool IsLikelyBD(
-            byte[] data)
-        {
-            if (data == null) return false;
-            if (data.Length < 32) return false;
-            if ((data.Length & 0xF) != 0)
-                return false;
-
-            int totalBlocks = data.Length / 16;
-            int validFlags = 0;
-            int sampledBlocks = 0;
-            int step = totalBlocks / 200;
-            if (step < 1) step = 1;
-
-            for (int b = 0; b < totalBlocks;
-                 b += step)
-            {
-                int off = b * 16;
-                byte flag = data[off + 1];
-                sampledBlocks++;
-                if (flag <= 0x07)
-                    validFlags++;
-            }
-
-            if (sampledBlocks == 0)
-                return false;
-
-            double validRatio =
-                (double)validFlags /
-                sampledBlocks;
-            return validRatio >= 0.50;
-        }
+        // ═══════════════════════════════════════════════════════════
+        // AUDIO FILE DETECTORS
+        // ═══════════════════════════════════════════════════════════
 
         private static bool IsHDFile(byte[] data)
         {
@@ -1553,6 +1573,8 @@ namespace HMSTHModdingTool.IO
                 return false;
             if (!StartsWith(data, MAGIC_HD_START))
                 return false;
+            // SQ files also start with HD magic,
+            // so exclude them here.
             if (IsSQFile(data)) return false;
             return true;
         }
@@ -1563,111 +1585,28 @@ namespace HMSTHModdingTool.IO
                 return false;
             if (!StartsWith(data, MAGIC_HD_START))
                 return false;
-
-            for (int i = 0; i < MAGIC_SQ_LINE2.Length; i++)
-                if (data[0x10 + i] != MAGIC_SQ_LINE2[i])
+            for (int i = 0;
+                 i < MAGIC_SQ_LINE2.Length; i++)
+                if (data[0x10 + i] !=
+                    MAGIC_SQ_LINE2[i])
                     return false;
-
             return true;
         }
 
-        // ADDITIVE: PS2 ADPCM .BD detection
-        // (audio body file with no magic).
-        //
-        // PS2 ADPCM format (a.k.a. VAG body):
-        //   - Block-aligned to 16 bytes
-        //   - Each 16-byte block:
-        //       byte 0 = predictor/shift
-        //                (upper 4 bits = filter
-        //                 index 0-4, lower 4 =
-        //                 shift 0-12)
-        //       byte 1 = flag (0x00-0x07)
-        //       bytes 2-15 = nibble pairs
-        //
-        // Detection rules (no magic header):
-        //   - File size >= 256 bytes
-        //   - File size is multiple of 16
-        //   - High percentage of blocks have
-        //     valid predictor byte (filter 0-4)
-        //   - High percentage of blocks have
-        //     valid flag byte (0x00-0x07)
-        //   - Must NOT look like any other
-        //     known format (HD, SQ, etc.
-        //     already checked earlier)
-        private static bool IsBDFile(byte[] data)
-        {
-            if (data == null) return false;
-            if (data.Length < 256) return false;
-            if ((data.Length & 0xF) != 0)
-                return false;
+        // ═══════════════════════════════════════════════════════════
+        // UTILITY
+        // ═══════════════════════════════════════════════════════════
 
-            int totalBlocks = data.Length / 16;
-            int validFlags = 0;
-            int validPredictors = 0;
-            int sampledBlocks = 0;
-
-            // Sample evenly across the file
-            // (max ~500 blocks scanned even
-            // for very large files)
-            int step = totalBlocks / 500;
-            if (step < 1) step = 1;
-
-            for (int b = 0; b < totalBlocks;
-                 b += step)
-            {
-                int off = b * 16;
-
-                // Predictor byte (byte 0):
-                //   - Upper nibble = filter
-                //     index, valid range 0-4
-                //   - Lower nibble = shift,
-                //     valid range 0-12
-                byte pred = data[off];
-                int filter = (pred >> 4) & 0xF;
-                int shift = pred & 0xF;
-                if (filter <= 4 && shift <= 12)
-                    validPredictors++;
-
-                // Flag byte (byte 1):
-                //   - Valid range 0x00-0x07
-                byte flag = data[off + 1];
-                if (flag <= 0x07)
-                    validFlags++;
-
-                sampledBlocks++;
-            }
-
-            if (sampledBlocks == 0) return false;
-
-            double flagRatio =
-                (double)validFlags /
-                sampledBlocks;
-            double predRatio =
-                (double)validPredictors /
-                sampledBlocks;
-
-            // Both ratios must be high.
-            // Real ADPCM data has nearly 100%
-            // valid bytes for both fields.
-            // Random binary data will have
-            // roughly 8/256 = 3% valid flags
-            // and roughly 65/256 = 25% valid
-            // predictors — far below threshold.
-            return flagRatio >= 0.85
-                && predRatio >= 0.85;
-        }
         private static bool StartsWith(
             byte[] data, byte[] magic)
         {
-            if (data.Length < magic.Length) return false;
+            if (data.Length < magic.Length)
+                return false;
             for (int i = 0; i < magic.Length; i++)
-                if (data[i] != magic[i]) return false;
+                if (data[i] != magic[i])
+                    return false;
             return true;
         }
-
-        // ═══════════════════════════════════════════════════════════
-        // SORTED FILE LISTING — excludes ALL manifests
-        // ═══════════════════════════════════════════════════════════
 
         private static string[] GetSortedFiles(
             string inputFolder)
@@ -1676,12 +1615,6 @@ namespace HMSTHModdingTool.IO
                 inputFolder, null);
         }
 
-        /// <summary>
-        /// Returns all non-manifest files in the folder,
-        /// sorted by the numeric index in their filename.
-        /// Optionally excludes a specific file by full path
-        /// (the manifest, already located by ReadManifest).
-        /// </summary>
         private static string[] GetSortedFilesExcluding(
             string inputFolder,
             string excludeFullPath)
@@ -1692,16 +1625,15 @@ namespace HMSTHModdingTool.IO
             var filtered = new List<string>();
             foreach (string f in allFiles)
             {
-                // Skip by content (manifest detection)
-                if (IsManifestFile(f))
-                    continue;
+                if (IsManifestFile(f)) continue;
 
-                // Skip by explicit path if provided
                 if (excludeFullPath != null &&
                     string.Equals(
                         Path.GetFullPath(f),
-                        Path.GetFullPath(excludeFullPath),
-                        StringComparison.OrdinalIgnoreCase))
+                        Path.GetFullPath(
+                            excludeFullPath),
+                        StringComparison
+                            .OrdinalIgnoreCase))
                     continue;
 
                 filtered.Add(f);
@@ -1711,10 +1643,10 @@ namespace HMSTHModdingTool.IO
 
             Array.Sort(files, (a, b) =>
             {
-                int ia =
-                    ExtractFileIndex(Path.GetFileName(a));
-                int ib =
-                    ExtractFileIndex(Path.GetFileName(b));
+                int ia = ExtractFileIndex(
+                    Path.GetFileName(a));
+                int ib = ExtractFileIndex(
+                    Path.GetFileName(b));
                 return ia.CompareTo(ib);
             });
 
@@ -1725,20 +1657,18 @@ namespace HMSTHModdingTool.IO
             string fileName)
         {
             string name =
-                Path.GetFileNameWithoutExtension(fileName);
+                Path.GetFileNameWithoutExtension(
+                    fileName);
             int u = name.LastIndexOf('_');
             if (u < 0) return 0;
 
             int result;
             return int.TryParse(
-                    name.Substring(u + 1), out result)
+                    name.Substring(u + 1),
+                    out result)
                 ? result
                 : 0;
         }
-
-        // ═══════════════════════════════════════════════════════════
-        // ALIGNMENT
-        // ═══════════════════════════════════════════════════════════
 
         private static int Align(int Value)
         {
