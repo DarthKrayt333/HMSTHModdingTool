@@ -602,30 +602,50 @@ Skeleton export with mesh in progress.
 
 ---
 
-### Experimental - 3D Model Tools
+### 3D Model Tools
 > 3D Mesh by DarthKrayt333
 
--x3d <file.rdtb> <file.gdtb> <base_name>
+-xbatches <file.rdtb> <file.gdtb> <base_name>
 
-    Extract 3D models with textures.
+    Extract 3D models batches with textures.
     
-    Creates 4 output folders:
+    Creates 1 output folder:
     
-      <base_name>_obj/       per-texture OBJ files
-      
-      <base_name>_dae/       per-texture DAE files
-      
-      <base_name>_all_obj/   body + tools OBJ
-      
-      <base_name>_all_dae/   combined DAE
+      <base_name>_3d_batches_obj/       moddable OBJ files
 
--c3d <models_folder> <output_folder>
+-cbatches <models_batches_folder> <output_folder>
 
     Rebuild RDTB + GDTB from edited model files.
     
     Reads model_NN.obj OR model_NN.dae files.
     
     OBJ takes priority if both exist.
+
+-xbatches <file.srdb> <file.gdtb> <base_name>
+
+    Extract 3D models batches with textures.
+    
+    Creates 1 output folder:
+    
+      <base_name>_3d_batches_obj/       moddable OBJ files
+
+-cbatches <models_batches_folder> <output_folder>
+
+    Rebuild SRDB + GDTB from edited model files.
+    
+    Reads model_NN.obj OR model_NN.dae files.
+    
+    OBJ takes priority if both exist.
+
+-x3d <file.rdtb> <file.gdtb> <base_name>
+
+    Extract 3D models with textures
+
+    Creates 2 output folders:
+
+      <base_name>_3d_batches_obj/       moddable OBJ files
+      <base_name>_all_obj/       not moddable OBJ files - view only (Also, the extraction's still a bit corrupted)
+
 
 What works:
 
@@ -656,8 +676,6 @@ What works:
   ✅ **NEW**: Auto-hide siblings when replacing batches
   
   ✅ **NEW**: Normal copying for preserved lighting
-  
-  ⚠️  Cannot yet change vertex count on standard `c3d` (must keep same)
   
   ❌ Menu icons not yet updated when item batches swapped
 
@@ -852,7 +870,7 @@ Both work exactly the same.
 
 
 
-### 3D Model Commands (SRDB + RDTB)
+### 3D Model Commands (SRDB + RDTB) (Older Versions - Before v1-4-6-Beta, c3d no longer supported)
 
 -x3d <file.rdtb_or_srdb> <file.gdtb> <base_name>
 
@@ -1531,6 +1549,14 @@ boymodv2 BOY_00000.rdtb
 boymodv3 00_skeleton.bin
 
 boymodv3 BOY_00000.rdtb
+
+---
+
+##### BoyModV4 — Taller Player Mod - Best Current
+
+boymodv4 00_skeleton.bin
+
+boymodv4 BOY_00000.rdtb
 
 ---
 
