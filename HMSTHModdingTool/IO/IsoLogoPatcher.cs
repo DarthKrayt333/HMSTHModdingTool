@@ -73,14 +73,12 @@ namespace HMSTHModdingTool
         // ═══════════════════════════════
         public static void PatchIso(
             string isoPath,
-            PatchOptions opts = null)
+            PatchOptions opts = null,
+            bool isJap = false)
         {
-            if (!File.Exists(
-                    isoPath))
-                throw new
-                    FileNotFoundException(
-                    "File not found",
-                    isoPath);
+            if (!File.Exists(isoPath))
+                throw new FileNotFoundException(
+                    "File not found", isoPath);
 
             Console.ForegroundColor =
                 ConsoleColor.Cyan;
@@ -88,47 +86,36 @@ namespace HMSTHModdingTool
                 "═════════════════════" +
                 "════════════════════");
             Console.WriteLine(
-                " fixps2logo");
+                isJap
+                ? " fixps2logo [JAP]"
+                : " fixps2logo [USA]");
             Console.WriteLine(
                 "═════════════════════" +
                 "════════════════════");
             Console.ResetColor();
 
             int sectorSize =
-                DetectSectorSize(
-                    isoPath);
+                DetectSectorSize(isoPath);
 
             Console.WriteLine(
                 "  Format: " +
                 sectorSize +
                 "-byte sectors");
 
-            if (sectorSize ==
-                SECTOR_2352)
+            if (sectorSize == SECTOR_2352)
             {
-                // BIN format -
-                // patch directly
-                PatchBinFile(
-                    isoPath);
+                PatchBinFile(isoPath, isJap);
             }
-            else if (sectorSize ==
-                     SECTOR_2048)
+            else if (sectorSize == SECTOR_2048)
             {
-                // ISO format -
-                // patch via temp
-                // BIN then convert
-                // back to preserve
-                // original format
-                PatchIsoFile(
-                    isoPath);
+                PatchIsoFile(isoPath, isJap);
             }
             else
             {
-                Console.ForegroundColor
-                    = ConsoleColor.Yellow;
+                Console.ForegroundColor =
+                    ConsoleColor.Yellow;
                 Console.WriteLine(
-                    "  ERROR: Unknown" +
-                    " format!");
+                    "  ERROR: Unknown format!");
                 Console.ResetColor();
                 return;
             }
@@ -136,8 +123,7 @@ namespace HMSTHModdingTool
             Console.ForegroundColor =
                 ConsoleColor.Green;
             Console.WriteLine();
-            Console.WriteLine(
-                "  Done!");
+            Console.WriteLine("  Done!");
             Console.ResetColor();
         }
 
@@ -146,33 +132,28 @@ namespace HMSTHModdingTool
         // Direct in-place patching
         // ═══════════════════════════════
         static void PatchBinFile(
-            string path)
+            string path,
+            bool isJap = false)
         {
-            var blobs =
-                GetEmbeddedBlobs();
-            var eccData =
-                GetEmbeddedEcc();
+            var blobs = isJap
+                ? GetEmbeddedBlobsJap()
+                : GetEmbeddedBlobs();
+            var eccData = GetEmbeddedEcc();
+            byte padding = isJap
+                ? (byte)0x45
+                : PADDING;
 
             Console.WriteLine(
-                "  " +
-                blobs.Count +
-                " logo blobs" +
-                " (embedded)");
-            Console.WriteLine(
-                "  " +
-                eccData.Count +
-                " ECC entries" +
-                " (embedded)");
+                "  " + blobs.Count +
+                " logo blobs (embedded)");
 
-            using (var fs =
-                new FileStream(
-                    path,
-                    FileMode.Open,
-                    FileAccess.ReadWrite))
+            using (var fs = new FileStream(
+                path, FileMode.Open,
+                FileAccess.ReadWrite))
             {
                 DoPatchWork(
                     fs, blobs,
-                    eccData);
+                    eccData, padding);
             }
         }
 
@@ -184,7 +165,8 @@ namespace HMSTHModdingTool
         // 4) Preserves original size
         // ═══════════════════════════════
         static void PatchIsoFile(
-            string isoPath)
+            string isoPath,
+            bool isJap = false)
         {
             string tempBin =
                 isoPath + ".tmp.bin";
@@ -193,37 +175,26 @@ namespace HMSTHModdingTool
                 "  Converting ISO" +
                 " to temp BIN...");
 
-            // Step 1: Convert ISO
-            // to BIN (temporary)
             Convert2048To2352(
                 isoPath, tempBin);
 
-            // Step 2: Patch the
-            // temp BIN
             Console.WriteLine(
-                "  Patching temp" +
-                " BIN...");
+                "  Patching temp BIN...");
 
-            PatchBinFile(tempBin);
+            PatchBinFile(tempBin, isJap);
 
-            // Step 3: Convert
-            // patched BIN back to
-            // ISO (overwrite)
             Console.WriteLine(
-                "  Converting" +
-                " patched BIN back" +
-                " to ISO...");
+                "  Converting patched" +
+                " BIN back to ISO...");
 
             Convert2352To2048(
                 tempBin, isoPath);
 
-            // Step 4: Cleanup
             File.Delete(tempBin);
 
             Console.WriteLine(
-                "  ISO format" +
-                " preserved (2048" +
-                " bytes/sector)");
+                "  ISO format preserved" +
+                " (2048 bytes/sector)");
         }
 
         // ═══════════════════════════════
@@ -232,62 +203,52 @@ namespace HMSTHModdingTool
         static void DoPatchWork(
             FileStream fs,
             List<Blob> blobs,
-            Dictionary<int, byte[]>
-                eccData)
+            Dictionary<int, byte[]> eccData,
+            byte padding = PADDING)
         {
             Console.WriteLine();
             Console.WriteLine(
-                "  [1/4] Logo" +
-                " sectors 0-11" +
-                "...");
+                "  [1/4] Logo sectors" +
+                " 0-11...");
 
             for (int lba = 0;
                  lba <= 11; lba++)
             {
                 byte[] sec =
                     BuildLogoSector(
-                        lba, blobs);
-                WriteSectorData(
-                    fs, lba, sec);
+                        lba, blobs, padding);
+                WriteSectorData(fs, lba, sec);
             }
 
+            // rest stays same...
             Console.WriteLine(
-                "  [2/4] Master" +
-                " markers 14-15" +
-                "...");
+                "  [2/4] Master markers" +
+                " 14-15...");
 
             for (int lba = 14;
                  lba <= 15; lba++)
             {
-                PatchMasterSector(
-                    fs, lba);
+                PatchMasterSector(fs, lba);
             }
 
             Console.WriteLine(
-                "  [3/4] EDC" +
-                " recalc...");
+                "  [3/4] EDC recalc...");
 
             for (int lba = 0;
                  lba <= 15; lba++)
             {
-                if (lba == 12 ||
-                    lba == 13)
+                if (lba == 12 || lba == 13)
                     continue;
-                ComputeEdc(
-                    fs, lba);
+                ComputeEdc(fs, lba);
             }
 
             Console.WriteLine(
-                "  [4/4] ECC" +
-                " write...");
+                "  [4/4] ECC write...");
 
-            foreach (var kvp
-                     in eccData)
+            foreach (var kvp in eccData)
             {
-                WriteEcc(
-                    fs,
-                    kvp.Key,
-                    kvp.Value);
+                WriteEcc(fs,
+                    kvp.Key, kvp.Value);
             }
         }
 
@@ -530,36 +491,32 @@ namespace HMSTHModdingTool
             return result;
         }
 
-        static byte[]
-        BuildLogoSector(
+        static byte[] BuildLogoSector(
             int lba,
-            List<Blob> blobs)
+            List<Blob> blobs,
+            byte padding = PADDING)
         {
-            byte[] data = new byte[
-                DATA_LEN];
+            byte[] data =
+                new byte[DATA_LEN];
 
             for (int i = 0;
                  i < DATA_LEN; i++)
-                data[i] = PADDING;
+                data[i] = padding;
 
             foreach (var b in blobs)
             {
                 if (b.Sector != lba)
                     continue;
-                int copyLen =
-                    Math.Min(
-                        b.Data.Length,
-                        DATA_LEN -
-                        b.Offset);
+                int copyLen = Math.Min(
+                    b.Data.Length,
+                    DATA_LEN - b.Offset);
                 if (copyLen > 0 &&
                     b.Offset >= 0 &&
-                    b.Offset <
-                    DATA_LEN)
+                    b.Offset < DATA_LEN)
                 {
                     Array.Copy(
                         b.Data, 0,
-                        data,
-                        b.Offset,
+                        data, b.Offset,
                         copyLen);
                 }
             }
@@ -579,6 +536,47 @@ namespace HMSTHModdingTool
             fs.Write(data, 0,
                      DATA_LEN);
         }
+
+        static List<Blob>
+            GetEmbeddedBlobsJap()
+        {
+            // Use same format as GetEmbeddedBlobs
+            // but with JAP Base64 data
+            byte[] raw =
+                Convert.FromBase64String(
+                    BLOBS_B64_JAP);
+
+            var result = new List<Blob>();
+            int pos = 0;
+
+            while (pos < raw.Length)
+            {
+                int sec =
+                    raw[pos] |
+                    (raw[pos + 1] << 8);
+                int off =
+                    raw[pos + 2] |
+                    (raw[pos + 3] << 8);
+                int len =
+                    raw[pos + 4] |
+                    (raw[pos + 5] << 8);
+                pos += 6;
+
+                byte[] data = new byte[len];
+                Array.Copy(raw, pos,
+                    data, 0, len);
+                pos += len;
+
+                result.Add(new Blob
+                {
+                    Sector = sec,
+                    Offset = off,
+                    Data = data
+                });
+            }
+            return result;
+        }
+
 
         static void
         PatchMasterSector(
@@ -729,5 +727,8 @@ namespace HMSTHModdingTool
 
         const string ECC_B64 =
             "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";
+
+        const string BLOBS_B64_JAP =
+            "AAAvBBsABqEg4AMjQmKiTY2sjE7uLgkoCAgo6U5tgEbFAACvBR0Ai5EQ0HMzUnKSsv2cnF7ePhkYeHgY+b9d8JeoTUcAAC8HHwBSurq6urq6urq6urq6urq6urq6urq6urq6mjiylUJlAQCvAB8AUrq6urq6urq6urq6urq6urq6urq6urq6urq6uvuz4wEALwIgAFK6upqampr62tra2tra2tra2tr6urq6urq6urq6uvHnAQCvAyAAi/HR9jY21nYXFxcXFxcXFxcXF5eRffi6urq6urq6e8sBAAUEEgAnp4eHh4eHh4eHh4eHh4dHBAUBACQECADkRoeHh6fHZQEAdQQLAGWFBKRH5ERExcUFAQDOBAgAZSenh4eHRoQBAC8FIQAGgcGG5uaGJoeHh4eHh4eHh4eHZoENK5+6urq6urq63iYBAIUFFgAKlxcXFxcXFxcXFxcXFxcUNUjMwwYlAQCkBQgAD7cXFxeXdaUBAPIFEQDkQO1pStV0FLVVqkuIie7OZgEATgYIAMUKlxcXF7duAQDFBgsAhSk4urq6urq6+k8BAAUHGAAfutra2tra2tra2tra2toaepnc01aIg+UBACQHCADUutra2rq+xAEAcAcTAAdv1VD9vht6Ghp6WrvYGNne3uIBAM4HCAClf7ra2tq6FgIARgAKAMS3urq6urq6uooCAIUAGQDfurq6urq6urq6urq6urq6urq6upo48+7FAgCkAAgAlLq6urq6GcQCAO8AFABBNV+7urq6urq6urq6urq6urq6TAIATgEIAKXfurq6urrWAgDHAQkAYlq6urq6urpRAgAFAhkAP7q6urq6md29vb29nTxe+Jq6urq6urpe7AIAJAIIAJS6urq6unkkAgBuAhUA5Hd7urq6urqamby9vZ0cnH//fv6CAgCLAggAIC1NTU0tA2UCALsCCAAlYg1NTU3NwQIAzgIIAKXfurq6urrWAgBHAwkAR1m6urq6urrzAgCFAxoAP7q6urq60M2tra2trcxOSzBburq6urq6fGECAKQDCACUurq6urp5JAIA7gMVAA1burq6urpa0ImsTK2tDIxv727uBgIACwQIAHU9XV1dHfcFAgA7BAgAZDB9XV1d3SgCAE4ECACl37q6urq69gIAxwQJACWdurq6urq6fQIABQUHAD+6urq6uvQCABQFCwAFwGr+urq6urq6qAIAJAUIAJS6urq6unkkAgBtBQoARBG6urq6urg3gAIAiwUIADC6urq6ur0lAgC7BQgAxDm6urq6urQCAM4FCADllNAwMDDwaAIASAYIABK6urq6urqdAgCFBgcAP7q6urq6lAIAlgYKAGSKurq6urq6smQCAKQGCACUurq6urp5JAIA7QYJAMD4urq6urpwBgIACwcIABC6urq6up0lAgA7BwgAJHm6urq6upQCAE4HCABlweAgICCAJgIAyAcIAHK6urq6urqdAwAFAAcAP7q6urq6lAMAFwAJAAEZurq6urp7QgMAJAAIAJS6urq6unkkAwBtAAgALrq6urq6+g8DAIsACAAQurq6urr9JQMAuwAIACR5urq6urr0AwBHAQkAJf26urq6urqdAwCFAQcAP7q6urq6lAMAlwEJAAUxurq6urq6qwMApAEIAJS6urq6unkkAwC0ARAABaUEpKTHp4cmhuaGxmeFZQMAzAEJAIWG5ubm5uaGJAMA5AEHAMem5ubmhqUDAO0BCAAqurq6urrbYQMACwIPABC6urq6utymxubm5oYmBQMAHwIQAGWlZKSkZ4eHBobm5ubnRAUDADsCDwAkebq6urq6Fkbm5ubmpucDAE4CCABlRobm5uamBwMAYwINAGUEJmADYmJiwyCmhGUDAH0CFABlpaUkR6SkJ6eHh2bm5ubm5ocEBQMAxwIJAGe+urq6urq6XQMABQMHAD+6urq6upQDABgDCACourq6urq6FgMAJAMIAJS6urq6unkkAwA0AxIA5orVdHS0NxdW1jbWdvQKLiJHAwBMAwkABPX2NjY2NpZPAwBjAwgApaqWNjb2lGcDAG0DCABXurq6uroYpAMAiwMPABC6urq6unjWFjY2NvYXBAMAnwMSAERK1XR0NBcXt9Y2NjZ3qumNZgMAuwMPACR5urq6uro/lzY2NjaWSwMAzgMIAOV1ljY2NpauAwDhAxIAp6KuVXZwE1JSUtMwlrWJTGEFAwD9AxcAhWsV1RR0dJQ3FxeXNjY2NjY3FUgspgUDAEcECQAtu7q6urq6unMDAIUEBwA/urq6urqUAwCYBAgAr7q6urq6unADAKQECACUurq6urp5JAMAtAQTAEL7GhoaOtra+pqamvo6Ox4yFIIDAMwECgDlkbqampqaulPFAwDjBAgAzTi6mpq68wQDAO0ECAA2urq6urrYRwMACwUPABC6urq6urqampqamrq4pAMAHwUUAKR4GhoaGtra+pqampramzn9Vm/EAwA7BQ8AJHm6urq6urqampqamrqzAwBOBQgApT+6mpqaujYDAF8FFQBELPeynpuaurq6urq6upp6+b1RzocDAH0FGADEPjp6GhoaOtra2vqampqamtq7mRy2zmcDAMYFCgCGkLq6urq6urrXAwAFBgcAP7q6urq6lAMAGAYIAMy6urq6urowAwAkBggAlLq6urq6eSQDADQGFAAi+rq6urq6urq6urq6urq6uhryYwMATQYJAG76urq6urpYhgMAYgYIAAVxurq6uprpAwBtBggA9rq6urq628YDAIsGDwAQurq6urq6urq6urq6W6QDAJ8GFQCkW7q6urq6urq6urq6urq6urp/SCUDALsGDwAkebq6urq6urq6urq6ulIDAM4GCACl37q6urq61gMA3gYXACXJHPq6urq6urq6urq6urq6urq6HjWkAwD9BhkAxBm6urq6urq6urq6urq6urq6urq6uh5KRAMARQcLAOR1erq6urq6uroIAwCFBwcAP7q6urq6lAMAmAcIACy6urq6uroQAwCkBwgAlLq6urq6eSQDALQHFQCD2dl53t6//3+cXpi6urq6urq6kAEDAM0HCQDGWbq6urq6+u4DAOIHCADmGbq6urofpgMA7QcIABa6urq6ujpCBAALAA8AELq6urq6mDNzExMTM7EkBAAfABUAhB75Of7eXv8/nJ9Y2rq6urq6ut4CBAA7AA8AJHm6urq6uv6QExMTE9NVBABOAAgApd+6urq6utYEAF4AGADMPrq6urq6uvoZvbJdX9i6urq6urr4S2QEAH0AGQAkebq6urq6WxlZ3r/fvN/5Orq6urq6urksBAC1ABsABYRh4COjYmKDAwPAIEMibxU5urq6urq6urgDBAAFAQcAP7q6urq6lAQAGAEIAC+6urq6urpxBAAkAQgAlLq6urq6eSQEADQBFQAGSIkpzs6v72+sbiuRWLq6urq6+moEAE0BCgAFV7q6urq6ujJnBABiAQcAjvq6urr6qAQAbQEIANS6urq6urrrBACLAQ8AELq6urq6X8NjAwMDI6AlBACfARYApcmp6Y7OTu/PjI8IF366urq6uroxpQQAuwEPACR5urq6uroxgAMDAwPDwQQAzgEIAKXfurq6urrWBADdARkAAHy6urq6urrZtymtTW1PS1M7urq6urp5DAQA/QEaACR5urq6urr2KQnOTu9Pz6k0X7q6urq6uhLHBAAzAh0Ah01ItVHwE7NScpMTczAQsDJ/+7q6urq6urraFmQEAIUCBwA/urq6urqUBACYAggASbq6urq6uvQEAKQCCACUurq6urp5JAQAtAIEAGUlBWUEAL8CCwDloSq4urq6urq8RwQAzgIJAKB5urq6urq7TAQA4QIIAIWwurq6uh7GBADtAgsAS7q6urq6uryvxoUEAAsDCAAQurq6urr9JQQAHwMFAGUlBQVlBAAqAwsABeeuv7q6urq6OCIEADsDCAAkebq6urq69AQATgMIAKXfurq6urrWBABdAwsANbq6urq6uhnIBmUEAGwDCwDFYza6urq6urqwhQQAfQMIACR5urq6urqvBACGAwEAZQQAjAMLAGVHbxy6urq6upsuBACxAx4A5y8XXZl6urq6urq6urq6urq6urq6urq6urq6mvAgBAAFBAcAP7q6urq6lAQAGAQIAAu6urq6urqJBAAkBAgAlLq6urq6eSQEAEEECQAnMbq6urq6u20EAE4ECQBlUbq6urq6uvQEAGEEBwCj2Lq6uroUBABtBBMAjdq6urq6urqfFqvuDMLDoKHHZQQAiwQIABC6urq6up0lBACsBAkA5euaurq6uro1BAC7BAgAJHm6urq6upQEAM4ECACl37q6urq61gQA3AQKAGT8urq6urq6t0QEAO4ECQAgWLq6urq62AEEAP0ECAAkebq6urq6jwQADwUIAO4aurq6uroRBAAwBR4ApHUf2rq6urq6urq6urq6urq6urq6urq6urq6G5BDBACFBQcAP7q6urq6lAQAlwUJACURurq6urq4wAQApAUIAJS6urq6unkkBADCBQgArTq6urq6uosEAM8FCQDvOrq6urq6/CcEAOAFCABld7q6urpZgAQA7QUVAKdcurq6urq6upp7/nwy05CRV+kjxQQACwYIABC6urq6up0lBAAtBggAATi6urq6unAEADsGCAAkebq6urq6lAQATgYIAKXfurq6urrWBABcBgkAYDu6urq6ujpMBABuBgkAJZC6urq6upoPBAB9BggAJHm6urq6uo8EAI8GCQAn3rq6urq6fSUEAK8GHgAnSti6urq6urq6urraGjra+pqaurq6uvoa2N+wykMEAAUHBwA/urq6urqUBAAXBwkAgDm6urq6uvKFBAAkBwgAlLq6urq6eSQEAEIHCAAGmLq6urq6NAQATwcJAKd9urq6urqb7gQAYAcIAAb+urq6uhdlBABuBxUArzi6urq6urq6urq6urq6uto5EwgHBACLBwgAELq6urq6nSUEAK0HCQDlHLq6urq6MmUEALsHCAAkebq6urq6lAQAzgcIAKXfurq6urrWBADcBwkAr7q6urq6uvmnBADvBwgAjvq6urq6urQEAP0HAwAkeboFAAAABQC6urq6jwUADwAJAGUzurq6urp/hQUALwAdAIh4urq6urq6+n5SERd0Vxe31tYx0dExVlRrz6AEBQCFAAcAP7q6urq6lAUAlgAJACARurq6urq6awUApAAIAJS6urq6unkkBQDCAAgAxNm6urq6upQFANAACQCO2rq6urq6EuUFAOAABwCO+rq6ujuCBQDuABYAxOp4urq6urq6urq6urq6urq6uvkLBQUACwEIABC6urq6up0lBQAuAQgAcrq6urq63QUFADsBCAAkebq6urq6lAUATgEIAKXfurq6urrWBQBcAQkAdbq6urq6uh3FBQBvAQkApvi6urq6urxEBQB9AQgAJHm6urq6uo8FAJABCAC2urq6urr/pQUArgEbACM+urq6urq6mNYOYiGHpOeHBoaGIcHBwSaExQUABQIHAD+6urq6upQFAA8CEACBwmJiQuKvsZu6urq6upwhBQAkAggAlLq6urq6eSQFADcCCQDlR8YB4cHB4cQFAEICCAAkebq6urq6lAUAUAIJAAZ5urq6urqYIQUAXwIIAKRyurq6uv3EBQBvAhUAB4pe2rq6urq6urq6urq6urq6ulniBQCLAggAELq6urq6nSUFAKICCQDF5GZh4cHBoQcFAK4CCABSurq6urq9JQUAuwIIACR5urq6urqUBQDOAggApd+6urq6utYFANsCCQBlMLq6urq6upEFAO8CCQBE/7q6urq6ewYFAP0CCAAkebq6urq6jwUAEAMIANa6urq6ut+lBQAuAwoAFLq6urq6uprXpgUAhQMHAD+6urq6upQFAI8DDwDKMlJSUvKf2rq6urq6We8FAKQDCACUurq6urp5JAUAtAMMAGSDbus0FhHR0dHxowUAwgMIACR5urq6urqUBQDQAwkABba6urq6upopBQDfAwcA7du6urr7yQUA8AMVAOdOd/M8/355GDsamrq6urq6uroQhQUACwQIABC6urq6up0lBQAfBAwAxWCsS7WXUdHR0ZEPBQAuBAgAUrq6urq6nSUFADsECAAkebq6urq6lAUATgQIAKXfurq6urrWBQBbBAkApT+6urq6uro3BQBvBAkABR26urq6ulrABQB9BAgAJHm6urq6uo8FAJAECADWurq6urrfpQUArQQKAOW9urq6urq6/YEFAAUFBwA/urq6urqUBQAPBQ8A0Lq6urq6urq6urqbvciFBQAkBQgAlLq6urq6eSQFADMFDQDgCpNeWzqaurq6urqPBQBCBQgAJHm6urq6upQFAFEFCQAs+7q6urq6U+UFAF4FCABll7q6urqyJwUAcgUTAOeDzO8OCYgKldFeurq6urq6+OEFAIsFCAAQurq6urqdJQUAngUNAOZocJzYGvq6urq6ulUFAK4FCABSurq6urqdJQUAuwUIACR5urq6urqUBQDOBQgApd+6urq6utYFANsFCQCkOLq6urq6uvUFAPAFCAAzurq6urr6IgUA/QUIACR5urq6urqPBQAQBggA1rq6urq636UFAC0GCQDneLq6urq6uksFAIUGBwA/urq6urqUBQCPBg4AkZpaWlpaWlue/VAVrcQFAKQGCACUurq6urp5JAUAsgYOAKPQe7q6urq6urqaurqPBQDCBggAJHm6urq6upQFANEGCQBn07q6urq6OKMFAN4GBwCnPrq6uppoBQD3Bg4AZcWFxOEOPrq6urq6mi8FAAsHCAAQurq6urqdJQUAHQcOAGdX+bq6urq6urqamrqqBQAuBwgAUrq6urq6nSUFADsHCAAkebq6urq6lAUATgcIAKXfurq6urrWBQBbBwkApxu6urq6urpVBQBwBwgAMLq6urq6uu0FAH0HCAAkebq6urq6jwUAkAcIANa6urq6ut+lBQCtBwkAAFq6urq6urpsBgAFAAcAP7q6urq6lAYADwAMAO+VVVVVVVXrSY1AJAYAJAAIAJS6urq6unkkBgAxAA8AZzC6urq6urp4spHW1vbDBgBCAAgAJHm6urq6upQGAFIACABO+rq6urq69AYAXgAHAKzaurq6fkEGAHwACQBl6rq6urq6uosGAIsACAAQurq6urqdJQYAnAAPAGWJG7q6urq6WlwQ9ja2jAYArgAIAFK6urq6up0lBgC7AAgAJHm6urq6upQGAM4ACACl37q6urq61gYA2wAJAIbburq6urq6VQYA8AAIAHC6urq6urpMBgD9AAgAJHm6urq6uo8GABABCADWurq6urrfpQYALQEJAML6urq6urr6IgYAhQEHAD+6urq6upQGAI8BCQDlRERERERE5WUGAKQBCACUurq6urp5JAYAsQEPAG/burq6urreqKKhhuaGBAYAwgEIACR5urq6urqUBgDSAQkAZj66urq6ut8HBgDdAQgAhDC6urq6CmUGAP0BCACBOLq6urq61wYACwIIABC6urq6up0lBgAcAg8AIN+6urq6uph3TCCm5qakBgAuAggAUrq6urq6nSUGADsCCAAkebq6urq6lAYATgIIAKXfurq6urrWBgBbAgkAZju6urq6urpVBgBwAggAELq6urq6uu0GAH0CCAAkebq6urq6jwYAkAIIANa6urq6ut+lBgCtAgkATLq6urq6uhoDBgAFAwcAP7q6urq6lAYAJAMIAJS6urq6unkkBgAwAwoAZRG6urq6utrr5QYAQgMIACR5urq6urqUBgBTAwgAlbq6urq6emwGAF0DBwAtG7q6unlhBgB9AwgAxb26urq6urAGAIsDCAAQurq6urqdJQYAnAMJAEq6urq6urrWZgYArgMIAFK6urq6up0lBgC7AwgAJHm6urq6upQGAM4DCACl37q6urq61gYA2wMJAEf4urq6urq61QYA8AMIAHO6urq6uvriBgD9AwgAJHm6urq6uo8GABAECADWurq6urrfpQYALQQJAA+6urq6urpawAYAhQQHAD+6urq6upQGAKQECACUurq6urp5JAYAsAQJAGS/urq6urpfZgYAwgQIACR5urq6urqUBgDTBAkAAPm6urq6ulHlBgDdBAcA1Lq6urr2ZQYA/gQHAFO6urq6unIGAAsFCAAQurq6urqdJQYAGwUJAGXwurq6urqbYgYALgUIAFK6urq6up0lBgA7BQgAJHm6urq6upQGAE4FCACl37q6urq61gYAWwUJAGQ+urq6urq6lAYAbwUJAGXyurq6uroaYwYAfQUIACR5urq6urqPBgCQBQgA1rq6urq636UGAJ8FBwCEYs9J7OClBgCtBQkAr7q6urq6ulrABgAFBgcAP7q6urq6lAYAJAYIAJS6urq6unkkBgAwBggAATu6urq6uvQGAEIGCAAkebq6urq6lAYAUwYQAAURurq6urp4gQdfurq6++wGAH4GBwDxurq6urqwBgCLBggAELq6urq6nSUGAJsGCQDlPLq6urq6/8QGAK4GCABSurq6urqdJQYAuwYIACR5urq6urqUBgDOBggApd+6urq6utYGANsGCQAls7q6urq6ulEGAO8GCQCFnLq6urq6+2EGAP0GCAAkebq6urq6jwYAEAcIANa6urq6ut+lBgAdBwoABU0qdDSUFNSLgAYALQcJAO66urq6urpawAYAhQcHAD+6urq6upQGAKQHCACUurq6urp5JAYAsAcIAE36urq6urqoBgDCBwgAJHm6urq6upQGANQHDwBPerq6urq6aEl6urq6UwcGAP4HAgDQugcAAAAFALq6urrXBwALAAgAELq6urq6nSUHABsACQAE/rq6urq6EmUHAC4ACABSurq6urqdJQcAOwAIACR5urq6urpXBwBOAAgApd+6urq6utYHAFwACQAUurq6urq60iUHAG8ACQCnubq6urq6fsQHAH0ACAAkebq6urq6jwcAkAAIANa6urq6ut+lBwCcAAwAZYww1oqJSenINnEgBwCtAAkAybq6urq6ulrABwAFAQcAP7q6urq6lAcAJAEIAJS6urq6unkkBwAwAQgAbLq6urq6uksHAEIBCAAkebq6urq6lAcAVAEOACffurq6urqSnbq6urtsBwB9AQgA5Ry6urq6uosHAIsBCAAQurq6urrc5QcAmwEJACR5urq6urrSZQcArgEIAFK6urq6up0lBwC7AQgAJHm6urq6ulYHAM4BCACl37q6urq61gcA3AEJAEm6urq6urqepAcA7wEJAIwaurq6urr2ZQcA/QEIACR5urq6urqPBwAQAggA1rq6urq636UHABwCDQBD/auv8NdXNqrj1nEnBwAtAgkAybq6urq6ulrABwCFAgcAP7q6urq6lAcApAIIAJS6urq6unkkBwCwAggA4xq6urq6uvQHAMICCAAkebq6urq6lAcA1QINAJW6urq6uptaurq6vKQHAP0CCACBmLq6urq6TgcACwMIADC6urq6uv9EBwAbAwkARJ+6urq6ur/kBwAuAwgAUrq6urq6nSUHADsDCADEGbq6urq6lgcATgMIAKXfurq6urrWBwBcAwkAQhq6urq6ulrDBwBvAwgA97q6urq6uskHAH0DCAAkebq6urq6jwcAkAMIANa6urq6ut+lBwCcAw0AlZwkz9rLrndb4GC5DAcArQMJAMm6urq6urpawAcABQQHAD+6urq6upQHACQECACUurq6urp5JAcAMAQJAOeZurq6urq8xgcAQgQIACR5urq6urqUBwBVBAwA4Fm6urq6urq6unpLBwB9BAgAi7q6urq6u2MHAIsECABQurq6urpZJAcAmwQJACUyurq6urqb4gcArgQIAFK6urq6up0lBwC7BAgAJL66urq6unAHAM4ECACl37q6urq61gcA3AQJAAceurq6urq6VQcA7gQJAOafurq6urobYwcA/QQIACR5urq6urqPBwAQBQgA1rq6urq636UHABsFAwAlsjUHAB8FBwBu2s4tCnsDBwAnBQIAfLUHAC0FCQDJurq6urq6WsAHAIUFBwA/urq6urqUBwCkBQgAlLq6urq6eSQHALAFCgDFcrq6urq6+hXnBwDCBQgAJHm6urq6upQHANUFDABlt7q6urq6urq6XGYHAPsFCgCFTd+6urq6un/kBwALBggA9rq6urq6W+YHABwGCgDUurq6urq68eBlBwAuBggAUrq6urq6nSUHADsGCQClP7q6urq63eUHAE4GCACl37q6urq61gcAXAYLAGU3urq6urq6fi8EBwBtBgoA5pXaurq6urrSJAcAfQYIACR5urq6urqPBwCQBggA1rq6urq636UHAJsGAwCFvA4HAJ8GBwBOurdVEngmBwCnBgIAc7YHAK0GCQDJurq6urq6WsAHAAUHBwA/urq6urqUBwAkBwgAlLq6urq6eSQHADEHGQALurq6urq6mbTu7YAhZiFDAswYurq6urqUBwBWBwoAjbu6urq6urq6KwcAbgcWACWAoSGn5wREpYVkYc0rspq6urq6usoHAIsHDQDUurq6urraaiblpaTEBwCcBxoAjfu6urq6ujvQiWzj4SamAEIN3Lq6urq6nSUHALsHDgAlPbq6urq6GG+khaVnpQcAzgcIAKXfurq6urrWBwDdBxkAo566urq6urof6oxAh0ZCzhZ4urq6urpajgcA/QcDACR5uggAAAAFALq6urqPCAAQAAgA1rq6urq636UIABsAAwAlfVUIAB8ABwBu2k6CKjsACAAnAAIAvRQIAC0AIgDJurq6urq6WkMFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYXlCACFAAcAP7q6urq6lAgApAAIAJS6urq6unkkCACxABkAgd66urq6uroa3t3wEZcRUxKderq6urq6lAgA1gAKAKTSurq6urq6+CAIAO4AFgAkkZEx13cVVSpKdbY9+Lq6urq6uj8BCAALAQ0AiLq6urq6uhm36oq0DAgAHAEaAKSxurq6urq6utlc0/FW9hBSHbi6urq6up0lCAA8AQ0AsLq6urq6utwU6lXUAAgATgEIAKXfurq6urrWCABdARkAxevburq6urq6O/xQN/ezPtq6urq6uvrx5wgAfQEIACR5urq6urqPCACQAQgA1rq6urq636UIAJwBBgDUfATP+4YIAKMBBgADmw0h+U8IAK0BIwDpurq6urq6OpQLi4uLi4uLi4uLi4uLi4uLi4uLi4uLiwoJJQgABQIHAD+6urq6upQIACQCCACUurq6urp5JAgAMQIZAAUJvLq6urq6urq6urr6urq6urq6urq6upQIAFcCCQAOGrq6urq6saUIAG4CFQCkW7q62tpaWtsbWpq6urq6urq6fkkIAIsCDQCAPrq6urq6utq7u7qKCACdAhkAA9I6urq6urq6urq6+pq6urq6urq6urqdJQgAvAINAAgburq6urq6Grt6Oq0IAM4CCACl37q6urq61ggA3gIXAKcU/rq6urq6urq62vq6urq6urq6ONHgCAD9AggAJHm6urq6uo8IABADCADWurq6urrfpQgAHAMGACPdq+y1RwgAIwMGAOeUSfcRhwgALQMjAAm6urq6urq6O1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tb21ylCACFAwcAn7q6urq6lAgApAMIAJS6urq6ujnECACyAxgAhU/WvVkb+rq6urq6urq6urq6urq6urqUCADXAwgA5366urq6mYIIAO4DFQCkW7q6urq6urq6urq6urqauJwRDsQIAAsEDQBlaF8aurq6urq6urpVCAAeBBgAwvTyfpg6urq6urq6urq6urq6urq6up0lCAA8BA0ARtQZmrq6urq6urq6TAgATgQIAET/urq6urr2CABfBBUAh2lwPxu6urq6urq6urq6ulo+0yuBCAB9BAgAxDm6urq6uq8IAJAECAD2urq6urr/RAgAnAQMAGVP8LeJwsMNixBxIAgArQQjAK3aurq6urq6urq6urq6urq6urq6urq6urq6urq6urq6ut+lCAAFBQcA8F+cnJw/KwgAJAUIACs/nJycX7MECAAzBRcAZcataUr3kNLdvb293V1dshNzExAxkS4IAFcFCADFXLq6urpQxQgAbgUUACSRk12yPb293JycnPy90pbrrCFlCACMBQwA5G93HZycnBydvTwJCACfBRcAB+IOC/RQcj29vb39XV1d83MT0DHxqgUIAL0FDAAGKTF8nJycfJ29nYMIAM4FCACFMF+cnJwfiggA4AUTAMVgLwqQPH55WBgYGR68k9XOw0QIAP0FCAAEs1+cnJy8jQgAEAYIAIofnJycXzCFCAAdBgoABU2V0PExUFBKgAgALQYjAEZfurq6urq6urq6urq6urq6urq6urq6urq6urq6urq6uv+lCACFBgcAbW+MjIwvwAgApAYIAMAvjIyMT+3FCAC2BhQAZYVGoMLNTK1M7U1NoiMDIwAhoccIANcGBwAAeLq6unpOCADuBhEAJYCjTU0tTK3srIyMjK3ipuUIAA4HCgCnDayMrCytrcwBCAAhBxUAZcUHYALNra1MjU1NTeNjI+DBgcZlCAA+BwsAZcFsrIyMDK1MrQcIAE4HCAAFbW+MjIwvQwgAYwcNAKWgzG4JyIiIyS5Po8QIAH0HCADF7U+MjKxPJggAkAcIAEMvjIyMb20FCACfBwcA54/IK6mtZAgArgciAK8TXjk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTmZ8qUJAFYACADldLq6uroypwkA5wAFAGUlxcUFCQAhAQMABcVlCQAuASIAJQNu6enp6enp6enp6enp6enp6enp6enp6enp6enp6UgvJQkA1gEHAKA5urq6Gi8JALECHgAFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBWUJAFYDBwAqurq6up8HCQDVBAcABny6urq6dAkAVQYHAGt6urq6OQMJANQHCAAHf7q6urrU5QoAVAEHAGx6urq6WyMKANMCCAAFNrq6urpzBAoAUwQHAGLZurq6OEwKANIFCAAFFrq6urpzpQoAUgcHAEEZurq6+mkLANEACAAFCpq6uro+xgsAUQIHACZ92Tk52eoLANEDBwBmickpyelB";
     }
 }
