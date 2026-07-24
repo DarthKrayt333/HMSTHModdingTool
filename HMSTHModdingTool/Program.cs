@@ -21,7 +21,7 @@ namespace HMSTHModdingTool
             "HMSTHModdingTool original as" +
             " HDATextTool by gdkchan";
         const string TOOL_VERSION =
-            "v1.4.8-Beta";
+            "v1.4.9-Beta";
         const string TOOL_AUTHOR =
             "gdkchan + DarthKrayt333" +
             " & HMSTH Community";
@@ -158,6 +158,46 @@ namespace HMSTHModdingTool
         }
 
         // ═════════════════════════════════════
+        // DETECT -JAP FLAG
+        // ═════════════════════════════════════
+        static bool DetectJapFlag(
+            string[] args, out int flagIndex)
+        {
+            flagIndex = -1;
+            for (int i = 0; i < args.Length; i++)
+            {
+                string a = args[i]
+                    .TrimStart('-')
+                    .ToLower();
+                if (a == "jap" ||
+                    a == "jp" ||
+                    a == "japanese" ||
+                    a == "ntscj")
+                {
+                    flagIndex = i;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        ///     Removes the jap flag from the
+        ///     args array and returns a clean
+        ///     copy.
+        /// </summary>
+        static string[] RemoveJapFlag(
+            string[] args, int flagIndex)
+        {
+            var list =
+                new System.Collections
+                    .Generic.List<string>(
+                        args);
+            list.RemoveAt(flagIndex);
+            return list.ToArray();
+        }
+
+        // ═════════════════════════════════════
         // HELPERS FOR SRDB BATCHES
         // ═════════════════════════════════════
         static bool IsSRDBFile(string path)
@@ -194,7 +234,7 @@ namespace HMSTHModdingTool
         }
 
         static List<byte[]>
-    ParseSRDBForCSRDB(
+            ParseSRDBForCSRDB(
         byte[] data)
         {
             if (data.Length < 4 ||
@@ -416,6 +456,62 @@ namespace HMSTHModdingTool
             return result;
         }
 
+        // ═══════════════════════════════
+        // AUTO DETECT JAP OR USA
+        // FROM ISO FILE
+        // ═══════════════════════════════
+        static bool AutoDetectJap(
+            string isoPath,
+            out bool aborted)
+        {
+            aborted = false;
+            try
+            {
+                string detectedElf;
+                bool isJap =
+                    HarvestIso
+                        .AutoDetectVersion(
+                            isoPath,
+                            out detectedElf);
+
+                if (isJap)
+                {
+                    Console.ForegroundColor =
+                        ConsoleColor.Yellow;
+                    Console.WriteLine(
+                        "  [Auto-detected]" +
+                        " Japanese version" +
+                        " (SLPS_201.04)!");
+                    Console.ResetColor();
+                }
+                else
+                {
+                    Console.ForegroundColor =
+                        ConsoleColor.Green;
+                    Console.WriteLine(
+                        "  [Auto-detected]" +
+                        " USA version" +
+                        " (SLUS_202.51).");
+                    Console.ResetColor();
+                }
+                return isJap;
+            }
+            catch (InvalidDataException ex)
+            {
+                Console.ForegroundColor =
+                    ConsoleColor.Yellow;
+                Console.WriteLine(
+                    "\n  WARNING: " +
+                    ex.Message);
+                Console.WriteLine(
+                    "  Cannot fix this" +
+                    " ISO. Aborting.");
+                Console.ResetColor();
+                Console.WriteLine();
+                aborted = true;
+                return false;
+            }
+        }
 
         // ═════════════════════════════════════
         // RUN COMMAND
@@ -988,13 +1084,88 @@ namespace HMSTHModdingTool
                     // ELF COMMANDS
                     // ════════════════════════
                     case "fixelf":
-                        RequireArgs(args, 4,
-                            "-fixelf <SLUS>" +
-                            " <lba> <size>");
-                        HarvestElf.Fix(
-                            args[1],
-                            uint.Parse(args[2]),
-                            uint.Parse(args[3]));
+                        {
+                            int japIdx;
+                            bool isJap = DetectJapFlag(
+                                args, out japIdx);
+                            string[] cleanArgs = isJap
+                                ? RemoveJapFlag(args, japIdx)
+                                : args;
+
+                            RequireArgs(cleanArgs, 4,
+                                "-fixelf [-jap] <ELF>" +
+                                " <lba> <size>");
+
+                            // ─── AUTO-DETECT from ELF filename
+                            // if no -jap flag specified
+                            if (!isJap)
+                            {
+                                string elfFileName =
+                                    Path.GetFileName(
+                                        cleanArgs[1])
+                                    .ToUpper();
+
+                                if (elfFileName ==
+                                    "SLPS_201.04")
+                                {
+                                    isJap = true;
+                                    Console.ForegroundColor =
+                                        ConsoleColor.Yellow;
+                                    Console.WriteLine(
+                                        "  [Auto-detected]" +
+                                        " Japanese version" +
+                                        " (SLPS_201.04)!");
+                                    Console.ResetColor();
+                                }
+                                else if (elfFileName ==
+                                         "SLUS_202.51")
+                                {
+                                    Console.ForegroundColor =
+                                        ConsoleColor.Green;
+                                    Console.WriteLine(
+                                        "  [Auto-detected]" +
+                                        " USA version" +
+                                        " (SLUS_202.51).");
+                                    Console.ResetColor();
+                                }
+                                else
+                                {
+                                    Console.ForegroundColor =
+                                        ConsoleColor.Yellow;
+                                    Console.WriteLine(
+                                        "\n  WARNING: ELF" +
+                                        " file is not named" +
+                                        " SLUS_202.51 or" +
+                                        " SLPS_201.04.");
+                                    Console.WriteLine(
+                                        "  This does not" +
+                                        " appear to be a" +
+                                        " valid HMSTH ELF." +
+                                        " Aborting.");
+                                    Console.ResetColor();
+                                    Console.WriteLine();
+                                    break;
+                                }
+                            }
+
+                            if (isJap)
+                            {
+                                Console.ForegroundColor =
+                                    ConsoleColor.Cyan;
+                                Console.WriteLine(
+                                    "  [JAP] Using" +
+                                    " Japanese version" +
+                                    " offsets" +
+                                    " (SLPS_201.04)");
+                                Console.ResetColor();
+                            }
+
+                            HarvestElf.Fix(
+                                cleanArgs[1],
+                                uint.Parse(cleanArgs[2]),
+                                uint.Parse(cleanArgs[3]),
+                                isJap);
+                        }
                         break;
 
                     // ════════════════════════
@@ -1004,46 +1175,117 @@ namespace HMSTHModdingTool
                     //  LBA table at 0x162460-0x162D30)
                     // ════════════════════════
                     case "fixlba":
-                        RequireArgs(args, 2,
-                            "-fixlba <file.iso>");
                         {
-                            string isoPath =
-                                args[1];
-                            if (!Path
-                                    .IsPathRooted(
-                                        isoPath))
-                                isoPath =
-                                    Path.Combine(
-                                        Directory
-                                            .GetCurrentDirectory(),
-                                        isoPath);
-                            // Preserve real filename case
-                            isoPath =
-                                HarvestIso.GetRealPath(
+                            int japIdx;
+                            bool isJap = DetectJapFlag(
+                                args, out japIdx);
+                            string[] cleanArgs = isJap
+                                ? RemoveJapFlag(args, japIdx)
+                                : args;
+
+                            RequireArgs(cleanArgs, 2,
+                                "-fixlba [-jap] <file.iso>");
+
+                            string isoPath = cleanArgs[1];
+                            if (!Path.IsPathRooted(isoPath))
+                                isoPath = Path.Combine(
+                                    Directory
+                                        .GetCurrentDirectory(),
                                     isoPath);
+                            isoPath =
+                                HarvestIso.GetRealPath(isoPath);
+
+                            // ─── AUTO-DETECT if no -jap flag
+                            if (!isJap)
+                            {
+                                Console.ForegroundColor =
+                                    ConsoleColor.Cyan;
+                                Console.WriteLine(
+                                    "  Auto-detecting" +
+                                    " ISO version...");
+                                Console.ResetColor();
+
+                                try
+                                {
+                                    string detectedElf;
+                                    bool autoJap =
+                                        HarvestIso
+                                            .AutoDetectVersion(
+                                                isoPath,
+                                                out detectedElf);
+
+                                    if (autoJap)
+                                    {
+                                        isJap = true;
+                                        Console.ForegroundColor =
+                                            ConsoleColor.Yellow;
+                                        Console.WriteLine(
+                                            "  [Auto-detected]" +
+                                            " Japanese version" +
+                                            " (SLPS_201.04)!");
+                                        Console.ResetColor();
+                                    }
+                                    else
+                                    {
+                                        Console.ForegroundColor =
+                                            ConsoleColor.Green;
+                                        Console.WriteLine(
+                                            "  [Auto-detected]" +
+                                            " USA version" +
+                                            " (SLUS_202.51).");
+                                        Console.ResetColor();
+                                    }
+                                }
+                                catch (InvalidDataException ex)
+                                {
+                                    Console.ForegroundColor =
+                                        ConsoleColor.Yellow;
+                                    Console.WriteLine(
+                                        "\n  WARNING: " +
+                                        ex.Message);
+                                    Console.WriteLine(
+                                        "  Cannot fix LBA." +
+                                        " Aborting.");
+                                    Console.ResetColor();
+                                    Console.WriteLine();
+                                    return;
+                                }
+                            }
+
+                            if (isJap)
+                            {
+                                Console.ForegroundColor =
+                                    ConsoleColor.Cyan;
+                                Console.WriteLine(
+                                    "  [JAP] Using" +
+                                    " Japanese version" +
+                                    " (SLPS_201.04," +
+                                    " 0x162360-0x162C30)");
+                                Console.ResetColor();
+                            }
 
                             Console.ForegroundColor =
                                 ConsoleColor.Cyan;
                             Console.WriteLine(
-                                "Auto-fixing LBA" +
-                                " table in" +
-                                " SLUS_202.51" +
+                                "Auto-fixing LBA table" +
+                                " in " +
+                                (isJap
+                                    ? "SLPS_201.04"
+                                    : "SLUS_202.51") +
                                 " inside ISO...");
                             Console.ResetColor();
 
                             int changes =
                                 HarvestIso.FixLba(
-                                    isoPath);
+                                    isoPath, isJap);
 
                             if (changes == 0)
                             {
                                 Console.ForegroundColor =
                                     ConsoleColor.Green;
                                 Console.WriteLine(
-                                    "  LBA table" +
-                                    " already" +
-                                    " correct." +
-                                    " No changes" +
+                                    "  LBA table already" +
+                                    " correct. No changes" +
                                     " needed.");
                                 Console.ResetColor();
                             }
@@ -1052,11 +1294,8 @@ namespace HMSTHModdingTool
                                 Console.ForegroundColor =
                                     ConsoleColor.Green;
                                 Console.WriteLine(
-                                    "  Patched " +
-                                    changes +
-                                    " LBA" +
-                                    " entries" +
-                                    " in ISO.");
+                                    "  Patched " + changes +
+                                    " LBA entries in ISO.");
                                 Console.ResetColor();
                             }
                         }
@@ -1106,144 +1345,206 @@ namespace HMSTHModdingTool
                     // 3. Fixes LBA table
                     // ════════════════════════
                     case "fixiso":
-                        RequireArgs(args, 2,
-                            "-fixiso <file.iso>");
                         {
-                            string isoPath =
-                                args[1];
-                            if (!Path
-                                    .IsPathRooted(
-                                        isoPath))
-                                isoPath =
-                                    Path.Combine(
-                                        Directory
-                                            .GetCurrentDirectory(),
-                                        isoPath);
-                            // Preserve real filename case
-                            isoPath =
-                                HarvestIso.GetRealPath(
+                            int japIdx;
+                            bool isJap = DetectJapFlag(
+                                args, out japIdx);
+                            string[] cleanArgs = isJap
+                                ? RemoveJapFlag(args, japIdx)
+                                : args;
+
+                            RequireArgs(cleanArgs, 2,
+                                "-fixiso [-jap] <file.iso>");
+
+                            string isoPath = cleanArgs[1];
+                            if (!Path.IsPathRooted(isoPath))
+                                isoPath = Path.Combine(
+                                    Directory
+                                        .GetCurrentDirectory(),
                                     isoPath);
+                            isoPath =
+                                HarvestIso.GetRealPath(isoPath);
+
+                            // ─── AUTO-DETECT VERSION
+                            // if -jap not manually specified
+                            if (!isJap)
+                            {
+                                Console.ForegroundColor =
+                                    ConsoleColor.Cyan;
+                                Console.WriteLine(
+                                    "  Auto-detecting" +
+                                    " ISO version...");
+                                Console.ResetColor();
+
+                                try
+                                {
+                                    string detectedElf;
+                                    bool autoJap =
+                                        HarvestIso
+                                            .AutoDetectVersion(
+                                                isoPath,
+                                                out detectedElf);
+
+                                    if (autoJap)
+                                    {
+                                        isJap = true;
+                                        Console.ForegroundColor =
+                                            ConsoleColor.Yellow;
+                                        Console.WriteLine(
+                                            "  [Auto-detected]" +
+                                            " Japanese version" +
+                                            " (SLPS_201.04)" +
+                                            " found in ISO!");
+                                        Console.ResetColor();
+                                    }
+                                    else
+                                    {
+                                        Console.ForegroundColor =
+                                            ConsoleColor.Green;
+                                        Console.WriteLine(
+                                            "  [Auto-detected]" +
+                                            " USA version" +
+                                            " (SLUS_202.51)" +
+                                            " found in ISO.");
+                                        Console.ResetColor();
+                                    }
+                                }
+                                catch (InvalidDataException ex)
+                                {
+                                    Console.ForegroundColor =
+                                        ConsoleColor.Yellow;
+                                    Console.WriteLine(
+                                        "\n  WARNING: " +
+                                        ex.Message);
+                                    Console.WriteLine(
+                                        "  Cannot fix this" +
+                                        " ISO. Aborting.");
+                                    Console.ResetColor();
+                                    Console.WriteLine();
+                                    return;
+                                }
+                            }
+
+                            string elfName = isJap
+                                ? "SLPS_201.04"
+                                : "SLUS_202.51";
 
                             Console.ForegroundColor =
                                 ConsoleColor.Cyan;
                             Console.WriteLine(
-                                "═════════════════" +
-                                "═════════════════");
+                                "═══════════════════" +
+                                "═══════════════════");
                             Console.WriteLine(
-                                " FIXISO - Full" +
-                                " Auto Fix");
+                                " FIXISO - Full Auto Fix" +
+                                (isJap
+                                    ? " [JAP]"
+                                    : " [USA]"));
                             Console.WriteLine(
-                                "═════════════════" +
-                                "═════════════════");
+                                "═══════════════════" +
+                                "═══════════════════");
                             Console.ResetColor();
 
-                            // ─── STEP 1: Fix ISO
-                            // structure
+                            if (isJap)
+                            {
+                                Console.ForegroundColor =
+                                    ConsoleColor.Yellow;
+                                Console.WriteLine(
+                                    "  Japanese version:" +
+                                    " SLPS_201.04");
+                                Console.ResetColor();
+                            }
+
+                            // ─── STEP 1: Fix ISO structure
                             Console.WriteLine();
                             Console.ForegroundColor =
                                 ConsoleColor.Yellow;
                             Console.WriteLine(
-                                "[STEP 1/3]" +
-                                " Repairing ISO" +
-                                " structure...");
+                                "[STEP 1/3] Repairing" +
+                                " ISO structure...");
                             Console.ResetColor();
 
                             try
                             {
-                                IsoRepair.FixIso(
-                                    isoPath);
+                                IsoRepair.FixIso(isoPath);
                             }
                             catch (Exception ex)
                             {
-                                Console.ForegroundColor
-                                    = ConsoleColor
-                                        .Yellow;
+                                Console.ForegroundColor =
+                                    ConsoleColor.Yellow;
                                 Console.WriteLine(
-                                    "  Step 1 warning:"
-                                    + " " + ex.Message);
+                                    "  Step 1 warning: " +
+                                    ex.Message);
                                 Console.ResetColor();
                             }
 
-                            // ─── STEP 2: Fix
-                            // PS2 logo
+                            // ─── STEP 2: Fix PS2 logo
                             Console.WriteLine();
                             Console.ForegroundColor =
                                 ConsoleColor.Yellow;
                             Console.WriteLine(
-                                "[STEP 2/3]" +
-                                " Fixing PS2 logo" +
-                                " + Master Disc" +
+                                "[STEP 2/3] Fixing PS2" +
+                                " logo + Master Disc" +
                                 " markers...");
                             Console.ResetColor();
 
                             try
                             {
-                                IsoLogoPatcher
-                                    .PatchIso(
-                                        isoPath);
+                                IsoLogoPatcher.PatchIso(
+                                    isoPath, null, isJap);
                             }
                             catch (Exception ex)
                             {
-                                Console.ForegroundColor
-                                    = ConsoleColor
-                                        .Yellow;
+                                Console.ForegroundColor =
+                                    ConsoleColor.Yellow;
                                 Console.WriteLine(
-                                    "  Step 2 warning:"
-                                    + " " + ex.Message);
+                                    "  Step 2 warning: " +
+                                    ex.Message);
                                 Console.ResetColor();
                             }
 
-                            // ─── STEP 3: Fix LBA
-                            // table in SLUS
+                            // ─── STEP 3: Fix LBA table
                             Console.WriteLine();
                             Console.ForegroundColor =
                                 ConsoleColor.Yellow;
                             Console.WriteLine(
-                                "[STEP 3/3]" +
-                                " Fixing LBA table" +
-                                " in SLUS_202.51" +
-                                "...");
+                                "[STEP 3/3] Fixing LBA" +
+                                " table in " +
+                                elfName + "...");
                             Console.ResetColor();
 
                             try
                             {
                                 int changes =
-                                    HarvestIso
-                                        .FixLba(
-                                            isoPath);
+                                    HarvestIso.FixLba(
+                                        isoPath, isJap);
 
                                 if (changes == 0)
                                 {
-                                    Console.ForegroundColor
-                                        = ConsoleColor
-                                            .Green;
+                                    Console.ForegroundColor =
+                                        ConsoleColor.Green;
                                     Console.WriteLine(
                                         "  LBA table" +
-                                        " already" +
-                                        " correct.");
+                                        " already correct.");
                                     Console.ResetColor();
                                 }
                                 else
                                 {
-                                    Console.ForegroundColor
-                                        = ConsoleColor
-                                            .Green;
+                                    Console.ForegroundColor =
+                                        ConsoleColor.Green;
                                     Console.WriteLine(
                                         "  Patched " +
                                         changes +
-                                        " LBA" +
-                                        " entries.");
+                                        " LBA entries.");
                                     Console.ResetColor();
                                 }
                             }
                             catch (Exception ex)
                             {
-                                Console.ForegroundColor
-                                    = ConsoleColor
-                                        .Yellow;
+                                Console.ForegroundColor =
+                                    ConsoleColor.Yellow;
                                 Console.WriteLine(
-                                    "  Step 3 warning:"
-                                    + " " + ex.Message);
+                                    "  Step 3 warning: " +
+                                    ex.Message);
                                 Console.ResetColor();
                             }
 
@@ -1251,14 +1552,14 @@ namespace HMSTHModdingTool
                             Console.ForegroundColor =
                                 ConsoleColor.Green;
                             Console.WriteLine(
-                                "═════════════════" +
-                                "═════════════════");
+                                "═══════════════════" +
+                                "═══════════════════");
                             Console.WriteLine(
                                 " ALL DONE! ISO is" +
                                 " ready to play.");
                             Console.WriteLine(
-                                "═════════════════" +
-                                "═════════════════");
+                                "═══════════════════" +
+                                "═══════════════════");
                             Console.ResetColor();
                         }
                         break;
@@ -1267,27 +1568,50 @@ namespace HMSTHModdingTool
                     // PS2 LOGO FIXER
                     // ════════════════════════
                     case "fixps2logo":
-                        RequireArgs(args, 2,
-                            "-fixps2logo" +
-                            " <file.iso>");
                         {
-                            string isoPath =
-                                args[1];
-                            if (!Path
-                                    .IsPathRooted(
-                                        isoPath))
-                                isoPath =
-                                    Path.Combine(
-                                        Directory
-                                            .GetCurrentDirectory(),
-                                        isoPath);
-                            // Preserve real filename case
+                            int japIdxLogo;
+                            bool isJapLogo =
+                                DetectJapFlag(
+                                    args,
+                                    out japIdxLogo);
+                            string[] cleanLogo = isJapLogo
+                                ? RemoveJapFlag(
+                                    args, japIdxLogo)
+                                : args;
+
+                            RequireArgs(cleanLogo, 2,
+                                "-fixps2logo" +
+                                " [-jap] <file.iso>");
+
+                            string isoPath = cleanLogo[1];
+                            if (!Path.IsPathRooted(isoPath))
+                                isoPath = Path.Combine(
+                                    Directory
+                                        .GetCurrentDirectory(),
+                                    isoPath);
                             isoPath =
                                 HarvestIso.GetRealPath(
                                     isoPath);
 
+                            // ─── AUTO-DETECT if no -jap flag
+                            if (!isJapLogo)
+                            {
+                                Console.ForegroundColor =
+                                    ConsoleColor.Cyan;
+                                Console.WriteLine(
+                                    "  Auto-detecting" +
+                                    " ISO version...");
+                                Console.ResetColor();
+
+                                bool aborted;
+                                isJapLogo = AutoDetectJap(
+                                    isoPath, out aborted);
+
+                                if (aborted) break;
+                            }
+
                             IsoLogoPatcher.PatchIso(
-                                isoPath);
+                                isoPath, null, isJapLogo);
                         }
                         break;
 
@@ -3410,6 +3734,51 @@ namespace HMSTHModdingTool
             Console.WriteLine(
                 "    tool.exe fixlba" +
                 " HMSTH_MODDED.iso");
+            Console.ResetColor();
+            Console.WriteLine();
+
+            // ── ISO LBA AUTO-FIXER FOR JAPANESE VERSION (NEW) ──────
+            Console.ForegroundColor =
+                ConsoleColor.DarkYellow;
+            Console.WriteLine(
+                "  Japanese Version" +
+                " Support (NEW v1.4.9):");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    Add -jap flag for" +
+                " Japanese version" +
+                " (SLPS_201.04).");
+            Console.WriteLine(
+                "    LBA table at" +
+                " 0x162360-0x162C30" +
+                " (vs USA 0x162460" +
+                "-0x162D30).");
+            Console.WriteLine(
+                "    Works with or" +
+                " without hyphen:" +
+                " -jap / jap / -jp");
+            Console.ResetColor();
+            Console.ForegroundColor =
+                ConsoleColor.DarkYellow;
+            Console.WriteLine(
+                "  Examples:");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    tool.exe fixlba" +
+                " -jap HMSTH_JAP.iso");
+            Console.WriteLine(
+                "    tool.exe fixiso" +
+                " -jap HMSTH_JAP.iso");
+            Console.WriteLine(
+                "    tool.exe fixelf" +
+                " -jap SLPS_201.04" +
+                " 1234 56789");
+            Console.WriteLine(
+                "    tool.exe fixlba" +
+                " HMSTH_USA.iso" +
+                "    (USA, no flag)");
             Console.ResetColor();
             Console.WriteLine();
 
