@@ -67,6 +67,138 @@ namespace HMSTHModdingTool.RDTB
             0x00, 0x00, 0x00, 0x00
         };
 
+        // ═════════════════════════════
+        // MOUTH BATCH FLAG PATTERN
+        // Learned from ORIG BOY batch 19
+        // (bone 300, tex 4). The PS2
+        // VU1 microcode reads these
+        // per-vertex flag bits during
+        // animation. Missing them makes
+        // the mouth jump.
+        //
+        // Key = (block_idx, vertex_idx)
+        // Value = (vertex_flag,
+        //          normal_flag)
+        // Blocks with size matching the
+        // reference get their exact
+        // flag pattern applied. Blocks
+        // with different size get a
+        // safe fallback (all zeros
+        // except normal[0]=0).
+        // ═════════════════════════════
+        static readonly
+            Dictionary<(int, int),
+                (uint vf, uint nf)>
+            MOUTH_FLAGS = new Dictionary<
+                (int, int),
+                (uint vf, uint nf)>
+        {
+            {(0,0), (0x00000000u, 0x00000001u)},
+            {(0,1), (0x00000000u, 0x3F800000u)},
+            {(0,2), (0x00000000u, 0x3F800000u)},
+            {(0,3), (0x00000001u, 0x3F800000u)},
+            {(0,4), (0x00000000u, 0x3F800000u)},
+            {(0,5), (0x00000001u, 0x3F800000u)},
+            {(0,6), (0x00000000u, 0x3F800000u)},
+            {(0,7), (0x00000001u, 0x3F800000u)},
+            {(0,8), (0x00000000u, 0x3F800000u)},
+            {(0,9), (0x00000001u, 0x3F800000u)},
+            {(0,10),(0x00000000u, 0x3F800000u)},
+            {(0,11),(0x00000001u, 0x3F800000u)},
+            {(1,0), (0x00000000u, 0x00000000u)},
+            {(1,1), (0x00000000u, 0x3F800000u)},
+            {(1,2), (0x00000000u, 0x3F800000u)},
+            {(1,3), (0x00000000u, 0x3F800000u)},
+            {(1,4), (0x00000000u, 0x3F800000u)},
+            {(1,5), (0x00000000u, 0x3F800000u)},
+            {(1,6), (0x00000000u, 0x3F800000u)},
+            {(1,7), (0x00000000u, 0x3F800000u)},
+            {(1,8), (0x00000000u, 0x3F800000u)},
+            {(1,9), (0x00000000u, 0x3F800000u)},
+            {(1,10),(0x00000000u, 0x3F800000u)},
+            {(1,11),(0x00000000u, 0x3F800000u)},
+            {(2,0), (0x00000000u, 0x00000000u)},
+            {(2,1), (0x00000000u, 0x3F800000u)},
+            {(2,2), (0x00000000u, 0x3F800000u)},
+            {(2,3), (0x00000000u, 0x3F800000u)},
+            {(2,4), (0x00000000u, 0x3F800000u)},
+            {(2,5), (0x00000000u, 0x3F800000u)},
+            {(2,6), (0x00000000u, 0x3F800000u)},
+            {(2,7), (0x00000000u, 0x3F800000u)},
+            {(2,8), (0x00000000u, 0x3F800000u)},
+            {(2,9), (0x00000000u, 0x3F800000u)},
+            {(2,10),(0x00000001u, 0x3F800000u)},
+            {(3,0), (0x00000000u, 0x00000001u)},
+            {(3,1), (0x00000001u, 0x3F800000u)},
+            {(3,2), (0x00000000u, 0x3F800000u)},
+            {(3,3), (0x00000001u, 0x3F800000u)},
+            {(3,4), (0x00000000u, 0x3F800000u)},
+            {(3,5), (0x00000001u, 0x3F800000u)},
+            {(3,6), (0x00000000u, 0x3F800000u)},
+            {(3,7), (0x00000001u, 0x3F800000u)},
+            {(3,8), (0x00000000u, 0x3F800000u)},
+            {(4,0), (0x00000000u, 0x00000000u)},
+            {(4,1), (0x00000000u, 0x3F800000u)},
+            {(4,2), (0x00000000u, 0x3F800000u)},
+            {(4,3), (0x00000000u, 0x3F800000u)},
+            {(4,4), (0x00000000u, 0x3F800000u)},
+            {(4,5), (0x00000000u, 0x3F800000u)},
+            {(4,6), (0x00000000u, 0x3F800000u)},
+            {(4,7), (0x00000000u, 0x3F800000u)},
+            {(4,8), (0x00000000u, 0x3F800000u)},
+            {(5,0), (0x00000000u, 0x00000000u)},
+            {(5,1), (0x00000000u, 0x3F800000u)},
+            {(5,2), (0x00000000u, 0x3F800000u)},
+            {(5,3), (0x00000000u, 0x3F800000u)},
+            {(5,4), (0x00000000u, 0x3F800000u)},
+            {(5,5), (0x00000000u, 0x3F800000u)},
+            {(5,6), (0x00000000u, 0x3F800000u)},
+            {(6,0), (0x00000000u, 0x00000000u)},
+            {(6,1), (0x00000001u, 0x3F800000u)},
+            {(6,2), (0x00000001u, 0x3F800000u)},
+            {(6,3), (0x00000000u, 0x3F800000u)},
+            {(6,4), (0x00000000u, 0x3F800000u)},
+            {(6,5), (0x00000000u, 0x3F800000u)},
+            {(6,6), (0x00000000u, 0x3F800000u)},
+            {(7,0), (0x00000000u, 0x00000000u)},
+            {(7,1), (0x00000000u, 0x3F800000u)},
+            {(7,2), (0x00000000u, 0x3F800000u)},
+            {(7,3), (0x00000000u, 0x3F800000u)},
+            {(7,4), (0x00000000u, 0x3F800000u)},
+            {(7,5), (0x00000000u, 0x3F800000u)},
+            {(7,6), (0x00000001u, 0x3F800000u)},
+            {(8,0), (0x00000000u, 0x00000001u)},
+            {(8,1), (0x00000000u, 0x3F800000u)},
+            {(8,2), (0x00000000u, 0x3F800000u)},
+            {(8,3), (0x00000000u, 0x3F800000u)},
+            {(8,4), (0x00000000u, 0x3F800000u)},
+            {(8,5), (0x00000000u, 0x3F800000u)},
+            {(8,6), (0x00000001u, 0x3F800000u)},
+            {(9,0), (0x00000000u, 0x00000000u)},
+            {(9,1), (0x00000000u, 0x3F800000u)},
+            {(9,2), (0x00000000u, 0x3F800000u)},
+            {(9,3), (0x00000000u, 0x3F800000u)},
+            {(9,4), (0x00000000u, 0x3F800000u)},
+            {(10,0),(0x00000000u, 0x00000000u)},
+            {(10,1),(0x00000001u, 0x3F800000u)},
+            {(10,2),(0x00000001u, 0x3F800000u)},
+            {(11,0),(0x00000000u, 0x00000000u)},
+            {(11,1),(0x00000000u, 0x3F800000u)},
+            {(11,2),(0x00000000u, 0x3F800000u)},
+        };
+
+        // Expected block sizes that
+        // trigger the mouth flag
+        // pattern (matches BOY's
+        // 12-block/92-vert mouth
+        // shape)
+        static readonly int[]
+            MOUTH_BLOCK_SIZES =
+            new int[] {
+                12, 12, 11, 9, 9,
+                7, 7, 7, 7, 5, 3, 3
+            };
+
         static bool IsVerbose =>
             Environment.GetEnvironmentVariable(
                 "HMSTH_VERBOSE") == "1";
@@ -558,6 +690,242 @@ namespace HMSTHModdingTool.RDTB
                         + " samples");
             }
 
+            var dupForcedBatches =
+                new HashSet<int>();
+
+            // ═══════════════════════
+            // DUP-FORCE (safe ver)
+            // For duplicate groups
+            // (mouth, eyes, blink),
+            // when an OBJ has a
+            // DIFFERENT vertex count
+            // from original, force
+            // all group members to
+            // use the first member's
+            // normals. This prevents
+            // the mouth-jump bug on
+            // modded-vertex batches.
+            // ONLY triggers when
+            // vertex count changed.
+            // Unchanged batches
+            // (moved/resized) are
+            // left alone.
+            // ═══════════════════════
+            {
+                var offsF =
+                    ReadChunkOffsets(
+                        rdtbData);
+                if (offsF.Count >= 9)
+                {
+                    int c8f = offsF[8];
+                    uint firstF =
+                        BitConverter
+                            .ToUInt32(
+                                rdtbData,
+                                c8f);
+                    int matCntF =
+                        (int)(
+                            firstF / 4);
+
+                    // Group by bone+tex
+                    var groups =
+                        new Dictionary<
+                            string,
+                            List<int>>();
+                    for (int bix = 0;
+                         bix <
+                         Math.Min(
+                             matCntF,
+                             nPtrs);
+                         bix++)
+                    {
+                        uint ptr =
+                            BitConverter
+                                .ToUInt32(
+                                    rdtbData,
+                                    c8f +
+                                    bix * 4);
+                        int rec =
+                            c8f +
+                            (int)ptr;
+                        if (rec + 8 >
+                            rdtbData
+                                .Length)
+                            continue;
+                        int bone =
+                            BitConverter
+                                .ToUInt16(
+                                    rdtbData,
+                                    rec);
+                        int tex =
+                            BitConverter
+                                .ToUInt16(
+                                    rdtbData,
+                                    rec + 6);
+                        string k =
+                            bone + "|"
+                            + tex;
+
+                        if (!groups
+                                .ContainsKey(
+                                    k))
+                            groups[k] =
+                                new
+                                List<int>();
+                        groups[k]
+                            .Add(bix);
+                    }
+
+                    foreach (var kv
+                        in groups)
+                    {
+                        if (kv.Value
+                                .Count
+                            < 2)
+                            continue;
+
+                        // Check if ANY
+                        // member has a
+                        // DIFFERENT
+                        // vertex count
+                        // in its OBJ
+                        // vs original
+                        bool anyVcChanged
+                            = false;
+                        foreach (int
+                            mem in
+                            kv.Value)
+                        {
+                            if (!batchObjs
+                                    .ContainsKey(
+                                        mem))
+                                continue;
+                            int origVc =
+                                origNormals
+                                    .ContainsKey(
+                                        mem)
+                                ? origNormals[
+                                    mem].Count
+                                : 0;
+                            int objVc =
+                                CountObjVerts(
+                                    batchObjs[
+                                        mem]);
+                            if (objVc !=
+                                origVc &&
+                                origVc > 0)
+                            {
+                                anyVcChanged
+                                    = true;
+                                break;
+                            }
+                        }
+
+                        if (!anyVcChanged)
+                            continue;
+
+                        // Expand group to
+                        // include ALL batches
+                        // with same tex, even
+                        // if they have
+                        // different bones
+                        // (like mouth batches
+                        // 26 and 29 which have
+                        // bone 334/432 instead
+                        // of 300)
+                        var expandedGroup =
+                            new List<int>(
+                                kv.Value);
+                        foreach (var kv2
+                            in groups)
+                        {
+                            if (kv2.Key ==
+                                kv.Key)
+                                continue;
+                            // Check if same
+                            // tex
+                            string[] parts1 =
+                                kv.Key.Split(
+                                    '|');
+                            string[] parts2 =
+                                kv2.Key.Split(
+                                    '|');
+                            if (parts1.Length
+                                < 2 ||
+                                parts2.Length
+                                < 2)
+                                continue;
+                            if (parts1[1] ==
+                                parts2[1])
+                            {
+                                foreach (int
+                                    extra in
+                                    kv2.Value)
+                                {
+                                    if (!expandedGroup
+                                            .Contains(
+                                                extra))
+                                        expandedGroup
+                                            .Add(
+                                                extra);
+                                }
+                            }
+                        }
+
+                        // Force all
+                        // members to
+                        // use first
+                        // member's
+                        // normals
+                        int leader =
+                            expandedGroup[0];
+
+                        if (!origNormals
+                                .ContainsKey(
+                                    leader))
+                            continue;
+                        var leaderData
+                            = origNormals[
+                                leader];
+
+                        Console
+                            .ForegroundColor
+                            = ConsoleColor
+                                .Cyan;
+
+                        Console.WriteLine(
+                            "    [DUP-FORCE]"
+                            + " group ["
+                            + string.Join(
+                                ",",
+                                expandedGroup)
+
+                            + "]: leader"
+                            + " = batch "
+                            + leader
+                            + " (vc changed)");
+                        Console
+                            .ResetColor();
+
+                        foreach (int
+                            mem in
+                            expandedGroup)
+                        {
+                            if (mem ==
+                                leader)
+                                continue;
+                            origNormals[
+                                mem] =
+                                leaderData;
+                            dupForcedBatches
+                                .Add(mem);
+                        }
+                        dupForcedBatches
+                            .Add(leader);
+                    }
+                }
+            }
+
             // ADDITIVE: If normals-copy map is
             // provided, ensure we have original
             // normals loaded for every SOURCE
@@ -971,9 +1339,75 @@ namespace HMSTHModdingTool.RDTB
                         nPtrs);
 
                 if (tris.Count ==
-                    origTriCount)
+                    origTriCount &&
+                    !dupForcedBatches
+                        .Contains(bi))
                 {
-                    keptCount++;
+                    // Check if any vertex
+                    // actually moved vs
+                    // original. If yes,
+                    // recompile instead
+                    // of keeping original
+                    // bytes.
+                    bool anyMoved = false;
+                    if (origNormals
+                            .ContainsKey(bi))
+                    {
+                        var samples =
+                            origNormals[bi];
+                        const float EPS =
+                            0.01f;
+                        for (int vi2 = 0;
+                             vi2 <
+                             Math.Min(
+                                 verts.Count,
+                                 samples
+                                     .Count);
+                             vi2++)
+                        {
+                            float dx =
+                                verts[vi2][0]
+                                - samples[vi2]
+                                    .pos[0];
+                            float dy =
+                                verts[vi2][1]
+                                - samples[vi2]
+                                    .pos[1];
+                            float dz =
+                                verts[vi2][2]
+                                - samples[vi2]
+                                    .pos[2];
+                            if (Math.Abs(dx)
+                                    > EPS ||
+                                Math.Abs(dy)
+                                    > EPS ||
+                                Math.Abs(dz)
+                                    > EPS)
+                            {
+                                anyMoved =
+                                    true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (anyMoved)
+                    {
+                        byte[] vifData =
+                            CompilePureTri(
+                                verts,
+                                normals,
+                                uvs, tris,
+                                vertFlags,
+                                false);
+                        newBatchData[bi] =
+                            vifData;
+                        newCount++;
+                    }
+                    else
+                    {
+                        keptCount++;
+                    }
                 }
                 else
                 {
@@ -982,7 +1416,9 @@ namespace HMSTHModdingTool.RDTB
                             verts,
                             normals,
                             uvs, tris,
-                            vertFlags);
+                            vertFlags,
+                            dupForcedBatches
+                                .Contains(bi));
                     newBatchData[bi] =
                         vifData;
                     newCount++;
@@ -1146,8 +1582,49 @@ namespace HMSTHModdingTool.RDTB
             Console.ResetColor();
         }
 
+        // ═════════════════════════════
+        // COUNT OBJ VERTS
+        // Quick count of vertex lines
+        // in an OBJ file.
+        // ═════════════════════════════
+        static int CountObjVerts(
+            string path)
+        {
+            int count = 0;
+            foreach (string line in
+                File.ReadAllLines(path))
+            {
+                string t =
+                    line.Trim();
+                if (t.Length >= 2 &&
+                    t[0] == 'v' &&
+                    t[1] == ' ')
+                    count++;
+            }
+            return count;
+        }
 
-
+        // ═════════════════════════════
+        // COUNT OBJ TRIS
+        // Quick count of face lines
+        // in an OBJ file.
+        // ═════════════════════════════
+        static int CountObjTris(
+            string path)
+        {
+            int count = 0;
+            foreach (string line in
+                File.ReadAllLines(path))
+            {
+                string t =
+                    line.Trim();
+                if (t.Length >= 2 &&
+                    t[0] == 'f' &&
+                    t[1] == ' ')
+                    count++;
+            }
+            return count;
+        }
 
         // ═════════════════════════════
         // COUNT ORIG BATCH TRIS (FIXED)
@@ -1522,12 +1999,28 @@ namespace HMSTHModdingTool.RDTB
             List<float[]> normals,
             List<float[]> uvs,
             List<int[]> tris,
-            List<uint> vertFlags)
+            List<uint> vertFlags,
+            bool skipMouthFlags
+                = false)
         {
             // Build vertex strips from
             // the triangle list
             List<List<int>> strips =
                 BuildStrips(tris);
+
+            // ═════════════════════
+            // MOUTH-PATTERN DETECT
+            // If block-size pattern
+            // matches the mouth's
+            // known shape, we apply
+            // the hardcoded flag
+            // lookup below. This
+            // preserves the vertex
+            // and normal flag bits
+            // that the VU1 microcode
+            // reads during animation.
+            // ═════════════════════
+            bool useMouthFlags = false;
 
             // Split strips into blocks
             // not larger than MAX_VC
@@ -1563,6 +2056,30 @@ namespace HMSTHModdingTool.RDTB
 
             if (blocks.Count == 0)
                 return new byte[0];
+
+            // Check if block sizes match
+            // the known mouth pattern
+            if (blocks.Count ==
+                MOUTH_BLOCK_SIZES.Length)
+            {
+                bool match = true;
+                for (int k = 0;
+                     k < blocks.Count;
+                     k++)
+                {
+                    if (blocks[k].Count !=
+                        MOUTH_BLOCK_SIZES[k])
+                    {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match &&
+                    !skipMouthFlags)
+                {
+                    useMouthFlags = true;
+                }
+            }
 
             // Emit VIF blocks
             using (var ms =
@@ -1609,11 +2126,27 @@ namespace HMSTHModdingTool.RDTB
                             ? verts[vi]
                             : new float[]
                               { 0, 0, 0 };
-                        uint vflag =
-                            (vi < vertFlags
-                                .Count)
-                            ? vertFlags[vi]
-                            : F_ZERO;
+
+                        uint vflag;
+                        if (useMouthFlags &&
+                            MOUTH_FLAGS
+                                .TryGetValue(
+                                    (bi, j),
+                                    out var mf))
+                        {
+                            vflag = mf.vf;
+                        }
+                        else if (vi <
+                            vertFlags.Count)
+                        {
+                            vflag =
+                                vertFlags[vi];
+                        }
+                        else
+                        {
+                            vflag = F_ZERO;
+                        }
+
                         ms.Write(
                             BitConverter
                                 .GetBytes(
@@ -1648,10 +2181,23 @@ namespace HMSTHModdingTool.RDTB
                             ? normals[vi]
                             : new float[]
                               { 0, 1, 0 };
-                        uint nflag =
-                            (j == 0)
-                            ? F_ZERO
-                            : F_ONE;
+
+                        uint nflag;
+                        if (useMouthFlags &&
+                            MOUTH_FLAGS
+                                .TryGetValue(
+                                    (bi, j),
+                                    out var mfN))
+                        {
+                            nflag = mfN.nf;
+                        }
+                        else
+                        {
+                            nflag = (j == 0)
+                                ? F_ZERO
+                                : F_ONE;
+                        }
+
                         ms.Write(
                             BitConverter
                                 .GetBytes(
@@ -2525,6 +3071,7 @@ namespace HMSTHModdingTool.RDTB
                 chunks[ci] =
                     lookupChunk;
             }
+
 
             // Compute new positions for
             // each unique chunk in file
