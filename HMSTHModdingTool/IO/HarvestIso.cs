@@ -432,6 +432,24 @@ namespace HMSTHModdingTool.IO
             {
                 if (kvp.Value.Size == 0)
                     continue;
+
+                // ─── Skip DVD dummy files ───
+                // Handles Z1.Z, Z2.Z, Z1., Z2.
+                // (with or without extension)
+                string upperName =
+                    kvp.Key.ToUpper();
+                string fileName =
+                    Path.GetFileName(upperName);
+                if (fileName == "Z1.Z" ||
+                    fileName == "Z2.Z" ||
+                    fileName == "Z1." ||
+                    fileName == "Z2." ||
+                    fileName == "Z1" ||
+                    fileName == "Z2" ||
+                    fileName.StartsWith("Z1.") ||
+                    fileName.StartsWith("Z2."))
+                    continue;
+
                 gameFiles.Add(kvp);
             }
 
