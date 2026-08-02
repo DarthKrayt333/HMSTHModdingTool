@@ -7,10 +7,8 @@ namespace HMSTHModdingTool.IO
     /// <summary>
     ///     Handles automated LBA table
     ///     patching in SLUS_202.51 /
-    ///     SLPS_201.04 inside a HMSTH ISO.
-    ///     No hardcoded file lists needed.
-    ///     Reads all files from ISO and
-    ///     sorts by LBA automatically.
+    ///     SLPS_201.04 / SLPM_601.47
+    ///     inside a HMSTH ISO.
     /// </summary>
     public class HarvestIso
     {
@@ -30,6 +28,14 @@ namespace HMSTHModdingTool.IO
             SLPS_LBA_TABLE_END =
                 0x162C30;
 
+        // ─── DEMO: SLPM_601.47 ────────
+        private const uint
+            SLPM_LBA_TABLE_START =
+                0x1633E0;
+        private const uint
+            SLPM_LBA_TABLE_END =
+                0x163CB0;
+
         private const int
             BYTES_PER_SECTOR = 2048;
 
@@ -48,6 +54,9 @@ namespace HMSTHModdingTool.IO
         private const string
             SLPS_FILENAME =
                 @"\SLPS_201.04";
+        private const string
+            SLPM_FILENAME =
+                @"\SLPM_601.47";
 
         // ═════════════════════════════
         // PUBLIC HELPERS
@@ -91,44 +100,104 @@ namespace HMSTHModdingTool.IO
         }
 
         public static string
-            GetElfFilename(bool isJap)
+            GetElfFilename(
+                GameVersion version)
         {
-            return isJap
-                ? SLPS_FILENAME
-                : SLUS_FILENAME;
+            switch (version)
+            {
+                case GameVersion.JAP:
+                    return SLPS_FILENAME;
+                case GameVersion.DEMO:
+                    return SLPM_FILENAME;
+                default:
+                    return SLUS_FILENAME;
+            }
         }
 
+        /// <summary>
+        ///     Legacy overload.
+        /// </summary>
+        public static string
+            GetElfFilename(bool isJap)
+        {
+            return GetElfFilename(
+                isJap
+                    ? GameVersion.JAP
+                    : GameVersion.USA);
+        }
+
+        public static uint
+            GetLbaTableStart(
+                GameVersion version)
+        {
+            switch (version)
+            {
+                case GameVersion.JAP:
+                    return
+                        SLPS_LBA_TABLE_START;
+                case GameVersion.DEMO:
+                    return
+                        SLPM_LBA_TABLE_START;
+                default:
+                    return
+                        SLUS_LBA_TABLE_START;
+            }
+        }
+
+        /// <summary>
+        ///     Legacy overload.
+        /// </summary>
         public static uint
             GetLbaTableStart(bool isJap)
         {
-            return isJap
-                ? SLPS_LBA_TABLE_START
-                : SLUS_LBA_TABLE_START;
+            return GetLbaTableStart(
+                isJap
+                    ? GameVersion.JAP
+                    : GameVersion.USA);
         }
 
         public static uint
+            GetLbaTableEnd(
+                GameVersion version)
+        {
+            switch (version)
+            {
+                case GameVersion.JAP:
+                    return
+                        SLPS_LBA_TABLE_END;
+                case GameVersion.DEMO:
+                    return
+                        SLPM_LBA_TABLE_END;
+                default:
+                    return
+                        SLUS_LBA_TABLE_END;
+            }
+        }
+
+        /// <summary>
+        ///     Legacy overload.
+        /// </summary>
+        public static uint
             GetLbaTableEnd(bool isJap)
         {
-            return isJap
-                ? SLPS_LBA_TABLE_END
-                : SLUS_LBA_TABLE_END;
+            return GetLbaTableEnd(
+                isJap
+                    ? GameVersion.JAP
+                    : GameVersion.USA);
         }
 
         // ═════════════════════════════
         // AUTO DETECT VERSION
+        // Now returns GameVersion enum
         // ═════════════════════════════
 
         /// <summary>
         ///     Scans the ISO filesystem
-        ///     to detect JAP or USA.
-        ///     Returns true if JAP
-        ///     (SLPS_201.04 found).
-        ///     Returns false if USA
-        ///     (SLUS_202.51 found).
-        ///     Throws warning if neither.
+        ///     to detect USA, JAP, or
+        ///     JAP DEMO version.
         /// </summary>
-        public static bool
-            AutoDetectVersion(
+        public static GameVersion
+            AutoDetectGameVersion(
                 string isoPath,
                 out string detectedElf)
         {
@@ -144,6 +213,9 @@ namespace HMSTHModdingTool.IO
             var files = ScanIso(
                 isoPath, raw, uoff);
 
+            bool hasDemo =
+                files.ContainsKey(
+                    @"\SLPM_601.47");
             bool hasJap =
                 files.ContainsKey(
                     @"\SLPS_201.04");
@@ -151,26 +223,35 @@ namespace HMSTHModdingTool.IO
                 files.ContainsKey(
                     @"\SLUS_202.51");
 
-            if (hasJap)
+            // Demo takes priority
+            // over JAP since DEMO
+            // is also Japanese
+            if (hasDemo)
+            {
+                detectedElf =
+                    @"\SLPM_601.47";
+                return GameVersion.DEMO;
+            }
+            else if (hasJap)
             {
                 detectedElf =
                     @"\SLPS_201.04";
-                return true;
+                return GameVersion.JAP;
             }
             else if (hasUsa)
             {
                 detectedElf =
                     @"\SLUS_202.51";
-                return false;
+                return GameVersion.USA;
             }
             else
             {
-                detectedElf = null;
                 throw new
                     InvalidDataException(
                     "Neither" +
-                    " SLUS_202.51 nor" +
-                    " SLPS_201.04 was" +
+                    " SLUS_202.51," +
+                    " SLPS_201.04, nor" +
+                    " SLPM_601.47 was" +
                     " found inside" +
                     " the ISO.\n" +
                     "  This does not" +
@@ -180,50 +261,58 @@ namespace HMSTHModdingTool.IO
             }
         }
 
+        /// <summary>
+        ///     Legacy overload that
+        ///     returns bool for JAP.
+        ///     Kept for backward compat.
+        /// </summary>
+        public static bool
+            AutoDetectVersion(
+                string isoPath,
+                out string detectedElf)
+        {
+            GameVersion v =
+                AutoDetectGameVersion(
+                    isoPath,
+                    out detectedElf);
+            return v == GameVersion.JAP
+                || v == GameVersion.DEMO;
+        }
+
         // ═════════════════════════════
         // FIX LBA (USA - no flag)
         // ═════════════════════════════
 
-        /// <summary>
-        ///     Auto-fixes the LBA table
-        ///     (USA version).
-        /// </summary>
         public static int FixLba(
             string isoPath)
         {
             return FixLba(
-                isoPath, false);
+                isoPath,
+                GameVersion.USA);
+        }
+
+        /// <summary>
+        ///     Legacy bool overload.
+        /// </summary>
+        public static int FixLba(
+            string isoPath,
+            bool isJap)
+        {
+            return FixLba(
+                isoPath,
+                isJap
+                    ? GameVersion.JAP
+                    : GameVersion.USA);
         }
 
         // ═════════════════════════════
         // FIX LBA - MAIN METHOD
-        // No hardcoded file list.
-        // Reads ISO filesystem and
-        // sorts files by LBA.
-        // Only needs ELF filename.
+        // Now uses GameVersion enum
         // ═════════════════════════════
 
-        /// <summary>
-        ///     Auto-fixes the LBA table
-        ///     inside the ELF which is
-        ///     inside the ISO.
-        ///     No hardcoded file list.
-        ///     Reads all files from ISO
-        ///     and sorts by LBA.
-        /// </summary>
-        /// <param name="isoPath">
-        ///     Path to the HMSTH ISO
-        /// </param>
-        /// <param name="isJap">
-        ///     True for JAP version
-        /// </param>
-        /// <returns>
-        ///     Number of LBA entries
-        ///     changed
-        /// </returns>
         public static int FixLba(
             string isoPath,
-            bool isJap)
+            GameVersion version)
         {
             if (!File.Exists(isoPath))
                 throw new
@@ -232,17 +321,36 @@ namespace HMSTHModdingTool.IO
                     isoPath);
 
             uint lbaTableStart =
-                GetLbaTableStart(isJap);
+                GetLbaTableStart(
+                    version);
             uint lbaTableEnd =
-                GetLbaTableEnd(isJap);
+                GetLbaTableEnd(
+                    version);
             int lbaTableSize =
                 (int)(lbaTableEnd -
                       lbaTableStart);
             string elfFilename =
-                GetElfFilename(isJap);
-            string versionName = isJap
-                ? "JAP (SLPS_201.04)"
-                : "USA (SLUS_202.51)";
+                GetElfFilename(
+                    version);
+            string versionName;
+            switch (version)
+            {
+                case GameVersion.JAP:
+                    versionName =
+                        "JAP" +
+                        " (SLPS_201.04)";
+                    break;
+                case GameVersion.DEMO:
+                    versionName =
+                        "JAP DEMO" +
+                        " (SLPM_601.47)";
+                    break;
+                default:
+                    versionName =
+                        "USA" +
+                        " (SLUS_202.51)";
+                    break;
+            }
 
             TextOut.Print(
                 $"Version:" +
@@ -290,7 +398,8 @@ namespace HMSTHModdingTool.IO
                     elfKey))
                 throw new Exception(
                     $"{elfFilename}" +
-                    " not found in ISO");
+                    " not found in" +
+                    " ISO");
 
             var elf = files[elfKey];
             TextOut.Print(
@@ -300,7 +409,6 @@ namespace HMSTHModdingTool.IO
                 " bytes");
 
             // ── 4. Sort all files
-            //       by LBA ascending
             var sortedFiles =
                 new List<
                     KeyValuePair<
@@ -313,8 +421,7 @@ namespace HMSTHModdingTool.IO
                     .CompareTo(
                         b.Value.Lba));
 
-            // ── 5. Filter out
-            //       zero-size entries
+            // ── 5. Filter zero-size
             var gameFiles =
                 new List<
                     KeyValuePair<
@@ -333,21 +440,12 @@ namespace HMSTHModdingTool.IO
                 " by LBA: " +
                 gameFiles.Count);
 
-            // ── 6. Check table
-            //       capacity
+            // ── 6. Check capacity
             int maxEntries =
                 lbaTableSize / 8;
-
-            // System area entry
-            // takes slot 0
             int availableSlots =
                 maxEntries - 1;
 
-            // ── CRITICAL CHECK ────────
-            // If game files exceed
-            // the table capacity
-            // something is very wrong
-            // and we must abort
             if (gameFiles.Count >
                 availableSlots)
             {
@@ -355,40 +453,29 @@ namespace HMSTHModdingTool.IO
                     InvalidDataException(
                     "CRITICAL: Found " +
                     gameFiles.Count +
-                    " files in ISO but" +
-                    " LBA table only" +
-                    " has space for " +
+                    " files but LBA" +
+                    " table only has" +
+                    " space for " +
                     availableSlots +
-                    " entries!\n" +
-                    "  The ISO may be" +
-                    " corrupted or" +
-                    " this is not a" +
-                    " valid HMSTH ISO." +
-                    " Aborting to" +
-                    " prevent damage.");
+                    " entries!");
             }
 
             TextOut.Print(
                 "LBA table capacity:" +
                 $" {maxEntries}" +
-                " entries (" +
-                availableSlots +
-                " for files + 1" +
-                " system area)");
+                " entries");
 
-            // ── 7. Get first file LBA
-            //       for system area
+            // ── 7. First file LBA
             uint firstLba = 0;
             if (gameFiles.Count > 0)
                 firstLba =
                     gameFiles[0]
                     .Value.Lba;
 
-            // ── 8. Build new LBA table
+            // ── 8. Build new table
             byte[] newTable =
                 new byte[lbaTableSize];
 
-            // Entry 0 = system area
             WriteUInt32Le(
                 newTable, 0, 0);
             WriteUInt32Le(
@@ -408,11 +495,6 @@ namespace HMSTHModdingTool.IO
                 if (pos + 8 >
                     lbaTableSize)
                 {
-                    // This should never
-                    // happen because we
-                    // checked capacity
-                    // above but just
-                    // in case log it
                     skippedFiles.Add(
                         kvp.Key +
                         " (table full)");
@@ -441,57 +523,20 @@ namespace HMSTHModdingTool.IO
                 written++;
             }
 
-            // ── CRITICAL: If anything
-            //    was skipped for any
-            //    reason abort now
             if (skippedFiles.Count > 0)
             {
-                Console.ForegroundColor =
-                    ConsoleColor.Red;
-                Console.WriteLine(
-                    "\n  CRITICAL" +
-                    " WARNING!");
-                Console.WriteLine(
-                    "  The following" +
-                    " files were" +
-                    " SKIPPED during" +
-                    " LBA table" +
-                    " building:");
-                foreach (var s
-                         in skippedFiles)
-                    Console.WriteLine(
-                        "    - " + s);
-                Console.WriteLine(
-                    "\n  This should" +
-                    " NEVER happen." +
-                    " The game will" +
-                    " NOT work" +
-                    " correctly!");
-                Console.WriteLine(
-                    "  ABORTING to" +
-                    " prevent ISO" +
-                    " damage.");
-                Console.ResetColor();
-                Console.WriteLine();
                 throw new
                     InvalidDataException(
                     "LBA table build" +
-                    " was incomplete." +
-                    " " +
-                    skippedFiles.Count +
-                    " file(s) were" +
-                    " skipped." +
+                    " incomplete." +
                     " Aborting.");
             }
 
             TextOut.Print(
                 $"Built LBA table:" +
-                $" {written} entries" +
-                $" (1 system area +" +
-                $" {written - 1}" +
-                $" files)");
+                $" {written} entries");
 
-            // ── 9. Read existing table
+            // ── 9. Read existing
             byte[] oldTable =
                 ReadBytesAtLba(
                     isoPath,
@@ -532,19 +577,14 @@ namespace HMSTHModdingTool.IO
             {
                 TextOut.PrintSuccess(
                     "LBA table already" +
-                    " correct - no" +
-                    " changes needed");
+                    " correct");
                 return 0;
             }
 
             TextOut.Print(
                 $"Writing" +
                 $" {diffCount}" +
-                $" changed LBA" +
-                $" entries to" +
-                $" {elfFilename}" +
-                $" at offset 0x" +
-                $"{lbaTableStart:X}");
+                $" changed entries");
 
             // ── 10. Write new table
             WriteBytesAtLba(
@@ -555,7 +595,7 @@ namespace HMSTHModdingTool.IO
                 lbaTableStart,
                 newTable);
 
-            // ── 11. Verify write
+            // ── 11. Verify
             byte[] verify =
                 ReadBytesAtLba(
                     isoPath,
@@ -572,14 +612,12 @@ namespace HMSTHModdingTool.IO
                     newTable[i])
                     throw new Exception(
                         "Verification" +
-                        " failed - write" +
-                        " did not" +
-                        " persist");
+                        " failed");
             }
 
             TextOut.PrintSuccess(
                 "LBA table patched" +
-                " successfully - " +
+                " - " +
                 $"{diffCount}" +
                 " entries updated");
             return diffCount;
@@ -587,6 +625,7 @@ namespace HMSTHModdingTool.IO
 
         // ═════════════════════════════
         // ISO 9660 HELPERS
+        // (unchanged - kept as-is)
         // ═════════════════════════════
 
         private static void
