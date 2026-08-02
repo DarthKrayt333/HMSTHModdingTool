@@ -58,6 +58,7 @@
     <Compile Include="BMP\PS2BMPConverter.cs" />
     <Compile Include="GDTB\GDTBArchive.cs" />
     <Compile Include="GDTB\GDTBTexture.cs" />
+    <Compile Include="IO\GameVersion.cs" />
     <Compile Include="IO\HarvestDataArchive.cs" />
     <Compile Include="IO\HarvestElf.cs" />
     <Compile Include="IO\HarvestIso.cs" />
@@ -78,6 +79,7 @@
     <Compile Include="IO\TextOut.cs" />
     <Compile Include="RDTB\RDTBBatchAdder.cs" />
     <Compile Include="RDTB\RDTBBatchFolder.cs" />
+    <Compile Include="RDTB\RDTBBatchPostFixer.cs" />
     <Compile Include="RDTB\RDTBBatchReplacer.cs" />
     <Compile Include="RDTB\RDTBBatchTools.cs" />
     <Compile Include="RDTB\RDTBConverter.cs" />
