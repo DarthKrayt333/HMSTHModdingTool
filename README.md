@@ -644,7 +644,7 @@ Skeleton export with mesh in progress.
     Creates 2 output folders:
 
       <base_name>_3d_batches_obj/       moddable OBJ files
-      <base_name>_all_obj/       not moddable OBJ files - view only (Extraction still corrupted)
+      <base_name>_all_obj/       not moddable OBJ files - view only (Extraction still a bit corrupted)
 
 
 What works:
