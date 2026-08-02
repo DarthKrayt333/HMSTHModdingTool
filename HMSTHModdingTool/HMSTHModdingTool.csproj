@@ -34,7 +34,7 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <PropertyGroup>
-    <ApplicationIcon>Icon_64x64.ico</ApplicationIcon>
+    <ApplicationIcon>Icons\Icon_64x64.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System" />
@@ -104,7 +104,7 @@
     <None Include="Resources\CharacterTable.txt" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="Icon_64x64.ico" />
+    <Content Include="Icons\Icon_64x64.ico" />
   </ItemGroup>
   <ItemGroup />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
