@@ -1199,6 +1199,65 @@ Output is saved automatically:
 - `texture.bmp` -> `texture_ps2.bmp`
 - `texture_ps2.bmp` -> `texture_win.bmp`
 
+
+
+### 🎨 BMP Texture Transparency — Important for Modders!
+
+The game uses a **non-standard transparency flag**
+in BMP palette entries. If you're editing textures
+and need transparent colors (like transparent
+backgrounds on items, leaves, fences, etc.), you
+**MUST use a hex editor** to set it correctly.
+
+**How it works:**
+
+Each palette entry in a BMP is 4 bytes: `RR GG BB AA`
+
+- `AA = 80` → **transparent** in game
+- `AA = 00` → **opaque** (solid) in game
+- Standard tools use `FF` for transparency,
+  but **this game uses `80` instead**
+
+**Palette sizes:**
+- **4-bit BMP** (16 colors): palette is
+  16 entries × 4 bytes = **64 bytes**
+- **8-bit BMP** (256 colors): palette is
+  256 entries × 4 bytes = **1024 bytes**
+
+**Examples:**
+
+| Color | Hex Code | Result in Game |
+|-------|----------|----------------|
+| Black transparent | `00 00 00 80` | Invisible |
+| Black opaque | `00 00 00 00` | Solid black |
+| White transparent | `FF FF FF 80` | Invisible |
+| White opaque | `FF FF FF 00` | Solid white |
+| Red transparent | `FF 00 00 80` | Invisible |
+| Red opaque | `FF 00 00 00` | Solid red |
+
+**⚠️ Water textures** may use different alpha
+values than `0x80` — always check each texture's
+palette individually before modifying.
+
+**How to edit:**
+1. Open your `.bmp` file in a hex editor
+   (HxD, 010 Editor, or similar)
+2. Find the palette section (starts right
+   after the BMP header)
+3. Look at every 4th byte in each palette
+   entry — that's the alpha byte
+4. Change it to `80` for transparent or
+   `00` for opaque
+5. Save and repack with `cgdtb`
+
+**Tip:** The first palette entry (color index 0)
+is usually the transparency color. If your
+texture has a solid background color that should
+be transparent in game, find that color in the
+palette and change its 4th byte to `80`.
+
+
+
 ### BMP Palette
 -xbmppal <image.bmp> <palette_name> Export raw palette from BMP
 
