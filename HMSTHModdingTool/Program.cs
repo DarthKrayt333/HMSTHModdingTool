@@ -21,7 +21,7 @@ namespace HMSTHModdingTool
             "HMSTHModdingTool original as" +
             " HDATextTool by gdkchan";
         const string TOOL_VERSION =
-            "v1.5.1-Beta";
+            "v1.5.2-Beta";
         const string TOOL_AUTHOR =
             "gdkchan + DarthKrayt333" +
             " & HMSTH Community";
@@ -1431,72 +1431,169 @@ namespace HMSTHModdingTool
                     // ════════════════════════
                     case "fixisoonly":
                         RequireArgs(args, 2,
-                            "-fixisoonly" +
-                            " <file.iso>");
+                            "-fixisoonly <file.iso>");
                         {
-                            string isoPath =
-                                args[1];
-                            if (!Path
-                                    .IsPathRooted(
-                                        isoPath))
-                                isoPath =
-                                    Path.Combine(
-                                        Directory
-                                            .GetCurrentDirectory(),
-                                        isoPath);
-                            // Preserve real filename case
+                            string isoPath = args[1];
+                            if (!Path.IsPathRooted(isoPath))
+                                isoPath = Path.Combine(
+                                    Directory
+                                        .GetCurrentDirectory(),
+                                    isoPath);
                             isoPath =
                                 HarvestIso.GetRealPath(
                                     isoPath);
 
+                            // ─── Check extension ────────
+                            string fixOnlyExt = Path
+                                .GetExtension(isoPath)
+                                .ToLower();
+                            bool isIsoFile =
+                                fixOnlyExt == ".iso" ||
+                                fixOnlyExt == ".img" ||
+                                fixOnlyExt == ".bin" ||
+                                fixOnlyExt == ".raw";
+
+                            // ─── Auto-detect version ────
+                            // needed for PS2 logo fix
                             Console.ForegroundColor =
                                 ConsoleColor.Cyan;
                             Console.WriteLine(
-                                "Repairing ISO" +
-                                " structure...");
+                                "  Auto-detecting " +
+                                "version...");
                             Console.ResetColor();
 
-                            IsoRepair.FixIso(
-                                isoPath);
+                            bool aborted;
+                            GameVersion gv =
+                                AutoDetectFromIso(
+                                    isoPath,
+                                    out aborted);
+                            if (aborted) break;
+
+                            Console.ForegroundColor =
+                                ConsoleColor.Cyan;
+                            Console.WriteLine(
+                                "═══════════════════" +
+                                "═══════════════════");
+                            if (isIsoFile)
+                            {
+                                Console.WriteLine(
+                                    " FIXISOONLY - ISO" +
+                                    " Repair + PS2 Logo");
+                            }
+                            else
+                            {
+                                Console.WriteLine(
+                                    " FIXISOONLY - PS2" +
+                                    " Logo Fix Only");
+                            }
+                            Console.WriteLine(
+                                "═══════════════════" +
+                                "═══════════════════");
+                            Console.ResetColor();
+                            Console.WriteLine();
+
+                            // ─── Step 1: Fix ISO ────────
+                            // Only for .iso / .img files
+                            if (isIsoFile)
+                            {
+                                Console.ForegroundColor =
+                                    ConsoleColor.Yellow;
+                                Console.WriteLine(
+                                    "[STEP 1/2] Repairing" +
+                                    " ISO structure...");
+                                Console.ResetColor();
+
+                                try
+                                {
+                                    IsoRepair.FixIso(isoPath);
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.ForegroundColor =
+                                        ConsoleColor.Yellow;
+                                    Console.WriteLine(
+                                        "  Step 1 warning: " +
+                                        ex.Message);
+                                    Console.ResetColor();
+                                }
+                            }
+                            else
+                            {
+                                Console.ForegroundColor =
+                                    ConsoleColor.DarkGray;
+                                Console.WriteLine(
+                                    "[STEP 1/2] Skipping" +
+                                    " ISO structure repair" +
+                                    " (not a .iso file).");
+                                Console.ResetColor();
+                            }
+
+                            // ─── Step 2: Fix PS2 logo ───
+                            // Always runs
+                            Console.WriteLine();
+                            Console.ForegroundColor =
+                                ConsoleColor.Yellow;
+                            Console.WriteLine(
+                                "[STEP 2/2] Fixing PS2" +
+                                " logo + Master Disc" +
+                                " markers...");
+                            Console.ResetColor();
+
+                            try
+                            {
+                                IsoLogoPatcher.PatchIso(
+                                    isoPath, null, gv);
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.ForegroundColor =
+                                    ConsoleColor.Yellow;
+                                Console.WriteLine(
+                                    "  Step 2 warning: " +
+                                    ex.Message);
+                                Console.ResetColor();
+                            }
+
+                            Console.WriteLine();
+                            Console.ForegroundColor =
+                                ConsoleColor.Green;
+                            Console.WriteLine(
+                                "═══════════════════" +
+                                "═══════════════════");
+                            Console.WriteLine(
+                                " ALL DONE! Image is" +
+                                " ready to play.");
+                            Console.WriteLine(
+                                "═══════════════════" +
+                                "═══════════════════");
+                            Console.ResetColor();
+                            Console.WriteLine();
                         }
                         break;
 
-                    // ════════════════════════
-                    // FIXISO - Does everything:
-                    // 1. Repairs ISO structure
-                    // 2. Patches PS2 logo
-                    // 3. Fixes LBA table
-                    // ════════════════════════
                     case "fixiso":
                         {
                             int flagIdx;
                             GameVersion gv =
                                 DetectVersionFlag(
-                                    args,
-                                    out flagIdx);
+                                    args, out flagIdx);
                             string[] cleanArgs =
                                 flagIdx >= 0
-                                ? RemoveJapFlag(
-                                    args, flagIdx)
+                                ? RemoveJapFlag(args, flagIdx)
                                 : args;
 
                             RequireArgs(cleanArgs, 2,
-                                "-fixiso" +
-                                " [-jap|-demo]" +
+                                "-fixiso [-jap|-demo]" +
                                 " <file.iso>");
 
-                            string isoPath =
-                                cleanArgs[1];
-                            if (!Path.IsPathRooted(
-                                    isoPath))
-                                isoPath =
-                                    Path.Combine(
-                                        Directory
-                                            .GetCurrentDirectory(),
-                                        isoPath);
-                            isoPath =
-                                HarvestIso.GetRealPath(
+                            string isoPath = cleanArgs[1];
+                            if (!Path.IsPathRooted(isoPath))
+                                isoPath = Path.Combine(
+                                    Directory
+                                        .GetCurrentDirectory(),
                                     isoPath);
+                            isoPath =
+                                HarvestIso.GetRealPath(isoPath);
 
                             // Auto-detect if no flag
                             if (flagIdx < 0)
@@ -1504,14 +1601,13 @@ namespace HMSTHModdingTool
                                 Console.ForegroundColor =
                                     ConsoleColor.Cyan;
                                 Console.WriteLine(
-                                    "  Auto-detecting" +
-                                    " ISO version...");
+                                    "  Auto-detecting " +
+                                    "ISO version...");
                                 Console.ResetColor();
 
                                 bool aborted;
                                 gv = AutoDetectFromIso(
-                                    isoPath,
-                                    out aborted);
+                                    isoPath, out aborted);
                                 if (aborted) return;
                             }
 
@@ -1519,16 +1615,13 @@ namespace HMSTHModdingTool
                             switch (gv)
                             {
                                 case GameVersion.DEMO:
-                                    elfName =
-                                        "SLPM_601.47";
+                                    elfName = "SLPM_601.47";
                                     break;
                                 case GameVersion.JAP:
-                                    elfName =
-                                        "SLPS_201.04";
+                                    elfName = "SLPS_201.04";
                                     break;
                                 default:
-                                    elfName =
-                                        "SLUS_202.51";
+                                    elfName = "SLUS_202.51";
                                     break;
                             }
 
@@ -1536,18 +1629,25 @@ namespace HMSTHModdingTool
                             switch (gv)
                             {
                                 case GameVersion.DEMO:
-                                    vLabel =
-                                        " [JAP DEMO]";
+                                    vLabel = " [JAP DEMO]";
                                     break;
                                 case GameVersion.JAP:
-                                    vLabel =
-                                        " [JAP]";
+                                    vLabel = " [JAP]";
                                     break;
                                 default:
-                                    vLabel =
-                                        " [USA]";
+                                    vLabel = " [USA]";
                                     break;
                             }
+
+                            // ─── Check extension ────────────
+                            string fixExt = Path
+                                .GetExtension(isoPath)
+                                .ToLower();
+                            bool isIsoFile =
+                                fixExt == ".iso" ||
+                                fixExt == ".img" ||
+                                fixExt == ".bin" ||
+                                fixExt == ".raw";
 
                             Console.ForegroundColor =
                                 ConsoleColor.Cyan;
@@ -1567,35 +1667,50 @@ namespace HMSTHModdingTool
                                 Console.ForegroundColor =
                                     ConsoleColor.Yellow;
                                 Console.WriteLine(
-                                    "  Version: " +
-                                    elfName);
+                                    "  Version: " + elfName);
                                 Console.ResetColor();
                             }
 
-                            // ─── STEP 1: Fix ISO
-                            Console.WriteLine();
-                            Console.ForegroundColor =
-                                ConsoleColor.Yellow;
-                            Console.WriteLine(
-                                "[STEP 1/3] Repairing" +
-                                " ISO structure...");
-                            Console.ResetColor();
-
-                            try
+                            // ─── STEP 1: Fix ISO ────────────
+                            // Only for .iso / .img files
+                            if (isIsoFile)
                             {
-                                IsoRepair.FixIso(isoPath);
-                            }
-                            catch (Exception ex)
-                            {
+                                Console.WriteLine();
                                 Console.ForegroundColor =
                                     ConsoleColor.Yellow;
                                 Console.WriteLine(
-                                    "  Step 1 warning: " +
-                                    ex.Message);
+                                    "[STEP 1/3] Repairing" +
+                                    " ISO structure...");
+                                Console.ResetColor();
+
+                                try
+                                {
+                                    IsoRepair.FixIso(isoPath);
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.ForegroundColor =
+                                        ConsoleColor.Yellow;
+                                    Console.WriteLine(
+                                        "  Step 1 warning: " +
+                                        ex.Message);
+                                    Console.ResetColor();
+                                }
+                            }
+                            else
+                            {
+                                Console.WriteLine();
+                                Console.ForegroundColor =
+                                    ConsoleColor.DarkGray;
+                                Console.WriteLine(
+                                    "[STEP 1/3] Skipping" +
+                                    " ISO structure repair" +
+                                    " (not a .iso file).");
                                 Console.ResetColor();
                             }
 
-                            // ─── STEP 2: Fix PS2 logo
+                            // ─── STEP 2: Fix PS2 logo ───────
+                            // Always runs
                             Console.WriteLine();
                             Console.ForegroundColor =
                                 ConsoleColor.Yellow;
@@ -1620,7 +1735,8 @@ namespace HMSTHModdingTool
                                 Console.ResetColor();
                             }
 
-                            // ─── STEP 3: Fix LBA table
+                            // ─── STEP 3: Fix LBA ────────────
+                            // Always runs
                             Console.WriteLine();
                             Console.ForegroundColor =
                                 ConsoleColor.Yellow;
@@ -1641,8 +1757,8 @@ namespace HMSTHModdingTool
                                     Console.ForegroundColor =
                                         ConsoleColor.Green;
                                     Console.WriteLine(
-                                        "  LBA table" +
-                                        " already correct.");
+                                        "  LBA table already" +
+                                        " correct.");
                                     Console.ResetColor();
                                 }
                                 else
@@ -1666,6 +1782,199 @@ namespace HMSTHModdingTool
                                 Console.ResetColor();
                             }
 
+                            // ─── Step 4: Convert to BIN ─────
+                            // If file has .bin extension but
+                            // is actually 2048-sector ISO
+                            // convert it to real BIN format
+                            string ext = Path
+                                .GetExtension(isoPath)
+                                .ToLower();
+
+                            if (ext == ".bin" || ext == ".raw")
+                            {
+                                // Check if file is currently
+                                // 2048-sector format
+                                long fSize = new FileInfo(
+                                    isoPath).Length;
+                                bool isCurrentlyIso =
+                                    (fSize % 2048 == 0) &&
+                                    (fSize % 2352 != 0);
+
+                                if (isCurrentlyIso)
+                                {
+                                    Console.WriteLine();
+                                    Console.ForegroundColor =
+                                        ConsoleColor.Yellow;
+                                    Console.WriteLine(
+                                        "[STEP 4/4] File has" +
+                                        " .bin extension but" +
+                                        " is 2048-sector ISO");
+                                    Console.WriteLine(
+                                        "  Converting to real" +
+                                        " BIN/CUE format...");
+                                    Console.ResetColor();
+
+                                    try
+                                    {
+                                        // Read the ISO data
+                                        byte[] isoData =
+                                            File.ReadAllBytes(
+                                                isoPath);
+
+                                        // Convert to BIN using
+                                        // HMSTHIsoConverter's
+                                        // streaming method
+                                        int numSec =
+                                            (int)(fSize / 2048);
+                                        long binSize =
+                                            (long)numSec * 2352;
+
+                                        Console.WriteLine(
+                                            $"  Sectors: " +
+                                            $"{numSec:N0}");
+                                        Console.WriteLine(
+                                            $"  BIN size: " +
+                                            $"{binSize:N0}" +
+                                            " bytes");
+
+                                        byte[] sync = new byte[]
+                                        {
+                                            0x00, 0xFF, 0xFF, 0xFF,
+                                            0xFF, 0xFF, 0xFF, 0xFF,
+                                            0xFF, 0xFF, 0xFF, 0x00
+                                        };
+
+                                        byte[] secBuf =
+                                            new byte[2352];
+
+                                        // Delete old file first
+                                        File.Delete(isoPath);
+
+                                        using (var fs =
+                                            new FileStream(
+                                                isoPath,
+                                                FileMode.Create,
+                                                FileAccess.Write,
+                                                FileShare.None,
+                                                65536))
+                                        {
+                                            for (int s = 0;
+                                                 s < numSec; s++)
+                                            {
+                                                Array.Clear(
+                                                    secBuf, 0,
+                                                    2352);
+
+                                                Array.Copy(sync, 0,
+                                                    secBuf, 0, 12);
+
+                                                int lba = s + 150;
+                                                int minute =
+                                                    lba / (60 * 75);
+                                                int second =
+                                                    (lba / 75) % 60;
+                                                int frame =
+                                                    lba % 75;
+
+                                                secBuf[12] = (byte)(
+                                                    ((minute / 10) << 4) |
+                                                    (minute % 10));
+                                                secBuf[13] = (byte)(
+                                                    ((second / 10) << 4) |
+                                                    (second % 10));
+                                                secBuf[14] = (byte)(
+                                                    ((frame / 10) << 4) |
+                                                    (frame % 10));
+                                                secBuf[15] = 0x02;
+
+                                                // Subheader
+                                                secBuf[16] = 0x00;
+                                                secBuf[17] = 0x00;
+                                                secBuf[18] = 0x08;
+                                                secBuf[19] = 0x00;
+                                                secBuf[20] = 0x00;
+                                                secBuf[21] = 0x00;
+                                                secBuf[22] = 0x08;
+                                                secBuf[23] = 0x00;
+
+                                                Array.Copy(
+                                                    isoData,
+                                                    s * 2048,
+                                                    secBuf, 24,
+                                                    2048);
+
+                                                fs.Write(
+                                                    secBuf, 0,
+                                                    2352);
+
+                                                if (s % 50000 == 0
+                                                    && s > 0)
+                                                {
+                                                    double pct =
+                                                        (double)s /
+                                                        numSec *
+                                                        100.0;
+                                                    Console.Write(
+                                                        $"\r  " +
+                                                        $"Writing" +
+                                                        $" BIN: " +
+                                                        $"{pct:F1}%");
+                                                }
+                                            }
+                                        }
+
+                                        Console.WriteLine();
+
+                                        // Also create .cue file
+                                        string cuePath =
+                                            Path.ChangeExtension(
+                                                isoPath, ".cue");
+                                        string cueContent =
+                                            "FILE \"" +
+                                            Path.GetFileName(
+                                                isoPath) +
+                                            "\" BINARY\r\n" +
+                                            "  TRACK 01" +
+                                            " MODE1/2352\r\n" +
+                                            "    INDEX 01" +
+                                            " 00:00:00\r\n";
+                                        File.WriteAllText(
+                                            cuePath,
+                                            cueContent);
+
+                                        Console.ForegroundColor =
+                                            ConsoleColor.Green;
+                                        Console.WriteLine(
+                                            "  BIN/CUE created!");
+                                        Console.WriteLine(
+                                            "  Also created: " +
+                                            Path.GetFileName(
+                                                cuePath));
+                                        Console.ResetColor();
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Console.ForegroundColor =
+                                            ConsoleColor.Yellow;
+                                        Console.WriteLine(
+                                            "  Step 4 warning: " +
+                                            ex.Message);
+                                        Console.ResetColor();
+                                    }
+                                }
+                                else
+                                {
+                                    Console.WriteLine();
+                                    Console.ForegroundColor =
+                                        ConsoleColor.DarkGray;
+                                    Console.WriteLine(
+                                        "[STEP 4/4] File is" +
+                                        " already in BIN format" +
+                                        " - no conversion needed.");
+                                    Console.ResetColor();
+                                }
+                            }
+
                             Console.WriteLine();
                             Console.ForegroundColor =
                                 ConsoleColor.Green;
@@ -1673,7 +1982,7 @@ namespace HMSTHModdingTool
                                 "═══════════════════" +
                                 "═══════════════════");
                             Console.WriteLine(
-                                " ALL DONE! ISO is" +
+                                " ALL DONE! Image is" +
                                 " ready to play.");
                             Console.WriteLine(
                                 "═══════════════════" +
@@ -1739,39 +2048,53 @@ namespace HMSTHModdingTool
                         break;
 
                     // ════════════════════════
-                    // ISO / BIN CONVERTER
+                    // CONVERT ISO ↔ BIN/CUE
                     // ════════════════════════
                     case "convertiso":
                         RequireArgs(args, 3,
-                            "-convertiso" +
-                            " <input>" +
-                            " <output>");
-                        {
-                            string inPath =
-                                args[1];
-                            string outPath =
-                                args[2];
-                            if (!Path
-                                    .IsPathRooted(
-                                        inPath))
-                                inPath =
-                                    Path.Combine(
-                                        Directory
-                                            .GetCurrentDirectory(),
-                                        inPath);
-                            if (!Path
-                                    .IsPathRooted(
-                                        outPath))
-                                outPath =
-                                    Path.Combine(
-                                        Directory
-                                            .GetCurrentDirectory(),
-                                        outPath);
+                            "-convertiso <input>" +
+                            " <output.iso|.bin>");
+                        HMSTHIsoConverter.ConvertIsoBin(
+                            args[1], args[2]);
+                        customFinish = true;
+                        break;
 
-                            IsoConverter.Convert(
-                                inPath,
-                                outPath);
-                        }
+                    // ════════════════════════
+                    // DVD/CD CONVERTER
+                    // ════════════════════════
+                    case "todvdiso":
+                    case "todvd":
+                    case "cd2dvd":
+                    case "cdtodvd":
+                        RequireArgs(args, 3,
+                            "-todvd <input> <output.iso>");
+                        HMSTHIsoConverter.ToDVD(
+                            args[1], args[2]);
+                        customFinish = true;
+                        break;
+
+                    case "tocdiso":
+                    case "tocd":
+                    case "dvd2cd":
+                    case "dvdtocd":
+                        RequireArgs(args, 3,
+                            "-tocd <input> <output.iso>");
+                        HMSTHIsoConverter.ToCD(
+                            args[1], args[2]);
+                        customFinish = true;
+                        break;
+
+                    // ════════════════════════
+                    // CONTROLS REMAPPER
+                    // ════════════════════════
+                    case "controls":
+                    case "remap":
+                    case "remapcontrols":
+                        RequireArgs(args, 2,
+                            "-controls <file.iso>" +
+                            " or <SLUS_202.51>");
+                        ControlsRemapper.Run(args[1]);
+                        customFinish = true;
                         break;
 
                     // ════════════════════════
@@ -1842,6 +2165,7 @@ namespace HMSTHModdingTool
                                 fakeYear);
                         }
                         break;
+
 
                     // ════════════════════════
                     // RDTB COMMANDS
@@ -3486,6 +3810,7 @@ namespace HMSTHModdingTool
                         customFinish = true;
                         break;
 
+
                     // ════════════════════════
                     // UNKNOWN COMMAND
                     // ════════════════════════
@@ -3676,6 +4001,12 @@ namespace HMSTHModdingTool
                     "fixelf",     "fixlba",
                     "fixiso",     "fixisoonly",
                     "convertiso", "fixps2logo",
+                    "todvdiso", "todvd",
+                    "cd2dvd",   "cdtodvd",
+                    "tocdiso",  "tocd",
+                    "dvd2cd",   "dvdtocd",
+                    "controls",
+                    "remap",      "remapcontrols",
                     "fakeyear",
                     "irdtb",      "irdtbnb",
                     "xrdtb",      "crdtb",
@@ -3981,6 +4312,130 @@ namespace HMSTHModdingTool
             Console.WriteLine(
                 "    Only fixes LBA" +
                 " table in SLUS_202.51.");
+            Console.ResetColor();
+            Console.WriteLine();
+
+            // ── ISO ↔ BIN Converter ────────────
+            Console.ForegroundColor =
+                ConsoleColor.Cyan;
+            Console.WriteLine(
+                "=== ISO/BIN Converter ===");
+            Console.ResetColor();
+            Console.WriteLine(
+                "  -convertiso <input>" +
+                " <output>");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    Converts between ISO" +
+                " and BIN+CUE formats.");
+            Console.WriteLine(
+                "    Output extension chooses" +
+                " format (.iso or .bin).");
+            Console.WriteLine(
+                "    Runs fixiso after (only" +
+                " for .iso output).");
+            Console.ResetColor();
+            Console.ForegroundColor =
+                ConsoleColor.DarkYellow;
+            Console.WriteLine(
+                "  Examples:");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    convertiso HMSTH.bin" +
+                " HMSTH.iso");
+            Console.WriteLine(
+                "    convertiso HMSTH.iso" +
+                " HMSTH.bin");
+            Console.ResetColor();
+            Console.WriteLine();
+
+            // ── DVD/CD Converter ──────────────────
+            Console.ForegroundColor =
+                ConsoleColor.Cyan;
+            Console.WriteLine(
+                "=== DVD/CD ISO Converter ===");
+            Console.ResetColor();
+            Console.WriteLine(
+                "  -todvdiso <file.iso>");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    Converts CD ISO to DVD ISO.");
+            Console.WriteLine(
+                "    Shifts LBA from 51 to 681.");
+            Console.WriteLine(
+                "    Adds Z1.Z (1GB) and" +
+                " Z2.Z (500MB) dummy files.");
+            Console.ResetColor();
+            Console.WriteLine();
+            Console.WriteLine(
+                "  -tocdiso <file.iso>");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    Converts DVD ISO back to CD.");
+            Console.WriteLine(
+                "    Shifts LBA from 681 to 51.");
+            Console.WriteLine(
+                "    Removes Z1.Z and Z2.Z.");
+            Console.ResetColor();
+            Console.ForegroundColor =
+                ConsoleColor.DarkYellow;
+            Console.WriteLine(
+                "  Aliases:");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    todvd  cd2dvd  cdtodvd");
+            Console.WriteLine(
+                "    tocd   dvd2cd  dvdtocd");
+            Console.ResetColor();
+            Console.ForegroundColor =
+                ConsoleColor.DarkYellow;
+            Console.WriteLine(
+                "  Examples:");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    todvdiso HMSTH.iso");
+            Console.WriteLine(
+                "    tocdiso HMSTH_DVD.iso");
+            Console.ResetColor();
+            Console.WriteLine();
+
+            // ── Controls Remapper ─────────────
+            Console.ForegroundColor =
+                ConsoleColor.Yellow;
+            Console.WriteLine(
+                "=== Controls Remapper ===");
+            Console.ResetColor();
+            Console.WriteLine(
+                "  -controls <file.iso>");
+            Console.WriteLine(
+                "  -controls <SLUS_202.51>");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    Toggles JAP<->USA controls.");
+            Console.WriteLine(
+                "    Auto-detects version.");
+            Console.WriteLine(
+                "    Run again to revert.");
+            Console.ResetColor();
+            Console.ForegroundColor =
+                ConsoleColor.DarkYellow;
+            Console.WriteLine(
+                "  Examples:");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    controls HMSTH.iso");
+            Console.WriteLine(
+                "    controls SLUS_202.51");
+            Console.WriteLine(
+                "    controls SLPS_201.04");
             Console.ResetColor();
             Console.WriteLine();
 
