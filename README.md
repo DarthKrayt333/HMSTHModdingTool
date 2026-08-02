@@ -1137,35 +1137,131 @@ ctxt clean <in.txt> <text.bin> <ptr.bin> Same without dashes
 
 ---
 
-### PS2 ISO/BIN Commands (NEW v1.4.7)
+### PS2 ISO/BIN Commands
+
+```
 -fixiso <file.iso>
-    ALL-IN-ONE auto-fix. Runs 3 fixes in order:
-    1. Repairs ISO structure
-    2. Patches PS2 logo + Master Disc markers
-    3. Fixes LBA table in SLUS_202.51
+```
 
+ALL-IN-ONE auto-fix. Runs 3 fixes in order:
+1. Repairs ISO structure
+2. Patches PS2 logo + Master Disc markers
+3. Fixes LBA table in ELF
+
+Now works on `.iso`, `.img`, `.bin`, and `.raw` files.
+If `.bin` file is actually a 2048-sector ISO inside,
+auto-converts to real BIN + CUE format after fixing.
+
+```
 -fixisoonly <file.iso>
-    Only repairs ISO structure
-    (no logo patch, no LBA fix)
+```
 
+Only repairs ISO structure + PS2 logo
+(no LBA fix)
+
+```
 -fixps2logo <file.iso>
-    Replicates Disc Patcher v3.0.
-    Fixes PS2 logo + Master Disc markers.
-    Works on both .iso (2048) and .bin (2352).
-    Preserves the original format.
+```
 
+Replicates Disc Patcher v3.0.
+Fixes PS2 logo + Master Disc markers.
+Works on both .iso (2048) and .bin (2352).
+Preserves the original format.
+
+```
 -fakeyear [year] <file.iso>
-    Changes year on all files with year > 2001
-    to your specified year. Leaves files with
-    year <= 2001 unchanged. Only year is changed
-    (month/day/time stay the same). Also patches
-    the ISO's own PVD dates + Windows file
-    timestamps.
-    Default year is 2001 if not specified.
+```
 
-    Examples:
-      fakeyear 2000 HMSTH.iso
-      fakeyear HMSTH.iso   (defaults to 2001)
+Changes year on all files with year > 2001
+to your specified year. Leaves files with
+year <= 2001 unchanged. Only year is changed
+(month/day/time stay the same). Also patches
+the ISO's own PVD dates + Windows file
+timestamps.
+Default year is 2001 if not specified.
+
+Examples:
+```
+fakeyear 2000 HMSTH.iso
+fakeyear HMSTH.iso   (defaults to 2001)
+```
+
+---
+
+### 🔄 Controls Remapper (NEW v1.5.2)
+
+Toggle PS2 controls between original and remapped
+formats infinitely. Works on ISO, BIN, IMG, RAW,
+and standalone ELF files.
+
+```
+controls HMSTH.iso
+controls HMSTH.bin
+controls SLUS_202.51
+controls SLPS_201.04
+controls SLPM_601.47
+```
+
+- **Auto-detects version** (USA / JAP / DEMO)
+- **Auto-detects patch state** — first run
+  applies remap, second run reverts, third
+  applies again, etc.
+- **Only patches 518 exact bytes** — nothing
+  else touched, so it's 100% safe
+- **Auto-fix runs after patch** (LBA + PS2
+  logo + ISO structure repair)
+
+---
+
+### 💿 CD ↔ DVD ISO Converter (NEW v1.5.2)
+
+Convert your HMSTH game between CD and DVD
+formats! Perfect for PS2 DVD builds.
+
+```
+todvd HMSTH.iso HMSTH_DVD.iso
+todvd HMSTH.bin HMSTH_DVD.iso
+tocd  HMSTH_DVD.iso HMSTH_CD.iso
+tocd  HMSTH_DVD.iso HMSTH_CD.bin
+```
+
+**CD → DVD does:**
+- Shifts all LBAs (CD:51 → DVD:681)
+- Rebuilds path tables (both LE + BE)
+- Rewrites directory tree with new LBAs
+- Adds UDF Bridge Format markers
+  (BEA01/NSR02/TEA01 at sectors 18-20)
+- Patches IOP file (CD→DVD mode)
+- Adds Z1.Z (1GB) and Z2.Z (500MB) dummies
+- Removes Master Disc markers
+
+**DVD → CD does everything in reverse:**
+- Removes UDF markers, adds Master Disc
+- Removes Z1.Z / Z2.Z dummies
+- Shifts LBAs back (DVD:681 → CD:51)
+- Restores CD IOP bytes
+
+**Important:** DVD output MUST be `.iso`
+format. `.bin` (2352) is CD-specific and
+PS2 DVD drives don't understand it. The tool
+will show a blue warning if you try `.bin`.
+
+---
+
+### 📀 ISO ↔ BIN/CUE Converter (NEW v1.5.2)
+
+```
+convertiso HMSTH.bin HMSTH.iso
+convertiso HMSTH.iso HMSTH.bin
+```
+
+- **Auto-detects direction** by output extension
+  (`.iso` → ISO 2048, `.bin` → BIN 2352 + CUE)
+- **Auto-creates `.cue` file** when outputting BIN
+- **Auto-fix runs on both** ISO and BIN outputs
+  (creates temp ISO, fixes, converts back to BIN)
+- **Rejects DVD input** with blue warning
+  (only supports CD format — use `tocd` first)
 
 ---
 
@@ -2078,6 +2174,18 @@ HMSTHModdingTool> boymodv3 BOY_00000.rdtb
 HMSTHModdingTool> boyback BOY_00000.rdtb
 
 HMSTHModdingTool> boyscale 00_skeleton.bin --b2y 1.20 --b3y 1.20
+
+HMSTHModdingTool> controls HMSTH.iso
+
+HMSTHModdingTool> controls SLPS_201.04
+
+HMSTHModdingTool> todvd HMSTH.iso HMSTH_DVD.iso
+
+HMSTHModdingTool> tocd HMSTH_DVD.iso HMSTH_CD.iso
+
+HMSTHModdingTool> convertiso HMSTH.iso HMSTH.bin
+
+HMSTHModdingTool> fixiso HMSTH.bin
 
 HMSTHModdingTool> help
 
