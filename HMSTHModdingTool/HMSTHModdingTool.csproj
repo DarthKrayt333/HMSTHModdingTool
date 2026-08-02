@@ -58,6 +58,8 @@
     <Compile Include="BMP\PS2BMPConverter.cs" />
     <Compile Include="GDTB\GDTBArchive.cs" />
     <Compile Include="GDTB\GDTBTexture.cs" />
+    <Compile Include="IO\HMSTHIsoConverter.cs" />
+    <Compile Include="IO\ControlsRemapper.cs" />
     <Compile Include="IO\GameVersion.cs" />
     <Compile Include="IO\HarvestDataArchive.cs" />
     <Compile Include="IO\HarvestElf.cs" />
