@@ -746,10 +746,15 @@ namespace HMSTHModdingTool.RDTB
                 " skipped");
             Console.ResetColor();
 
+            // Save the source RDTB as
+            // _source.rdtb (overwrite each
+            // time so extraction always
+            // gives a clean starting point).
             File.Copy(rdtbPath,
                 Path.Combine(outDir,
                     "_source.rdtb"),
                 true);
+
             if (File.Exists(gdtbPath))
                 File.Copy(gdtbPath,
                     Path.Combine(outDir,
