@@ -7,93 +7,27 @@ using System.Text;
 
 namespace HMSTHModdingTool.RDTB
 {
-    /// <summary>
-    /// Standalone in-place scale/move
-    /// applier for batches with UNCHANGED
-    /// vertex count.
-    ///
-    /// Runs AFTER cbatches has finished
-    /// building the RDTB. Scans the output
-    /// folder for batch OBJ files, compares
-    /// each vertex to the original RDTB
-    /// bytes, and writes ONLY the changed
-    /// XYZ floats at exact VIF byte offsets.
-    ///
-    /// Preserves everything else exactly:
-    ///   - VIF headers
-    ///   - GIF tags
-    ///   - EOF terminators
-    ///   - Vertex flags (bone weights)
-    ///   - Normals
-    ///   - UVs
-    ///   - Batch pointer tables
-    ///   - LOD chunk structure
-    ///
-    /// Works with BIG, SMALL, MIRRORED
-    /// RDTBs, and SRDB embedded RDTBs.
-    /// For BIG RDTBs, applies the same
-    /// edit to all 3 LOD mesh chunks
-    /// (11/12/13) automatically.
-    ///
-    /// PRE-FLIGHT DETECTION:
-    /// Does a quick scan first. If no
-    /// unchanged-vertex batch has any
-    /// scaled/moved vertices, exits
-    /// silently with zero side effects.
-    /// Full run only activates when
-    /// real edits are detected.
-    ///
-    /// Does NOT touch batches whose
-    /// vertex count differs from the
-    /// original — those go through the
-    /// standard cbatches recompile
-    /// pipeline.
-    /// </summary>
     public static class RDTBInPlaceScaler
     {
-        // Change detection threshold.
-        // Values differing from original
-        // by less than this are considered
-        // unchanged. Tuned tight so even
-        // small Blender nudges register
-        // as edits.
         private const float EPS = 0.001f;
-
         private const byte VIF_B0 = 0x00;
         private const byte VIF_B1 = 0x80;
         private const byte VIF_B3 = 0x6C;
 
-        // ═════════════════════════════════
-        // APPLY
-        // Called by cbatches after the
-        // main rebuild completes. Uses
-        // pre-flight check to exit
-        // silently when nothing to do.
-        // ═════════════════════════════════
         public static void Apply(
             string folderPath,
             string outRdtbPath)
         {
             if (!File.Exists(outRdtbPath))
                 return;
-            if (!Directory.Exists(
-                    folderPath))
+            if (!Directory.Exists(folderPath))
                 return;
 
             string srcRdtb = Path.Combine(
-                folderPath,
-                "_source.rdtb");
+                folderPath, "_source.rdtb");
             if (!File.Exists(srcRdtb))
                 return;
 
-            // ─── PRE-FLIGHT DETECTION ───
-            // Only proceed if at least one
-            // batch OBJ has (a) same vertex
-            // count as original AND (b) at
-            // least one vertex changed by
-            // >= EPS. Otherwise exit
-            // silently — no console output,
-            // no rewrites, no risk.
             if (!HasUnchangedVertBatchEdits(
                     folderPath, srcRdtb))
                 return;
@@ -101,40 +35,32 @@ namespace HMSTHModdingTool.RDTB
             byte[] originalRdtb =
                 File.ReadAllBytes(srcRdtb);
             byte[] outputRdtb =
-                File.ReadAllBytes(
-                    outRdtbPath);
+                File.ReadAllBytes(outRdtbPath);
 
             Console.WriteLine();
             Console.ForegroundColor =
                 ConsoleColor.Cyan;
             Console.WriteLine(
                 "[+] In-Place Scale/Move"
-                + " Applier");
+                + " Applier v4"
+                + " (centroid delta)");
             Console.ResetColor();
-            Console.WriteLine(
-                "    Detected"
-                + " scaled/moved batches"
-                + " with unchanged vertex"
-                + " count. Applying...");
 
-            // Find all batch OBJ files
             string[] modelDirs =
                 Directory.GetDirectories(
-                    folderPath,
-                    "model_*");
+                    folderPath, "model_*");
 
             var batchObjs =
-                new SortedDictionary<int,
-                    string>();
-            foreach (string md in
-                modelDirs)
+                new SortedDictionary<
+                    int, string>();
+            foreach (string md in modelDirs)
             {
                 foreach (string f in
                     Directory.GetFiles(
-                        md,
-                        "batch_*.obj"))
+                        md, "batch_*.obj"))
                 {
-                    string fn = Path
+                    string fn =
+                        Path
                         .GetFileNameWithoutExtension(
                             f);
                     if (fn.StartsWith(
@@ -145,8 +71,7 @@ namespace HMSTHModdingTool.RDTB
                         int bi;
                         if (int.TryParse(
                                 ns, out bi))
-                            batchObjs[bi]
-                                = f;
+                            batchObjs[bi] = f;
                     }
                 }
             }
@@ -154,9 +79,6 @@ namespace HMSTHModdingTool.RDTB
             if (batchObjs.Count == 0)
                 return;
 
-            // Detect mesh chunks in
-            // original RDTB (before
-            // cbatches touched it)
             List<int> origOffsets =
                 ReadChunkOffsets(
                     originalRdtb);
@@ -165,34 +87,20 @@ namespace HMSTHModdingTool.RDTB
                     originalRdtb,
                     origOffsets);
 
-            // Detect mesh chunks in
-            // output RDTB (positions
-            // may have shifted due
-            // to cbatches replacing
-            // other batches)
             List<int> outOffsets =
-                ReadChunkOffsets(
-                    outputRdtb);
+                ReadChunkOffsets(outputRdtb);
             List<int> outMeshChunks =
                 DetectMeshChunks(
-                    outputRdtb,
-                    outOffsets);
+                    outputRdtb, outOffsets);
 
             if (origMeshChunks.Count == 0
-                || outMeshChunks.Count
-                == 0)
+                || outMeshChunks.Count == 0)
                 return;
 
             int totalScaled = 0;
             int totalUnchanged = 0;
-            int totalSkippedDiffVc = 0;
+            int totalSkipped = 0;
 
-            // Process each mesh chunk.
-            // BIG: chunks 11/12/13.
-            // SMALL: single mesh chunk.
-            // MIRRORED: same as BIG
-            // before slot mirror is
-            // applied.
             int chunkCount = Math.Min(
                 origMeshChunks.Count,
                 outMeshChunks.Count);
@@ -210,8 +118,7 @@ namespace HMSTHModdingTool.RDTB
                 int origEnd =
                     (origCi + 1 <
                         origOffsets.Count)
-                    ? origOffsets[
-                        origCi + 1]
+                    ? origOffsets[origCi + 1]
                     : originalRdtb.Length;
 
                 int outStart =
@@ -219,85 +126,111 @@ namespace HMSTHModdingTool.RDTB
                 int outEnd =
                     (outCi + 1 <
                         outOffsets.Count)
-                    ? outOffsets[
-                        outCi + 1]
+                    ? outOffsets[outCi + 1]
                     : outputRdtb.Length;
 
-                // Parse batches from
-                // BOTH original and
-                // output. Match by
-                // batch index.
                 var origBatches =
                     ParseChunkBatches(
                         originalRdtb,
-                        origStart,
-                        origEnd);
+                        origStart, origEnd);
                 var outBatches =
                     ParseChunkBatches(
                         outputRdtb,
-                        outStart,
-                        outEnd);
+                        outStart, outEnd);
 
                 int cScaled = 0;
                 int cUnchanged = 0;
                 int cSkipped = 0;
 
-                foreach (var kv in
-                    origBatches)
+                foreach (var kv in origBatches)
                 {
                     int batchIdx = kv.Key;
-                    var origVertOffs =
-                        kv.Value;
+                    var origVertOffs = kv.Value;
 
                     if (!batchObjs
-                            .ContainsKey(
-                                batchIdx))
+                            .ContainsKey(batchIdx))
                         continue;
 
                     if (!outBatches
-                            .ContainsKey(
-                                batchIdx))
+                            .ContainsKey(batchIdx))
+                    {
+                        if (batchIdx == 5)
+                            Console.WriteLine(
+                                "    [DBG] batch 5"
+                                + " NOT in outBatches");
                         continue;
+                    }
 
                     var outVertOffs =
-                        outBatches[
-                            batchIdx];
+                        outBatches[batchIdx];
 
-                    // In-place overwrite
-                    // requires matching
-                    // vertex count in
-                    // BOTH original and
-                    // output. If output
-                    // count differs,
-                    // cbatches already
-                    // recompiled — don't
-                    // touch it.
                     if (origVertOffs.Count
-                        != outVertOffs
-                            .Count)
+                        != outVertOffs.Count)
                     {
+                        if (batchIdx == 5)
+                            Console.WriteLine(
+                                "    [DBG] batch 5"
+                                + " count mismatch: orig="
+                                + origVertOffs.Count
+                                + " out="
+                                + outVertOffs.Count);
                         cSkipped++;
                         continue;
                     }
 
                     var objVerts =
                         LoadObjVerts(
-                            batchObjs[
-                                batchIdx]);
+                            batchObjs[batchIdx]);
 
-                    // OBJ must match too
-                    if (objVerts.Count !=
-                        origVertOffs.Count)
+                    if (objVerts.Count == 0)
                     {
+                        if (batchIdx == 5)
+                            Console.WriteLine(
+                                "    [DBG] batch 5"
+                                + " obj empty");
                         cSkipped++;
                         continue;
                     }
 
-                    // Per-vertex compare
-                    // vs ORIGINAL bytes,
-                    // write to OUTPUT
-                    // where real change
-                    // exists.
+                    if (batchIdx == 5)
+                    {
+                        // Compute bboxes and show
+                        float gMinX = float.MaxValue;
+                        float gMaxX = float.MinValue;
+                        for (int i = 0;
+                             i < origVertOffs.Count; i++)
+                        {
+                            int row = origVertOffs[i];
+                            if (row + 16 >
+                                originalRdtb.Length) break;
+                            float x =
+                                BitConverter.ToSingle(
+                                    originalRdtb, row + 4);
+                            if (x < gMinX) gMinX = x;
+                            if (x > gMaxX) gMaxX = x;
+                        }
+                        float gCx = (gMinX + gMaxX) * 0.5f;
+
+                        float oMinX = float.MaxValue;
+                        float oMaxX = float.MinValue;
+                        foreach (var o in objVerts)
+                        {
+                            if (o[0] < oMinX) oMinX = o[0];
+                            if (o[0] > oMaxX) oMaxX = o[0];
+                        }
+                        float oCx = (oMinX + oMaxX) * 0.5f;
+
+                        Console.WriteLine(
+                            "    [DBG] batch 5:"
+                            + " gCx=" + gCx
+                            + " oCx=" + oCx
+                            + " moveX=" + (oCx - gCx)
+                            + " origVerts="
+                            + origVertOffs.Count
+                            + " objVerts="
+                            + objVerts.Count);
+                    }
+
                     int changed =
                         ApplyToVerts(
                             outputRdtb,
@@ -305,6 +238,11 @@ namespace HMSTHModdingTool.RDTB
                             outVertOffs,
                             origVertOffs,
                             objVerts);
+
+                    if (batchIdx == 5)
+                        Console.WriteLine(
+                            "    [DBG] batch 5"
+                            + " changed=" + changed);
 
                     if (changed > 0)
                         cScaled++;
@@ -318,19 +256,16 @@ namespace HMSTHModdingTool.RDTB
                     Console.WriteLine(
                         "    Chunk " +
                         outCi + ": " +
-                        "scaled=" +
-                        cScaled +
+                        "scaled=" + cScaled +
                         " unchanged=" +
                         cUnchanged +
-                        " skipped(diff-vc)="
-                        + cSkipped);
+                        " skipped=" +
+                        cSkipped);
                 }
 
                 totalScaled += cScaled;
-                totalUnchanged +=
-                    cUnchanged;
-                totalSkippedDiffVc +=
-                    cSkipped;
+                totalUnchanged += cUnchanged;
+                totalSkipped += cSkipped;
             }
 
             if (totalScaled > 0)
@@ -338,28 +273,28 @@ namespace HMSTHModdingTool.RDTB
                 Console.ForegroundColor =
                     ConsoleColor.Green;
                 Console.WriteLine(
-                    "    [OK] "
-                    + totalScaled +
-                    " batch(es)"
-                    + " scaled/moved"
-                    + " in-place");
+                    "    [OK] " +
+                    totalScaled +
+                    " batch(es) scaled/moved"
+                    + " (centroid delta)");
                 Console.ResetColor();
 
                 File.WriteAllBytes(
-                    outRdtbPath,
-                    outputRdtb);
+                    outRdtbPath, outputRdtb);
+            }
+            else
+            {
+                Console.ForegroundColor =
+                    ConsoleColor.DarkGray;
+                Console.WriteLine(
+                    "    (No real changes"
+                    + " detected)");
+                Console.ResetColor();
             }
         }
 
         // ═════════════════════════════════
-        // PRE-FLIGHT DETECTION
-        // Quick scan: does any batch OBJ
-        // have (a) same vertex count as
-        // the original AND (b) at least
-        // one vertex changed by >= EPS?
-        // If not, caller skips this whole
-        // module — no console output, no
-        // rewrites, no risk.
+        // PRE-FLIGHT
         // ═════════════════════════════════
         private static bool
             HasUnchangedVertBatchEdits(
@@ -368,33 +303,28 @@ namespace HMSTHModdingTool.RDTB
         {
             string[] modelDirs =
                 Directory.GetDirectories(
-                    folderPath,
-                    "model_*");
+                    folderPath, "model_*");
             if (modelDirs.Length == 0)
                 return false;
 
             var batchObjs =
                 new SortedDictionary<int,
                     string>();
-            foreach (string md in
-                modelDirs)
+            foreach (string md in modelDirs)
             {
                 foreach (string f in
-                    Directory.GetFiles(
-                        md,
+                    Directory.GetFiles(md,
                         "batch_*.obj"))
                 {
                     string fn = Path
                         .GetFileNameWithoutExtension(
                             f);
-                    if (!fn.StartsWith(
-                            "batch_"))
+                    if (!fn.StartsWith("batch_"))
                         continue;
-                    string ns =
-                        fn.Substring(6);
                     int bi;
                     if (int.TryParse(
-                            ns, out bi))
+                            fn.Substring(6),
+                            out bi))
                         batchObjs[bi] = f;
                 }
             }
@@ -402,116 +332,361 @@ namespace HMSTHModdingTool.RDTB
                 return false;
 
             byte[] originalRdtb =
-                File.ReadAllBytes(
-                    srcRdtbPath);
-
+                File.ReadAllBytes(srcRdtbPath);
             List<int> offs =
-                ReadChunkOffsets(
-                    originalRdtb);
+                ReadChunkOffsets(originalRdtb);
             List<int> meshChunks =
                 DetectMeshChunks(
                     originalRdtb, offs);
             if (meshChunks.Count == 0)
                 return false;
 
-            // Only check FIRST mesh
-            // chunk (LOD0 for BIG,
-            // single chunk for SMALL).
-            // If any batch there has
-            // an unchanged-vertex edit,
-            // full run is needed.
             int ci = meshChunks[0];
             int cStart = offs[ci];
-            int cEnd = (ci + 1 <
-                offs.Count)
+            int cEnd = (ci + 1 < offs.Count)
                 ? offs[ci + 1]
                 : originalRdtb.Length;
 
             var origBatches =
                 ParseChunkBatches(
-                    originalRdtb,
-                    cStart, cEnd);
+                    originalRdtb, cStart, cEnd);
 
-            foreach (var kv in
-                origBatches)
+            foreach (var kv in origBatches)
             {
                 int batchIdx = kv.Key;
-                var vertOffsets =
-                    kv.Value;
+                var vertOffsets = kv.Value;
 
-                if (!batchObjs
-                        .ContainsKey(
-                            batchIdx))
+                if (!batchObjs.ContainsKey(
+                        batchIdx))
                     continue;
 
                 var objVerts =
                     LoadObjVerts(
-                        batchObjs[
-                            batchIdx]);
-
-                // Skip if vertex count
-                // differs — cbatches
-                // handles those
-                if (objVerts.Count !=
-                    vertOffsets.Count)
+                        batchObjs[batchIdx]);
+                if (objVerts.Count == 0)
                     continue;
 
-                // Check if ANY vertex
-                // actually moved
-                for (int i = 0;
-                     i < vertOffsets
-                        .Count; i++)
+                int n = Math.Min(
+                    vertOffsets.Count,
+                    objVerts.Count);
+                if (n == 0) continue;
+
+                // Centroid delta move detection
+                // (coordinate-space agnostic)
+                double gCx2 = 0, gCy2 = 0,
+                    gCz2 = 0;
+                double oCx2 = 0, oCy2 = 0,
+                    oCz2 = 0;
+                for (int i = 0; i < n; i++)
                 {
-                    int row =
-                        vertOffsets[i];
-                    float[] v =
-                        objVerts[i];
-
+                    int row = vertOffsets[i];
                     if (row + 16 >
-                        originalRdtb
-                            .Length)
+                        originalRdtb.Length)
                         break;
+                    gCx2 += BitConverter.ToSingle(
+                        originalRdtb, row + 4);
+                    gCy2 += BitConverter.ToSingle(
+                        originalRdtb, row + 8);
+                    gCz2 += BitConverter.ToSingle(
+                        originalRdtb, row + 12);
+                    oCx2 += objVerts[i][0];
+                    oCy2 += objVerts[i][1];
+                    oCz2 += objVerts[i][2];
+                }
+                float dcx =
+                    (float)((oCx2 - gCx2) / n);
+                float dcy =
+                    (float)((oCy2 - gCy2) / n);
+                float dcz =
+                    (float)((oCz2 - gCz2) / n);
 
-                    float ox =
-                        BitConverter
-                            .ToSingle(
-                                originalRdtb,
-                                row + 4);
-                    float oy =
-                        BitConverter
-                            .ToSingle(
-                                originalRdtb,
-                                row + 8);
-                    float oz =
-                        BitConverter
-                            .ToSingle(
-                                originalRdtb,
-                                row + 12);
+                if (Math.Abs(dcx) > 0.005f
+                    || Math.Abs(dcy) > 0.005f
+                    || Math.Abs(dcz) > 0.005f)
+                    return true;
 
-                    if (Math.Abs(v[0] - ox)
-                            >= EPS ||
-                        Math.Abs(v[1] - oy)
-                            >= EPS ||
-                        Math.Abs(v[2] - oz)
-                            >= EPS)
-                    {
-                        // Found at least
-                        // one scaled/moved
-                        // vertex — full
-                        // run needed
+                // Also check for scale
+                // (bbox size ratio)
+                float gMinX = float.MaxValue;
+                float gMaxX = float.MinValue;
+                float oMinX = float.MaxValue;
+                float oMaxX = float.MinValue;
+                for (int i = 0; i < n; i++)
+                {
+                    int row = vertOffsets[i];
+                    if (row + 16 >
+                        originalRdtb.Length)
+                        break;
+                    float gx = BitConverter
+                        .ToSingle(
+                            originalRdtb,
+                            row + 4);
+                    if (gx < gMinX) gMinX = gx;
+                    if (gx > gMaxX) gMaxX = gx;
+                    if (objVerts[i][0] < oMinX)
+                        oMinX = objVerts[i][0];
+                    if (objVerts[i][0] > oMaxX)
+                        oMaxX = objVerts[i][0];
+                }
+                float gSx = gMaxX - gMinX;
+                float oSx = oMaxX - oMinX;
+                if (gSx > 0.001f)
+                {
+                    float ratio = oSx / gSx;
+                    if (Math.Abs(ratio - 1.0f)
+                        > 0.005f)
                         return true;
-                    }
                 }
             }
-
-            // Scanned everything, no
-            // edits detected
             return false;
         }
 
         // ═════════════════════════════════
-        // Read chunk offsets from RDTB
-        // slot table (skip zero + FFFFFFFF)
+        // APPLY TO VERTS v4
+        // Centroid-delta method.
+        // Completely ignores extractor
+        // coordinate bugs. Only measures
+        // scale and move you applied in
+        // Blender and applies that to the
+        // original correct game vertices.
+        // ═════════════════════════════════
+        private static int ApplyToVerts(
+            byte[] outputData,
+            byte[] originalData,
+            List<int> outVertOffs,
+            List<int> origVertOffs,
+            List<float[]> objVerts)
+        {
+            if (outVertOffs.Count == 0
+                || origVertOffs.Count == 0
+                || objVerts.Count == 0)
+                return 0;
+
+            int n = Math.Min(
+                Math.Min(
+                    outVertOffs.Count,
+                    origVertOffs.Count),
+                objVerts.Count);
+            if (n == 0) return 0;
+
+            // Read all original game verts
+            List<float[]> gameVerts =
+                new List<float[]>();
+            for (int i = 0; i < n; i++)
+            {
+                int row = origVertOffs[i];
+                if (row + 16 >
+                    originalData.Length) break;
+                gameVerts.Add(new float[]
+                {
+            BitConverter.ToSingle(
+                originalData, row + 4),
+            BitConverter.ToSingle(
+                originalData, row + 8),
+            BitConverter.ToSingle(
+                originalData, row + 12)
+                });
+            }
+
+            int cnt = Math.Min(
+                gameVerts.Count, n);
+            if (cnt == 0) return 0;
+
+            // ── COMPUTE CENTROIDS ──────────
+            // Centroid of original game verts
+            double gSumX = 0, gSumY = 0,
+                gSumZ = 0;
+            for (int i = 0; i < cnt; i++)
+            {
+                gSumX += gameVerts[i][0];
+                gSumY += gameVerts[i][1];
+                gSumZ += gameVerts[i][2];
+            }
+            float gCentX =
+                (float)(gSumX / cnt);
+            float gCentY =
+                (float)(gSumY / cnt);
+            float gCentZ =
+                (float)(gSumZ / cnt);
+
+            // Centroid of OBJ verts
+            double oSumX = 0, oSumY = 0,
+                oSumZ = 0;
+            for (int i = 0; i < cnt; i++)
+            {
+                oSumX += objVerts[i][0];
+                oSumY += objVerts[i][1];
+                oSumZ += objVerts[i][2];
+            }
+            float oCentX =
+                (float)(oSumX / cnt);
+            float oCentY =
+                (float)(oSumY / cnt);
+            float oCentZ =
+                (float)(oSumZ / cnt);
+
+            // ── COMPUTE BBOX FOR SCALE ─────
+            float gMinX = float.MaxValue;
+            float gMaxX = float.MinValue;
+            float gMinY = float.MaxValue;
+            float gMaxY = float.MinValue;
+            float gMinZ = float.MaxValue;
+            float gMaxZ = float.MinValue;
+            float oMinX = float.MaxValue;
+            float oMaxX = float.MinValue;
+            float oMinY = float.MaxValue;
+            float oMaxY = float.MinValue;
+            float oMinZ = float.MaxValue;
+            float oMaxZ = float.MinValue;
+
+            for (int i = 0; i < cnt; i++)
+            {
+                float[] g = gameVerts[i];
+                float[] o = objVerts[i];
+                if (g[0] < gMinX) gMinX = g[0];
+                if (g[0] > gMaxX) gMaxX = g[0];
+                if (g[1] < gMinY) gMinY = g[1];
+                if (g[1] > gMaxY) gMaxY = g[1];
+                if (g[2] < gMinZ) gMinZ = g[2];
+                if (g[2] > gMaxZ) gMaxZ = g[2];
+                if (o[0] < oMinX) oMinX = o[0];
+                if (o[0] > oMaxX) oMaxX = o[0];
+                if (o[1] < oMinY) oMinY = o[1];
+                if (o[1] > oMaxY) oMaxY = o[1];
+                if (o[2] < oMinZ) oMinZ = o[2];
+                if (o[2] > oMaxZ) oMaxZ = o[2];
+            }
+
+            float gSx = gMaxX - gMinX;
+            float gSy = gMaxY - gMinY;
+            float gSz = gMaxZ - gMinZ;
+            float oSx = oMaxX - oMinX;
+            float oSy = oMaxY - oMinY;
+            float oSz = oMaxZ - oMinZ;
+
+            float scaleX =
+                (gSx > 0.001f)
+                ? (oSx / gSx) : 1.0f;
+            float scaleY =
+                (gSy > 0.001f)
+                ? (oSy / gSy) : 1.0f;
+            float scaleZ =
+                (gSz > 0.001f)
+                ? (oSz / gSz) : 1.0f;
+
+            bool scaled =
+                Math.Abs(scaleX - 1.0f)
+                    > 0.005f
+                || Math.Abs(scaleY - 1.0f)
+                    > 0.005f
+                || Math.Abs(scaleZ - 1.0f)
+                    > 0.005f;
+
+            // ── CENTROID-TO-CENTROID MOVE ──
+            // This works in any coordinate
+            // space because it measures the
+            // RELATIVE shift of the cloud
+            // center — bone offset cancels
+            // out since it is the same
+            // constant added to all verts
+            // in both OBJ and game space.
+            float moveX = oCentX - gCentX;
+            float moveY = oCentY - gCentY;
+            float moveZ = oCentZ - gCentZ;
+
+            bool moved =
+                Math.Abs(moveX) > 0.005f
+                || Math.Abs(moveY) > 0.005f
+                || Math.Abs(moveZ) > 0.005f;
+
+            if (!scaled && !moved)
+            {
+                // No real edit detected.
+                // Restore original bytes.
+                for (int i = 0;
+                     i < cnt; i++)
+                {
+                    int outRow =
+                        outVertOffs[i];
+                    Array.Copy(
+                        originalData,
+                        origVertOffs[i] + 4,
+                        outputData,
+                        outRow + 4, 12);
+                }
+                return 0;
+            }
+
+            // ── APPLY TRANSFORM ───────────
+            // Scale around game bbox center,
+            // then translate by centroid delta
+            float gBbCx =
+                (gMinX + gMaxX) * 0.5f;
+            float gBbCy =
+                (gMinY + gMaxY) * 0.5f;
+            float gBbCz =
+                (gMinZ + gMaxZ) * 0.5f;
+
+            int changed = 0;
+            for (int i = 0; i < cnt; i++)
+            {
+                float[] g = gameVerts[i];
+                float newX, newY, newZ;
+
+                if (scaled)
+                {
+                    // Scale around bbox center
+                    // of game verts, then
+                    // add centroid move delta
+                    newX = (g[0] - gBbCx)
+                        * scaleX + gBbCx
+                        + moveX;
+                    newY = (g[1] - gBbCy)
+                        * scaleY + gBbCy
+                        + moveY;
+                    newZ = (g[2] - gBbCz)
+                        * scaleZ + gBbCz
+                        + moveZ;
+                }
+                else
+                {
+                    // Pure translation:
+                    // add centroid delta
+                    // to each original
+                    // game vert
+                    newX = g[0] + moveX;
+                    newY = g[1] + moveY;
+                    newZ = g[2] + moveZ;
+                }
+
+                int outRow = outVertOffs[i];
+                WriteFloat(outputData,
+                    outRow + 4, newX);
+                WriteFloat(outputData,
+                    outRow + 8, newY);
+                WriteFloat(outputData,
+                    outRow + 12, newZ);
+                changed++;
+            }
+            return changed;
+        }
+
+        // ═════════════════════════════════
+        // WRITE FLOAT
+        // ═════════════════════════════════
+        private static void WriteFloat(
+            byte[] data, int off, float v)
+        {
+            byte[] b =
+                BitConverter.GetBytes(v);
+            data[off] = b[0];
+            data[off + 1] = b[1];
+            data[off + 2] = b[2];
+            data[off + 3] = b[3];
+        }
+
+        // ═════════════════════════════════
+        // READ CHUNK OFFSETS
         // ═════════════════════════════════
         private static List<int>
             ReadChunkOffsets(byte[] data)
@@ -527,23 +702,19 @@ namespace HMSTHModdingTool.RDTB
                         data,
                         0x10 + i * 4);
                 if (v == 0) continue;
-                if (v == 0xFFFFFFFF)
-                    continue;
+                if (v == 0xFFFFFFFF) continue;
                 if (v < 0x48 ||
                     v > (uint)data.Length)
                     continue;
                 offs.Add((int)v);
             }
             offs.Sort();
-            offs = offs.Distinct()
-                .ToList();
+            offs = offs.Distinct().ToList();
             return offs;
         }
 
         // ═════════════════════════════════
-        // Detect mesh chunks (chunks with
-        // valid pointer table + VIF data).
-        // Excludes material chunk (slot 8).
+        // DETECT MESH CHUNKS
         // ═════════════════════════════════
         private static List<int>
             DetectMeshChunks(
@@ -551,78 +722,52 @@ namespace HMSTHModdingTool.RDTB
                 List<int> offs)
         {
             var result = new List<int>();
-            int matIdx = 8;
 
-            for (int ci = 0;
-                 ci < offs.Count; ci++)
-            {
-                if (ci == matIdx)
-                    continue;
+            // Read raw slot 11 to find the
+            // real mesh chunk offset.
+            // Slot 11 is always the mesh
+            // (LOD0) in BIG, SMALL and
+            // MIRROR RDTBs.
+            if (data.Length < 0x10 + 12 * 4)
+                return result;
+            uint meshRawOff =
+                BitConverter.ToUInt32(
+                    data, 0x10 + 11 * 4);
 
-                int cs = offs[ci];
-                int ce = (ci + 1 <
-                    offs.Count)
-                    ? offs[ci + 1]
-                    : data.Length;
-                int sz = ce - cs;
-                if (sz < 64) continue;
+            if (meshRawOff == 0 ||
+                meshRawOff == 0xFFFFFFFF)
+                return result;
 
-                uint first =
-                    BitConverter.ToUInt32(
-                        data, cs);
-                if (first == 0 ||
-                    first > (uint)sz ||
-                    first < 4)
-                    continue;
+            // Find its index in offs
+            int meshIdx =
+                offs.IndexOf((int)meshRawOff);
+            if (meshIdx >= 0)
+                result.Add(meshIdx);
 
-                bool hasVif = false;
-                for (int i = cs;
-                     i + 16 <= ce;
-                     i += 4)
-                {
-                    if (data[i] == VIF_B0
-                        && data[i + 1]
-                            == VIF_B1
-                        && data[i + 3]
-                            == VIF_B3)
-                    {
-                        hasVif = true;
-                        break;
-                    }
-                }
-
-                if (hasVif)
-                    result.Add(ci);
-            }
             return result;
         }
 
         // ═════════════════════════════════
-        // Parse a mesh chunk into batches.
-        // For each batch idx, returns the
-        // absolute byte offsets of every
-        // vertex row's flag byte (so +4/8/
-        // 12 = X/Y/Z floats).
+        // PARSE CHUNK BATCHES
         // ═════════════════════════════════
         private static
-            SortedDictionary<int,
-                List<int>>
+            SortedDictionary<int, List<int>>
             ParseChunkBatches(
                 byte[] data,
                 int chunkStart,
                 int chunkEnd)
         {
             var result =
-                new SortedDictionary<int,
-                    List<int>>();
+                new SortedDictionary<
+                    int, List<int>>();
 
             uint firstPtr =
                 BitConverter.ToUInt32(
                     data, chunkStart);
             if (firstPtr == 0 ||
                 firstPtr > (uint)
-                    (chunkEnd - chunkStart)
-                || firstPtr < 4)
+                    (chunkEnd - chunkStart) ||
+                firstPtr < 4)
                 return result;
 
             int nPtrs =
@@ -631,19 +776,17 @@ namespace HMSTHModdingTool.RDTB
             var batchStarts =
                 new List<(int idx,
                     uint ptr)>();
-            for (int i = 0; i < nPtrs;
-                 i++)
+            for (int i = 0; i < nPtrs; i++)
             {
-                int poff = chunkStart
-                    + i * 4;
-                if (poff + 4 >
-                    data.Length) break;
+                int poff =
+                    chunkStart + i * 4;
+                if (poff + 4 > data.Length)
+                    break;
                 uint ptr =
                     BitConverter.ToUInt32(
                         data, poff);
                 if (ptr == 0) continue;
-                batchStarts.Add(
-                    (i, ptr));
+                batchStarts.Add((i, ptr));
             }
 
             var sortedByOffset =
@@ -657,13 +800,13 @@ namespace HMSTHModdingTool.RDTB
             {
                 var (batchIdx, bPtr) =
                     sortedByOffset[si];
-                uint bEnd = (si + 1 <
-                    sortedByOffset.Count)
+                uint bEnd =
+                    (si + 1 <
+                        sortedByOffset.Count)
                     ? sortedByOffset[
                         si + 1].ptr
-                    : (uint)
-                        (chunkEnd -
-                         chunkStart);
+                    : (uint)(chunkEnd -
+                              chunkStart);
 
                 int absBatchStart =
                     chunkStart + (int)bPtr;
@@ -684,11 +827,7 @@ namespace HMSTHModdingTool.RDTB
         }
 
         // ═════════════════════════════════
-        // Walk a batch's VIF blocks and
-        // return absolute file byte offset
-        // of each vertex row (points to
-        // the flag u32, so +4/+8/+12 =
-        // X/Y/Z floats).
+        // PARSE BATCH VERTEX OFFSETS
         // ═════════════════════════════════
         private static List<int>
             ParseBatchVertOffsets(
@@ -701,11 +840,9 @@ namespace HMSTHModdingTool.RDTB
 
             while (pos + 16 <= end)
             {
-                if (data[pos] != VIF_B0
-                    || data[pos + 1]
-                        != VIF_B1
-                    || data[pos + 3]
-                        != VIF_B3)
+                if (data[pos] != VIF_B0 ||
+                    data[pos + 1] != VIF_B1 ||
+                    data[pos + 3] != VIF_B3)
                 {
                     pos += 4;
                     continue;
@@ -717,32 +854,28 @@ namespace HMSTHModdingTool.RDTB
                     continue;
                 }
                 int vStart = pos + 16;
-                int nStart = vStart
-                    + vc * 16;
-                int uStart = nStart
-                    + vc * 16;
+                int nStart =
+                    vStart + vc * 16;
+                int uStart =
+                    nStart + vc * 16;
                 if (uStart + vc * 16 > end)
                 {
                     pos += 4;
                     continue;
                 }
-                for (int i = 0; i < vc;
-                     i++)
-                {
+                for (int i = 0; i < vc; i++)
                     offsets.Add(
                         vStart + i * 16);
-                }
-                int blockSize = 16 +
-                    3 * vc * 16 + 16;
+
+                int blockSize =
+                    16 + 3 * vc * 16 + 16;
                 if (pos + blockSize + 16
                     <= end)
                 {
                     uint eof =
-                        BitConverter
-                            .ToUInt32(
-                                data,
-                                pos +
-                                blockSize);
+                        BitConverter.ToUInt32(
+                            data,
+                            pos + blockSize);
                     if (eof == 0x70000000)
                         blockSize += 16;
                 }
@@ -752,37 +885,30 @@ namespace HMSTHModdingTool.RDTB
         }
 
         // ═════════════════════════════════
-        // Load OBJ vertex positions in
-        // file order. Only reads 'v '
-        // lines — normals and UVs are
-        // ignored (this script never
-        // touches them).
+        // LOAD OBJ VERTS
         // ═════════════════════════════════
         private static List<float[]>
             LoadObjVerts(string path)
         {
-            var verts =
-                new List<float[]>();
-            var ci = System
-                .Globalization
-                .CultureInfo
-                .InvariantCulture;
+            var verts = new List<float[]>();
+            var ci =
+                System.Globalization
+                    .CultureInfo
+                    .InvariantCulture;
 
             using (var fh =
                 new StreamReader(
                     path, Encoding.UTF8))
             {
                 string line;
-                while ((line = fh.ReadLine())
-                       != null)
+                while ((line =
+                    fh.ReadLine()) != null)
                 {
                     string t = line.Trim();
-                    if (string.IsNullOrEmpty(
-                            t)) continue;
-                    if (t[0] == '#')
+                    if (string.IsNullOrEmpty(t))
                         continue;
-                    if (t.Length < 2)
-                        continue;
+                    if (t[0] == '#') continue;
+                    if (t.Length < 2) continue;
                     if (t[0] != 'v' ||
                         t[1] != ' ')
                         continue;
@@ -792,30 +918,26 @@ namespace HMSTHModdingTool.RDTB
                         { ' ', '\t' },
                         StringSplitOptions
                             .RemoveEmptyEntries);
-                    if (p.Length < 4)
+                    if (p.Length < 4) continue;
+                    if (p[0].ToLower() != "v")
                         continue;
-                    if (p[0].ToLower()
-                        != "v") continue;
 
                     float x, y, z;
                     if (float.TryParse(
                             p[1],
-                            System
-                                .Globalization
+                            System.Globalization
                                 .NumberStyles
                                 .Float,
                             ci, out x) &&
                         float.TryParse(
                             p[2],
-                            System
-                                .Globalization
+                            System.Globalization
                                 .NumberStyles
                                 .Float,
                             ci, out y) &&
                         float.TryParse(
                             p[3],
-                            System
-                                .Globalization
+                            System.Globalization
                                 .NumberStyles
                                 .Float,
                             ci, out z))
@@ -827,124 +949,6 @@ namespace HMSTHModdingTool.RDTB
                 }
             }
             return verts;
-        }
-
-        // ═════════════════════════════════
-        // Per-vertex compare + write.
-        // Compares each OBJ vertex against
-        // the ORIGINAL RDTB bytes. If any
-        // XYZ float differs by >= EPS,
-        // writes new floats at the OUTPUT
-        // byte offset. Preserves vertex
-        // flags, normals, UVs, and all
-        // VIF structure exactly.
-        // Returns count of vertices that
-        // actually changed.
-        // ═════════════════════════════════
-        private static int ApplyToVerts(
-            byte[] outputData,
-            byte[] originalData,
-            List<int> outVertOffs,
-            List<int> origVertOffs,
-            List<float[]> objVerts)
-        {
-            int changed = 0;
-            int n = Math.Min(
-                Math.Min(
-                    outVertOffs.Count,
-                    origVertOffs.Count),
-                objVerts.Count);
-
-            for (int i = 0; i < n; i++)
-            {
-                int outRow =
-                    outVertOffs[i];
-                int origRow =
-                    origVertOffs[i];
-                float[] v = objVerts[i];
-
-                int oxOff = origRow + 4;
-                int oyOff = origRow + 8;
-                int ozOff = origRow + 12;
-
-                int wxOff = outRow + 4;
-                int wyOff = outRow + 8;
-                int wzOff = outRow + 12;
-
-                if (ozOff + 4 >
-                    originalData.Length)
-                    break;
-                if (wzOff + 4 >
-                    outputData.Length)
-                    break;
-
-                float ox =
-                    BitConverter.ToSingle(
-                        originalData,
-                        oxOff);
-                float oy =
-                    BitConverter.ToSingle(
-                        originalData,
-                        oyOff);
-                float oz =
-                    BitConverter.ToSingle(
-                        originalData,
-                        ozOff);
-
-                bool xDiff =
-                    Math.Abs(v[0] - ox)
-                    >= EPS;
-                bool yDiff =
-                    Math.Abs(v[1] - oy)
-                    >= EPS;
-                bool zDiff =
-                    Math.Abs(v[2] - oz)
-                    >= EPS;
-
-                if (xDiff || yDiff ||
-                    zDiff)
-                {
-                    byte[] xb =
-                        BitConverter
-                            .GetBytes(v[0]);
-                    byte[] yb =
-                        BitConverter
-                            .GetBytes(v[1]);
-                    byte[] zb =
-                        BitConverter
-                            .GetBytes(v[2]);
-
-                    outputData[wxOff]
-                        = xb[0];
-                    outputData[wxOff + 1]
-                        = xb[1];
-                    outputData[wxOff + 2]
-                        = xb[2];
-                    outputData[wxOff + 3]
-                        = xb[3];
-
-                    outputData[wyOff]
-                        = yb[0];
-                    outputData[wyOff + 1]
-                        = yb[1];
-                    outputData[wyOff + 2]
-                        = yb[2];
-                    outputData[wyOff + 3]
-                        = yb[3];
-
-                    outputData[wzOff]
-                        = zb[0];
-                    outputData[wzOff + 1]
-                        = zb[1];
-                    outputData[wzOff + 2]
-                        = zb[2];
-                    outputData[wzOff + 3]
-                        = zb[3];
-
-                    changed++;
-                }
-            }
-            return changed;
         }
     }
 }
