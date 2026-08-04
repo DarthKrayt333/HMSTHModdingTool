@@ -3,7 +3,7 @@
 
 
 ### Originally HDATextTool by gdkchan
-### Updated & Expanded by DarthKrayt333 & HMSTH Community
+### Updated & Expanded by DarthKrayt333
 
 ---
 
