@@ -365,6 +365,17 @@ namespace HMSTHModdingTool.IO
                     Output.Append(slotText);
                     Output.Append(EndMarker);
                 }
+                else
+                {
+                    // Preserve empty/null slot so the round-trip
+                    // keeps the pointer table + slot count intact.
+                    // Matches original 4-byte null slot layout
+                    // (e.g. ITEMOTHE slot 0 = 00 02 00 00).
+                    // Users can freely delete/add [empty] lines to
+                    // add or remove null slots by choice.
+                    Output.Append("[empty]");
+                    Output.Append(EndMarker);
+                }
             }
 
             return Output.ToString();
@@ -1191,6 +1202,18 @@ namespace HMSTHModdingTool.IO
                     Pointer.Write((uint)Data.Position);
 
                     string Dialog = visibleDialogs[origIdx];
+
+                    // [empty] marker → bare null slot.
+                    // Writes mask (0x00) + terminator (0x02).
+                    // Next iteration's Align(Data, 4) at top of
+                    // the loop pads to 4 bytes just like the
+                    // original file.
+                    if (Dialog.Trim() == "[empty]")
+                    {
+                        Data.WriteByte(0x00);
+                        Data.WriteByte(0x02);
+                        continue;
+                    }
 
                     byte Header2 = 0;
                     int Mask2 = 0;
