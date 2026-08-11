@@ -53,6 +53,7 @@
     <Compile Include="BoyMods\UniversalBoneScaler.cs" />
     <Compile Include="IO\AudioBank.cs" />
     <Compile Include="IO\AudioConverter.cs" />
+    <Compile Include="IO\BadEndingRemover.cs" />
     <Compile Include="IO\Compression\HarvestCompression.cs" />
     <Compile Include="GDTB\PS2Converter.cs" />
     <Compile Include="BMP\PS2BMPConverter.cs" />
