@@ -1362,6 +1362,80 @@ palette and change its 4th byte to `80`.
 
 ---
 
+### 🎮 Bad Ending Remover (NEW v1.5.3)
+
+Permanently removes the 1-year cap, Year 2
+Winter 30 bad ending, and Winter → Spring
+transition crash from HMSTH. Standalone
+patch — no PNACH file needed.
+
+Works on ELF (SLUS_202.51), ISO (2048 byte
+sectors), and BIN (2352 byte sectors).
+
+fixbadend <file> Apply patches
+
+abadend <file> Analyze (preview)
+
+vbadend <file> Verify patches
+
+rbadend <file> Restore from .bak
+
+
+**Options:**
+- `--nobackup` — skip backup creation
+  (default: backup is always created)
+
+**Aliases:**
+- `fixbadend` / `removebadend` / `applybadend` / `fbe`
+- `abadend`  / `analyzebadend` / `abe`
+- `vbadend`  / `verifybadend`  / `vbe`
+- `rbadend`  / `restorebadend` / `rbe`
+
+**Examples:**
+
+fixbadend SLUS_202.51
+
+fixbadend HMSTH.iso
+
+fixbadend HMSTH.bin
+
+abadend HMSTH.iso (preview only)
+
+vbadend HMSTH.iso (verify)
+
+rbadend HMSTH.iso (restore original)
+
+fixbadend HMSTH.iso --nobackup (skip backup)
+
+
+**What Gets Patched:**
+
+0x0017800C = 0x1000002B Skip Y2W30 bad-end gate
+
+0x00178040 = 0x00000000 NOP bad-end cutscene call
+
+0x001A1CE4 = 0x30420003 Season wrap #1
+
+0x001A1E24 = 0x30420003 Season wrap #2
+
+
+
+**What It Fixes:**
+- ✅ **1-Year cap removed** — play unlimited
+  years (Year 2, 3, 10, 100+!)
+- ✅ **Year 2 Winter 30 bad ending** removed
+- ✅ **Winter → Spring transition crash** fixed
+- ✅ **All game systems continue working** —
+  farming, marriage, festivals, events
+
+**Also available as standalone tool:**
+[HMSTH-Bad-Ending-Remover](https://github.com/DarthKrayt333/HMSTH-Bad-Ending-Remover)
+— dedicated GUI version for users who don't
+need the full modding toolkit.
+
+
+---
+
 ### Audio / Music & SFX
 
 -cmusic <input.vag>
@@ -1484,8 +1558,6 @@ No audio corruption in-game
 Best practice: Always try to keep your modded audio
 similar in size to the original file you are replacing.
 The closer to the original size — the safer it is!
-
----
 
 ---
 
@@ -2148,6 +2220,48 @@ affected and extract at their original size.
 
 ---
 
+### Remove Bad Ending (NEW v1.5.3)
+
+Permanently remove the 1-year cap and bad
+ending from your HMSTH ISO:
+
+**Step 1:** Preview what will change:
+
+abadend HMSTH.iso
+
+
+**Step 2:** Apply the patches (creates .bak
+backup automatically):
+
+fixbadend HMSTH.iso
+
+
+**Step 3:** Verify patches are applied:
+
+vbadend HMSTH.iso
+
+
+**Step 4:** Load the patched ISO in PCSX2
+— bad ending is now permanently removed!
+
+If you want to undo the patches:
+
+rbadend HMSTH.iso
+
+
+The tool automatically:
+- Creates a `.bak` backup before patching
+- Detects the file format (ELF/ISO/BIN)
+- Uses sector-aware writes for BIN files
+- Verifies patches after applying
+
+**Works on:**
+- `SLUS_202.51` (standalone ELF)
+- HMSTH ISO files (2048 byte sectors)
+- HMSTH BIN files (2352 byte sectors)
+
+---
+
 ### HOW TO USE HMSTHModdingTool
 
 DON'T FORGET TO PLACE HMSTHModdingTool.exe
@@ -2204,6 +2318,14 @@ HMSTHModdingTool> fixps2logo HMSTH.bin
 HMSTHModdingTool> fakeyear 2001 HMSTH.iso
 
 HMSTHModdingTool> cmusic mysong.vag
+
+HMSTHModdingTool> fixbadend HMSTH.iso
+
+HMSTHModdingTool> abadend SLUS_202.51
+
+HMSTHModdingTool> vbadend HMSTH.bin
+
+HMSTHModdingTool> rbadend HMSTH.iso
 
 
 
