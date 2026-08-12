@@ -21,7 +21,7 @@ namespace HMSTHModdingTool
             "HMSTHModdingTool original as" +
             " HDATextTool by gdkchan";
         const string TOOL_VERSION =
-            "v1.5.2-Beta";
+            "v1.5.3-Beta";
         const string TOOL_AUTHOR =
             "gdkchan + DarthKrayt333" +
             " & HMSTH Community";
@@ -2085,6 +2085,136 @@ namespace HMSTHModdingTool
                         break;
 
                     // ════════════════════════
+                    // BAD ENDING REMOVER
+                    // Port of standalone Python
+                    // HMSTH-Bad-Ending-Remover
+                    // Removes: 1-year cap, bad
+                    // ending, Winter->Spring
+                    // transition crash.
+                    // ════════════════════════
+                    case "abadend":
+                    case "analyzebadend":
+                    case "abe":
+                        RequireArgs(args, 2,
+                            "-abadend <file>" +
+                            " (ELF/ISO/BIN)");
+                        {
+                            string beFile =
+                                args[1];
+                            if (!Path
+                                    .IsPathRooted(
+                                        beFile))
+                                beFile =
+                                    Path.Combine(
+                                        Directory
+                                            .GetCurrentDirectory(),
+                                        beFile);
+                            HMSTHModdingTool
+                                .BadEndingRemover
+                                .BadEndingRemover
+                                .Analyze(beFile);
+                        }
+                        customFinish = true;
+                        break;
+
+                    case "fixbadend":
+                    case "removebadend":
+                    case "applybadend":
+                    case "fbe":
+                        RequireArgs(args, 2,
+                            "-fixbadend <file>" +
+                            " (ELF/ISO/BIN)" +
+                            " [--nobackup]");
+                        {
+                            string beFile =
+                                args[1];
+                            bool doBackup =
+                                true;
+                            for (int i = 2;
+                                 i < args
+                                     .Length;
+                                 i++)
+                            {
+                                string a = args[i]
+                                    .ToLower()
+                                    .TrimStart('-');
+                                if (a ==
+                                    "nobackup" ||
+                                    a ==
+                                    "no-backup" ||
+                                    a == "nb")
+                                    doBackup =
+                                        false;
+                            }
+                            if (!Path
+                                    .IsPathRooted(
+                                        beFile))
+                                beFile =
+                                    Path.Combine(
+                                        Directory
+                                            .GetCurrentDirectory(),
+                                        beFile);
+                            HMSTHModdingTool
+                                .BadEndingRemover
+                                .BadEndingRemover
+                                .Apply(
+                                    beFile,
+                                    doBackup);
+                        }
+                        customFinish = true;
+                        break;
+
+                    case "vbadend":
+                    case "verifybadend":
+                    case "vbe":
+                        RequireArgs(args, 2,
+                            "-vbadend <file>" +
+                            " (ELF/ISO/BIN)");
+                        {
+                            string beFile =
+                                args[1];
+                            if (!Path
+                                    .IsPathRooted(
+                                        beFile))
+                                beFile =
+                                    Path.Combine(
+                                        Directory
+                                            .GetCurrentDirectory(),
+                                        beFile);
+                            HMSTHModdingTool
+                                .BadEndingRemover
+                                .BadEndingRemover
+                                .Verify(beFile);
+                        }
+                        customFinish = true;
+                        break;
+
+                    case "rbadend":
+                    case "restorebadend":
+                    case "rbe":
+                        RequireArgs(args, 2,
+                            "-rbadend <file>" +
+                            " (restores .bak)");
+                        {
+                            string beFile =
+                                args[1];
+                            if (!Path
+                                    .IsPathRooted(
+                                        beFile))
+                                beFile =
+                                    Path.Combine(
+                                        Directory
+                                            .GetCurrentDirectory(),
+                                        beFile);
+                            HMSTHModdingTool
+                                .BadEndingRemover
+                                .BadEndingRemover
+                                .Restore(beFile);
+                        }
+                        customFinish = true;
+                        break;
+
+                    // ════════════════════════
                     // CONTROLS REMAPPER
                     // ════════════════════════
                     case "controls":
@@ -4005,6 +4135,11 @@ namespace HMSTHModdingTool
                     "cd2dvd",   "cdtodvd",
                     "tocdiso",  "tocd",
                     "dvd2cd",   "dvdtocd",
+                    "abadend", "analyzebadend", "abe",
+                    "fixbadend", "removebadend",
+                    "applybadend", "fbe",
+                    "vbadend", "verifybadend", "vbe",
+                    "rbadend", "restorebadend", "rbe",
                     "controls",
                     "remap",      "remapcontrols",
                     "fakeyear",
@@ -4139,6 +4274,49 @@ namespace HMSTHModdingTool
             Console.WriteLine(
                 "  -ctxt <in.txt>" +
                 " <text.bin> <ptr.bin>");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    [empty] token = null" +
+                " slot. Add or remove to");
+            Console.WriteLine(
+                "    control slot count" +
+                " in the output file.");
+            Console.WriteLine(
+                "    [hex XX_YY] tokens =" +
+                " raw bytes (animations,");
+            Console.WriteLine(
+                "    control codes, etc.)" +
+                " — edit freely for mods.");
+            Console.WriteLine(
+                "    Optional: add '-dat'" +
+                " after -xtxt/-ctxt to use");
+            Console.WriteLine(
+                "    lossless .dat sidecar" +
+                " mode instead of hex.");
+            Console.ResetColor();
+            Console.WriteLine();
+            Console.ForegroundColor =
+                ConsoleColor.DarkYellow;
+            Console.WriteLine(
+                "  Examples:");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    tool.exe xtxt" +
+                " ITEMOTHE_00101.bin" +
+                " ITEMOTHE_00102.bin" +
+                " item.txt");
+            Console.WriteLine(
+                "    tool.exe ctxt" +
+                " item.txt" +
+                " ITEMOTHE_00101_mod.bin" +
+                " ITEMOTHE_00102_mod.bin");
+            Console.WriteLine(
+                "    tool.exe xtxt -dat" +
+                " file_101.bin file_102.bin" +
+                " out.txt   (dat mode)");
+            Console.ResetColor();
             Console.WriteLine();
 
             // ── ELF ───────────────────────────
@@ -4402,6 +4580,87 @@ namespace HMSTHModdingTool
                 "    todvdiso HMSTH.iso");
             Console.WriteLine(
                 "    tocdiso HMSTH_DVD.iso");
+            Console.ResetColor();
+            Console.WriteLine();
+
+            // ── Bad Ending Remover ──────────────
+            Console.ForegroundColor =
+                ConsoleColor.Magenta;
+            Console.WriteLine(
+                "=== Bad Ending Remover" +
+                " (NEW!) ===");
+            Console.ResetColor();
+            Console.WriteLine(
+                "  -fixbadend <file>" +
+                " (ELF/ISO/BIN) [--nobackup]");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    Removes 1-year cap," +
+                " Y2W30 bad ending, and");
+            Console.WriteLine(
+                "    Winter->Spring" +
+                " transition crash from HMSTH.");
+            Console.WriteLine(
+                "    Standalone patch - no" +
+                " PNACH needed.");
+            Console.WriteLine(
+                "    Creates .bak backup" +
+                " automatically.");
+            Console.ResetColor();
+            Console.WriteLine();
+            Console.WriteLine(
+                "  -abadend <file>" +
+                " (analyze without patching)");
+            Console.WriteLine(
+                "  -vbadend <file>" +
+                " (verify patches applied)");
+            Console.WriteLine(
+                "  -rbadend <file>" +
+                " (restore from .bak)");
+            Console.ForegroundColor =
+                ConsoleColor.DarkYellow;
+            Console.WriteLine(
+                "  Aliases:");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    fixbadend / removebadend /" +
+                " applybadend / fbe");
+            Console.WriteLine(
+                "    abadend  / analyzebadend /" +
+                " abe");
+            Console.WriteLine(
+                "    vbadend  / verifybadend /" +
+                " vbe");
+            Console.WriteLine(
+                "    rbadend  / restorebadend /" +
+                " rbe");
+            Console.ResetColor();
+            Console.ForegroundColor =
+                ConsoleColor.DarkYellow;
+            Console.WriteLine(
+                "  Examples:");
+            Console.ForegroundColor =
+                ConsoleColor.DarkGray;
+            Console.WriteLine(
+                "    tool.exe fixbadend" +
+                " SLUS_202.51");
+            Console.WriteLine(
+                "    tool.exe fixbadend" +
+                " HMSTH.iso");
+            Console.WriteLine(
+                "    tool.exe fixbadend" +
+                " HMSTH.bin");
+            Console.WriteLine(
+                "    tool.exe abadend" +
+                " HMSTH.iso  (preview)");
+            Console.WriteLine(
+                "    tool.exe vbadend" +
+                " HMSTH.iso  (verify)");
+            Console.WriteLine(
+                "    tool.exe rbadend" +
+                " HMSTH.iso  (restore)");
             Console.ResetColor();
             Console.WriteLine();
 
