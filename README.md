@@ -1362,7 +1362,7 @@ palette and change its 4th byte to `80`.
 
 ---
 
-### 🎮 Bad Ending Remover (NEW v1.5.3)
+### 🌟 Bad Ending Remover (NEW v1.5.3)
 
 Permanently removes the 1-year cap, Year 2
 Winter 30 bad ending, and Winter → Spring
