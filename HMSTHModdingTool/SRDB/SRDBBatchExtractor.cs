@@ -1437,35 +1437,72 @@ namespace HMSTHModdingTool.SRDB
                                 File.ReadAllBytes(
                                     foundRdtb);
 
-                            // KEY FIX: Compare rebuilt
-                            // against original blob.
-                            // If only the 4 sentinel
-                            // slots differ (ApplySlotMirror
-                            // changed 0xFFFFFFFF to real
-                            // offsets) and nothing else
-                            // changed, use original bytes.
-                            // This gives byte-identical
-                            // roundtrip for unmodded blobs
-                            // while still applying real
-                            // user edits.
                             if (IsOnlySlotTableDiff(
                                     rebuilt,
                                     rdtbs[idx]))
                             {
-                                // No real edits.
-                                // Use original bytes.
                                 rdtbBytes = rdtbs[idx];
                                 status = "source";
                             }
                             else
                             {
-                                // Real edits exist.
-                                // Use rebuilt bytes.
                                 rdtbBytes = rebuilt;
                                 status = "REBUILT";
                                 moddedCount++;
                             }
+
+                            // ── SRDB UV PATCH FIX ────────────
+                            // Fixes UV changes not applying
+                            // when vertex count is unchanged
+                            // but auto-scale is active.
+                            // Only runs for auto-scaled blobs.
+                            // Does NOT affect normal-scale
+                            // blobs (handled by C# tool already).
+                            float autoScale =
+                                SRDBUVPatcher.ReadAutoScale(
+                                    subPath);
+
+                            if (autoScale != 1.0f)
+                            {
+                                // Work on a mutable copy
+                                byte[] patchTarget =
+                                    new byte[rdtbBytes.Length];
+                                Array.Copy(rdtbBytes,
+                                    patchTarget,
+                                    rdtbBytes.Length);
+
+                                int uvChanges =
+                                    SRDBUVPatcher.PatchUVs(
+                                        patchTarget,
+                                        subPath,
+                                        autoScale);
+
+                                if (uvChanges > 0)
+                                {
+                                    rdtbBytes = patchTarget;
+                                    Console.ForegroundColor =
+                                        ConsoleColor.Green;
+                                    Console.WriteLine(
+                                        "    [UV fix] " +
+                                        sub + " " +
+                                        uvChanges +
+                                        " UV pairs patched");
+                                    Console.ResetColor();
+
+                                    // Mark as modded if it
+                                    // was previously "source"
+                                    // (UV-only edit counts as
+                                    // a real mod)
+                                    if (status == "source")
+                                    {
+                                        status = "UV-PATCHED";
+                                        moddedCount++;
+                                    }
+                                }
+                            }
+                            // ── END SRDB UV PATCH FIX ────────
                         }
+
                         else
                         {
                             rdtbBytes = rdtbs[idx];
