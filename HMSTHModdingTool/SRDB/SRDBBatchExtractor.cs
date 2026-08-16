@@ -1450,6 +1450,57 @@ namespace HMSTHModdingTool.SRDB
                                 status = "REBUILT";
                                 moddedCount++;
                             }
+
+                            // ── SRDB UV PATCH FIX ────────────
+                            // Fixes UV changes not applying
+                            // when vertex count is unchanged
+                            // but auto-scale is active.
+                            // Only runs for auto-scaled blobs.
+                            // Does NOT affect normal-scale
+                            // blobs (handled by C# tool already).
+                            float autoScale =
+                                SRDBUVPatcher.ReadAutoScale(
+                                    subPath);
+
+                            if (autoScale != 1.0f)
+                            {
+                                // Work on a mutable copy
+                                byte[] patchTarget =
+                                    new byte[rdtbBytes.Length];
+                                Array.Copy(rdtbBytes,
+                                    patchTarget,
+                                    rdtbBytes.Length);
+
+                                int uvChanges =
+                                    SRDBUVPatcher.PatchUVs(
+                                        patchTarget,
+                                        subPath,
+                                        autoScale);
+
+                                if (uvChanges > 0)
+                                {
+                                    rdtbBytes = patchTarget;
+                                    Console.ForegroundColor =
+                                        ConsoleColor.Green;
+                                    Console.WriteLine(
+                                        "    [UV fix] " +
+                                        sub + " " +
+                                        uvChanges +
+                                        " UV pairs patched");
+                                    Console.ResetColor();
+
+                                    // Mark as modded if it
+                                    // was previously "source"
+                                    // (UV-only edit counts as
+                                    // a real mod)
+                                    if (status == "source")
+                                    {
+                                        status = "UV-PATCHED";
+                                        moddedCount++;
+                                    }
+                                }
+                            }
+                            // ── END SRDB UV PATCH FIX ────────
                         }
 
                         else
@@ -1486,70 +1537,6 @@ namespace HMSTHModdingTool.SRDB
                     rdtbBytes = rdtbs[idx];
                     status = "source";
                 }
-
-                // ── SRDB UV PATCH ────────────────────
-                // Runs for ALL blobs including
-                // "source" ones. embedded_09
-                // has no batch OBJs so it fell
-                // through to "source" above,
-                // but it may still have UV edits
-                // in its model_XX folders that
-                // were placed manually.
-                if (Directory.Exists(subPath))
-                {
-                    float autoScale =
-                        SRDBUVPatcher
-                            .ReadAutoScale(
-                                subPath);
-
-                    // ── FIX: Use scale=1.0 floor ──
-                    // If no auto-scale in _info.txt
-                    // still run patch with scale=1.0
-                    // so UV-only edits are not skipped
-                    float patchScale =
-                        autoScale > 0f
-                        ? autoScale
-                        : 1.0f;
-
-                    byte[] patchTarget =
-                        new byte[
-                            rdtbBytes.Length];
-                    Array.Copy(
-                        rdtbBytes,
-                        patchTarget,
-                        rdtbBytes.Length);
-
-                    int uvChanges =
-                        SRDBUVPatcher.PatchUVs(
-                            patchTarget,
-                            subPath,
-                            patchScale);  // ← was: autoScale
-
-                    if (uvChanges > 0)
-                    {
-                        rdtbBytes =
-                            patchTarget;
-                        Console.ForegroundColor
-                            = ConsoleColor
-                                .Green;
-                        Console.WriteLine(
-                            "    [UV fix] "
-                            + sub + " "
-                            + uvChanges
-                            + " UV pairs"
-                            + " patched");
-                        Console.ResetColor();
-
-                        if (status
-                            == "source")
-                        {
-                            status =
-                                "UV-PATCHED";
-                            moddedCount++;
-                        }
-                    }
-                }
-                // ── END SRDB UV PATCH ────────────
 
                 int pad = (16 -
                     rdtbBytes.Length % 16) % 16;
