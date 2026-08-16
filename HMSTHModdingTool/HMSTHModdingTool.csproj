@@ -93,6 +93,7 @@
     <Compile Include="SRDB\SRDBArchive.cs" />
     <Compile Include="SRDB\SRDBBatchExtractor.cs" />
     <Compile Include="SRDB\SRDBEmbedObjTextureFixer.cs" />
+    <Compile Include="SRDB\SRDBUVPatcher.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
