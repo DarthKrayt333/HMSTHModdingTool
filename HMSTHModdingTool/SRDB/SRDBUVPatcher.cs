@@ -6,8 +6,36 @@ using System.Text;
 
 namespace HMSTHModdingTool.SRDB
 {
+    /// <summary>
+    /// SRDB-only UV patcher.
+    /// Fixes UV changes not being applied
+    /// when vertex count is unchanged but
+    /// auto-scale is active (large buildings
+    /// and map objects in SRDB files).
+    ///
+    /// Called ONLY from SRDBBatchExtractor
+    /// .RebuildSRDB() after the normal
+    /// cbatches rebuild. Does NOT touch
+    /// standalone RDTB files.
+    ///
+    /// Root cause of the bug:
+    ///   PatchKeptBatchUvs() in
+    ///   RDTBBatchReplacer calls
+    ///   VerifyVertexOrder() which compares
+    ///   OBJ verts (display-space, scaled)
+    ///   against RDTB verts (game-space).
+    ///   When autoScaleInvert != 1.0 the
+    ///   positions never match so the UV
+    ///   patch is silently skipped.
+    ///
+    /// This class fixes that by using a
+    /// scale-aware comparison and applying
+    /// UV patches directly to the RDTB blob
+    /// bytes before SRDB assembly.
+    /// </summary>
     public static class SRDBUVPatcher
     {
+        // ─── VIF constants ────────────────
         private const byte VIF_B0 = 0x00;
         private const byte VIF_B1 = 0x80;
         private const byte VIF_B3 = 0x6C;
@@ -15,26 +43,39 @@ namespace HMSTHModdingTool.SRDB
             0x70000000;
         private const float UV_EPS = 0.00001f;
 
+        // ═════════════════════════════════════
+        // PUBLIC ENTRY POINT
+        // Called from SRDBBatchExtractor
+        // .RebuildSRDB() per embedded blob.
+        //
+        // Parameters:
+        //   rdtbBlob   - the RDTB blob bytes
+        //                to patch (modified
+        //                in-place)
+        //   subPath    - path to the
+        //                embedded_NN folder
+        //                containing model_XX/
+        //                batch_XXXX.obj files
+        //   autoScale  - the scale that was
+        //                applied at extraction
+        //                time (from _info.txt)
+        //
+        // Returns number of UV pairs changed.
+        // Returns 0 if autoScale == 1.0 (not
+        // the bug condition - C# tool already
+        // handles that path correctly).
+        // ═════════════════════════════════════
         public static int PatchUVs(
             byte[] rdtbBlob,
             string subPath,
             float autoScale)
         {
-            // ── FIX v2: Remove the early
-            // return on scale=1.0.
-            // UV-only edits must be applied
-            // even when no auto-scale was
-            // used during extraction.
-            // The scale is only used for
-            // vertex ORDER verification,
-            // not for UV patching itself.
-            //
-            // OLD (broken):
-            //   if (autoScale == 1.0f)
-            //       return 0;
-            //
-            // NEW: always proceed, use
-            // scale=1.0 as neutral value
+            // Only fix the SRDB auto-scale bug.
+            // Normal-scale blobs are handled
+            // correctly by PatchKeptBatchUvs
+            // in RDTBBatchReplacer already.
+            if (autoScale == 1.0f)
+                return 0;
 
             if (rdtbBlob == null ||
                 rdtbBlob.Length < 0x48)
@@ -43,11 +84,18 @@ namespace HMSTHModdingTool.SRDB
             if (!Directory.Exists(subPath))
                 return 0;
 
+            float autoScaleInv =
+                autoScale > 0f
+                ? 1.0f / autoScale
+                : 1.0f;
+
+            // Read material table
             var batchTex =
                 GetBatchTexMap(rdtbBlob);
             if (batchTex.Count == 0)
                 return 0;
 
+            // Get mesh chunk bounds
             int meshStart, meshEnd;
             if (!GetMeshChunkBounds(
                     rdtbBlob,
@@ -55,6 +103,7 @@ namespace HMSTHModdingTool.SRDB
                     out meshEnd))
                 return 0;
 
+            // Get batch ranges
             var batchRanges =
                 GetBatchRanges(
                     rdtbBlob,
@@ -65,6 +114,7 @@ namespace HMSTHModdingTool.SRDB
 
             int totalChanged = 0;
 
+            // Scan model_XX subdirs
             string[] modelDirs =
                 Directory
                     .GetDirectories(
@@ -111,12 +161,17 @@ namespace HMSTHModdingTool.SRDB
                     int absEnd =
                         batchRanges[bi].Item2;
 
+                    // Count physical verts
+                    // in RDTB blob
                     int physVc =
                         CountPhysicalVerts(
                             rdtbBlob,
                             absStart,
                             absEnd);
+                    if (physVc == 0)
+                        continue;
 
+                    // Parse OBJ
                     List<float[]> comboVerts;
                     List<float[]> comboUvs;
                     ParseObjVertsUvs(
@@ -127,41 +182,49 @@ namespace HMSTHModdingTool.SRDB
                     if (comboUvs.Count == 0)
                         continue;
 
-                    // Allow up to 2 vertex difference
-                    // caused by Blender seam welding.
-                    if (Math.Abs(
-                            comboUvs.Count -
-                            physVc) > 2)
+                    // Only apply when vertex
+                    // count is unchanged.
+                    // If vert count changed,
+                    // cbatches already wrote
+                    // correct UVs into the
+                    // new VIF data.
+                    if (comboUvs.Count !=
+                        physVc)
                         continue;
 
-                    // FIX v3: No vertex order check
-                    // needed. Position-based UV matching
-                    // works regardless of vertex order,
-                    // so we can accept any batch where
-                    // vertex count is close enough.
-                    // This fixes the scrambled UV bug
-                    // on the car and waterwell where
-                    // Blender reordered vertices during
-                    // UV editing.
-
-                    // ── FIX v3: Use position-based
-                    // matching instead of index-based.
-                    // Direct index mapping fails when
-                    // Blender reorders vertices during
-                    // UV editing (causes scrambled UVs
-                    // like on car and waterwell).
-                    float scaleInvert =
-                        autoScale > 0f
-                        ? 1.0f / autoScale
-                        : 1.0f;
-
-                    int nChanged =
-                        PatchUvsByPosition(
+                    // Verify vertex order
+                    // using scale-aware check.
+                    // This is the fix for the
+                    // bug: original code used
+                    // exact position match
+                    // which failed because OBJ
+                    // is in display-space but
+                    // RDTB is in game-space.
+                    if (!VerifyVertexOrderScaled(
                             rdtbBlob,
                             absStart, absEnd,
                             comboVerts,
-                            comboUvs,
-                            scaleInvert);
+                            autoScale,
+                            checkCount: 5))
+                    {
+                        Console.ForegroundColor
+                            = ConsoleColor
+                                .DarkGray;
+                        Console.WriteLine(
+                            "      [UV skip]"
+                            + " batch_" +
+                            bi.ToString("D4")
+                            + " order mismatch");
+                        Console.ResetColor();
+                        continue;
+                    }
+
+                    // Patch UV rows
+                    int nChanged =
+                        PatchUvsDirect(
+                            rdtbBlob,
+                            absStart, absEnd,
+                            comboUvs);
 
                     if (nChanged > 0)
                     {
@@ -184,6 +247,9 @@ namespace HMSTHModdingTool.SRDB
             return totalChanged;
         }
 
+        // ═════════════════════════════════════
+        // READ AUTO SCALE FROM _info.txt
+        // ═════════════════════════════════════
         public static float ReadAutoScale(
             string subPath)
         {
@@ -216,6 +282,11 @@ namespace HMSTHModdingTool.SRDB
             return 1.0f;
         }
 
+        // ─────────────────────────────────────
+        // GET BATCH TEX MAP
+        // Reads chunk 8 material table.
+        // Returns {batch_idx -> tex_id}
+        // ─────────────────────────────────────
         private static
             Dictionary<int, int>
             GetBatchTexMap(byte[] rdtb)
@@ -257,6 +328,7 @@ namespace HMSTHModdingTool.SRDB
             if (c8Len < 4)
                 return result;
 
+            // Skip VIF-tagged chunks
             if (rdtb[c8Off] == VIF_B0 &&
                 rdtb[c8Off + 1] == VIF_B1 &&
                 c8Len > 3 &&
@@ -293,6 +365,12 @@ namespace HMSTHModdingTool.SRDB
             return result;
         }
 
+        // ─────────────────────────────────────
+        // GET MESH CHUNK BOUNDS
+        // Uses raw slot 11 (LOD0).
+        // Falls back to last active slot
+        // for small RDTBs.
+        // ─────────────────────────────────────
         private static bool
             GetMeshChunkBounds(
                 byte[] rdtb,
@@ -311,10 +389,13 @@ namespace HMSTHModdingTool.SRDB
                     BitConverter.ToUInt32(
                         rdtb, 0x10 + i * 4);
 
+            // Slot 11 = LOD0 mesh
             uint c11 = rawSlots[11];
             if (c11 == 0 ||
                 c11 == 0xFFFFFFFF)
             {
+                // Small RDTB: use last
+                // active slot
                 var active =
                     rawSlots
                         .Where(v =>
@@ -349,6 +430,13 @@ namespace HMSTHModdingTool.SRDB
             return meshEnd > meshStart;
         }
 
+        // ─────────────────────────────────────
+        // GET BATCH RANGES
+        // Returns batch_idx ->
+        //   (abs_start, abs_end)
+        // using the pointer table at the
+        // start of the mesh chunk.
+        // ─────────────────────────────────────
         private static
             Dictionary<int,
                 Tuple<int, int>>
@@ -377,6 +465,7 @@ namespace HMSTHModdingTool.SRDB
             int nPtrs =
                 (int)(firstPtr / 4);
 
+            // Read all pointers
             var ptrs =
                 new List<Tuple<int, uint>>();
             for (int i = 0; i < nPtrs; i++)
@@ -395,6 +484,7 @@ namespace HMSTHModdingTool.SRDB
                         Tuple.Create(i, ptr));
             }
 
+            // Sort by pointer value
             var sorted =
                 ptrs.OrderBy(t => t.Item2)
                     .ToList();
@@ -422,6 +512,9 @@ namespace HMSTHModdingTool.SRDB
             return result;
         }
 
+        // ─────────────────────────────────────
+        // COUNT PHYSICAL VERTS IN VIF BLOCKS
+        // ─────────────────────────────────────
         private static int
             CountPhysicalVerts(
                 byte[] data,
@@ -467,6 +560,10 @@ namespace HMSTHModdingTool.SRDB
             return total;
         }
 
+        // ─────────────────────────────────────
+        // PARSE OBJ VERTS AND UVS
+        // Resolves to per-unique-combo lists.
+        // ─────────────────────────────────────
         private static void ParseObjVertsUvs(
             string objPath,
             out List<float[]> comboVerts,
@@ -478,7 +575,8 @@ namespace HMSTHModdingTool.SRDB
             var rawV = new List<float[]>();
             var rawVT = new List<float[]>();
             var comboMap =
-                new Dictionary<long, int>();
+                new Dictionary<
+                    long, int>();
 
             var ci =
                 System.Globalization
@@ -578,6 +676,8 @@ namespace HMSTHModdingTool.SRDB
                                 sp[1]) - 1
                             : vi;
 
+                        // Pack vi, ti into
+                        // one long key
                         long key =
                             ((long)vi << 32)
                             | (uint)ti;
@@ -614,6 +714,24 @@ namespace HMSTHModdingTool.SRDB
             }
         }
 
+        // ─────────────────────────────────────
+        // VERIFY VERTEX ORDER - SCALE AWARE
+        //
+        // The bug fix is here.
+        // Original VerifyVertexOrder in
+        // RDTBBatchReplacer compares OBJ verts
+        // (display-space) directly against VIF
+        // verts (game-space). This fails when
+        // autoScale != 1.0 because:
+        //   OBJ_v  = game_v * autoScale
+        //   game_v = OBJ_v  / autoScale
+        //
+        // We compare:
+        //   game_v * autoScale ≈ OBJ_v
+        //
+        // This correctly identifies whether
+        // vertices are in the expected order.
+        // ─────────────────────────────────────
         private static bool
             VerifyVertexOrderScaled(
                 byte[] data,
@@ -625,19 +743,9 @@ namespace HMSTHModdingTool.SRDB
             if (autoScale <= 0f)
                 autoScale = 1.0f;
 
-            // ── FIX v2: Scale-aware epsilon
-            // When autoScale is large (e.g.
-            // 0.05 for huge map geometry),
-            // scaleInvert is large too and
-            // floating point error compounds.
-            // Use a wider epsilon that scales
-            // with the invert factor so
-            // valid batches are not rejected.
-            float scaleInvert =
-                1.0f / autoScale;
-            float posEps = Math.Max(
-                0.05f,
-                0.1f * scaleInvert);  // ← was: 0.05f * autoScale
+            // Allow 5% of display-range
+            // as position tolerance
+            float posEps = 0.05f * autoScale;
 
             int matched = 0;
             int checked_ = 0;
@@ -679,6 +787,8 @@ namespace HMSTHModdingTool.SRDB
                                     vStart +
                                     i * 16;
 
+                                // Game-space
+                                // vertex
                                 float gx =
                                     BitConverter
                                         .ToSingle(
@@ -695,36 +805,31 @@ namespace HMSTHModdingTool.SRDB
                                             data,
                                             vro + 12);
 
-                                // ── FIX v2:
-                                // Convert OBJ
+                                // Scale to
                                 // display-space
-                                // back to game-
-                                // space using
-                                // scaleInvert
+                                // for comparison
+                                float sx =
+                                    gx * autoScale;
+                                float sy =
+                                    gy * autoScale;
+                                float sz =
+                                    gz * autoScale;
+
                                 float[] ov =
                                     objVerts[
                                         vertIdx
                                         + i];
-                                float sx =
-                                    ov[0] *
-                                    scaleInvert;
-                                float sy =
-                                    ov[1] *
-                                    scaleInvert;
-                                float sz =
-                                    ov[2] *
-                                    scaleInvert;
 
                                 if (
                                     Math.Abs(
-                                        gx - sx)
-                                    <= posEps &&
+                                        sx - ov[0])
+                                    < posEps &&
                                     Math.Abs(
-                                        gy - sy)
-                                    <= posEps &&
+                                        sy - ov[1])
+                                    < posEps &&
                                     Math.Abs(
-                                        gz - sz)
-                                    <= posEps)
+                                        sz - ov[2])
+                                    < posEps)
                                     matched++;
 
                                 checked_++;
@@ -742,8 +847,7 @@ namespace HMSTHModdingTool.SRDB
                             BitConverter
                                 .ToUInt32(
                                     data,
-                                    pos +
-                                    bSize)
+                                    pos + bSize)
                             == EOF_FLAG)
                             bSize += 16;
                         pos += bSize;
@@ -758,232 +862,162 @@ namespace HMSTHModdingTool.SRDB
 
             float ratio =
                 (float)matched / checked_;
-            return ratio >= 0.6f;
+            return ratio >= 0.8f;
         }
 
-        // ═════════════════════════════════════
-        // PATCH UVS BY NEAREST VERTEX POSITION
-        // ═════════════════════════════════════
-        // For each VIF vertex in the RDTB batch,
-        // find the OBJ vertex whose position
-        // matches (accounting for auto-scale)
-        // and copy that OBJ vertex's UV into
-        // the VIF UV slot.
+        // ─────────────────────────────────────
+        // PATCH UVS DIRECT
+        // Writes combo_uvs[i] into VIF UV
+        // row[i] in physical vertex order.
         //
-        // This handles the case where Blender
-        // reorders vertices during UV editing.
-        // Direct index mapping breaks when the
-        // OBJ vertex order does not match the
-        // original RDTB extraction order, which
-        // causes scrambled UVs like the car
-        // texture you saw.
-        // ═════════════════════════════════════
+        // OBJ UV convention:
+        //   Extractor writes: vt U (1-V)
+        //   So OBJ has V already flipped.
+        //   PS2 stores raw V.
+        //   Therefore: ps2_V = 1 - obj_V
+        //
+        // UV values are NOT affected by
+        // autoScale (scale is positional
+        // only, UV coordinates are in
+        // texture-space 0..1).
+        // ─────────────────────────────────────
         private static int PatchUvsDirect(
             byte[] data,
             int start, int end,
             List<float[]> objUvs)
         {
-            // This overload kept for backward
-            // compat but should not be called
-            // for SRDB embedded batches.
-            // It does index-based mapping which
-            // corrupts UVs when Blender reorders
-            // vertices during editing.
-            return PatchUvsByPosition(
-                data, start, end,
-                null, objUvs, 1.0f);
-        }
-
-        // ═════════════════════════════════════
-        // NEW: POSITION-BASED UV PATCH
-        // Matches each VIF vertex to the
-        // nearest OBJ vertex by position and
-        // copies that OBJ vertex's UV. Safe
-        // against Blender vertex reordering.
-        // ═════════════════════════════════════
-        // ═════════════════════════════════════
-        // PATCH UVS BY POSITION + UV HINT v4
-        // ═════════════════════════════════════
-        // For each VIF vertex, find OBJ vertex
-        // matching BOTH position AND closest
-        // original UV. This handles UV seams
-        // where multiple OBJ vertices share
-        // the same 3D position but have
-        // different UVs.
-        //
-        // Score = position_distance * 1000
-        //       + uv_distance
-        //
-        // Position dominates (1000x weight)
-        // so only vertices at the same spot
-        // compete, and among those the one
-        // with UV closest to original wins.
-        // This picks the correct seam side.
-        // ═════════════════════════════════════
-        private static int PatchUvsByPosition(
-            byte[] data,
-            int start, int end,
-            List<float[]> objVerts,
-            List<float[]> objUvs,
-            float scaleInvert)
-        {
-            if (objVerts == null ||
-                objUvs == null ||
-                objVerts.Count == 0 ||
-                objUvs.Count == 0)
-                return 0;
-
-            int nObj = Math.Min(
-                objVerts.Count,
-                objUvs.Count);
-
-            // Pre-scale OBJ positions once
-            // for speed
-            float[] osx = new float[nObj];
-            float[] osy = new float[nObj];
-            float[] osz = new float[nObj];
-            for (int j = 0; j < nObj; j++)
-            {
-                osx[j] = objVerts[j][0]
-                    * scaleInvert;
-                osy[j] = objVerts[j][1]
-                    * scaleInvert;
-                osz[j] = objVerts[j][2]
-                    * scaleInvert;
-            }
-
-            // Pre-flip OBJ UVs to PS2 space
-            // (OBJ V is flipped, PS2 is not)
-            float[] ouU = new float[nObj];
-            float[] ouV = new float[nObj];
-            for (int j = 0; j < nObj; j++)
-            {
-                ouU[j] = objUvs[j][0];
-                ouV[j] = 1.0f - objUvs[j][1];
-            }
-
             int changed = 0;
+            int vertIdx = 0;
             int pos = start;
 
             while (pos + 16 <= end)
             {
-                if (data[pos] != VIF_B0 ||
-                    data[pos + 1] != VIF_B1 ||
-                    data[pos + 3] != VIF_B3)
+                if (data[pos] == VIF_B0 &&
+                    data[pos + 1] == VIF_B1 &&
+                    data[pos + 3] == VIF_B3)
                 {
-                    pos += 4;
-                    continue;
-                }
-
-                int vc = data[pos + 4];
-                if (vc < 1 || vc > 96)
-                {
-                    pos += 4;
-                    continue;
-                }
-
-                int vStart = pos + 16;
-                int nStart = vStart + vc * 16;
-                int uStart = nStart + vc * 16;
-
-                if (uStart + vc * 16 > end)
-                {
-                    pos += 4;
-                    continue;
-                }
-
-                for (int i = 0; i < vc; i++)
-                {
-                    int vro = vStart + i * 16;
-                    int uro = uStart + i * 16;
-                    if (uro + 12 > data.Length)
-                        break;
-
-                    // Read VIF position
-                    float gx = BitConverter
-                        .ToSingle(data, vro + 4);
-                    float gy = BitConverter
-                        .ToSingle(data, vro + 8);
-                    float gz = BitConverter
-                        .ToSingle(data, vro + 12);
-
-                    // Read original VIF UV
-                    // (used as tiebreaker
-                    //  hint for seam verts)
-                    float origU = BitConverter
-                        .ToSingle(data, uro + 4);
-                    float origV = BitConverter
-                        .ToSingle(data, uro + 8);
-
-                    // Find OBJ vertex with
-                    // best combined score
-                    float bestScore =
-                        float.MaxValue;
-                    int bestIdx = -1;
-
-                    for (int j = 0; j < nObj; j++)
+                    int vc = data[pos + 4];
+                    if (vc >= 1 && vc <= 96)
                     {
-                        float dx = gx - osx[j];
-                        float dy = gy - osy[j];
-                        float dz = gz - osz[j];
-                        float posD = dx * dx
-                            + dy * dy
-                            + dz * dz;
+                        int vStart =
+                            pos + 16;
+                        int nStart =
+                            vStart + vc * 16;
+                        int uStart =
+                            nStart + vc * 16;
 
-                        float du = origU
-                            - ouU[j];
-                        float dv = origV
-                            - ouV[j];
-                        float uvD = du * du
-                            + dv * dv;
-
-                        // Position dominates.
-                        // UV breaks ties among
-                        // co-located verts.
-                        float score =
-                            posD * 1000.0f
-                            + uvD;
-
-                        if (score < bestScore)
+                        if (uStart +
+                            vc * 16 <= end)
                         {
-                            bestScore = score;
-                            bestIdx = j;
+                            for (int i = 0;
+                                 i < vc; i++)
+                            {
+                                if (vertIdx
+                                    + i >=
+                                    objUvs
+                                        .Count)
+                                    break;
+
+                                int uro =
+                                    uStart +
+                                    i * 16;
+                                if (uro + 12
+                                    > data
+                                        .Length)
+                                    break;
+
+                                // Current
+                                // stored UV
+                                float curU =
+                                    BitConverter
+                                        .ToSingle(
+                                            data,
+                                            uro + 4);
+                                float curV =
+                                    BitConverter
+                                        .ToSingle(
+                                            data,
+                                            uro + 8);
+
+                                // New UV from
+                                // OBJ.
+                                // OBJ V is
+                                // already 1-V
+                                // (flipped at
+                                // extraction).
+                                // PS2 stores
+                                // raw V so
+                                // flip back:
+                                // ps2_V = 1 - obj_V
+                                float newU =
+                                    objUvs[
+                                        vertIdx
+                                        + i][0];
+                                float newV =
+                                    1.0f -
+                                    objUvs[
+                                        vertIdx
+                                        + i][1];
+
+                                if (
+                                    Math.Abs(
+                                        curU -
+                                        newU)
+                                    >= UV_EPS
+                                    ||
+                                    Math.Abs(
+                                        curV -
+                                        newV)
+                                    >= UV_EPS)
+                                {
+                                    byte[] bu =
+                                        BitConverter
+                                            .GetBytes(
+                                                newU);
+                                    byte[] bv =
+                                        BitConverter
+                                            .GetBytes(
+                                                newV);
+                                    data[uro + 4]
+                                        = bu[0];
+                                    data[uro + 5]
+                                        = bu[1];
+                                    data[uro + 6]
+                                        = bu[2];
+                                    data[uro + 7]
+                                        = bu[3];
+                                    data[uro + 8]
+                                        = bv[0];
+                                    data[uro + 9]
+                                        = bv[1];
+                                    data[uro + 10]
+                                        = bv[2];
+                                    data[uro + 11]
+                                        = bv[3];
+                                    changed++;
+                                }
+                            }
                         }
-                    }
 
-                    if (bestIdx < 0) continue;
+                        vertIdx += vc;
 
-                    float newU = ouU[bestIdx];
-                    float newV = ouV[bestIdx];
-
-                    if (Math.Abs(origU - newU)
-                            >= UV_EPS ||
-                        Math.Abs(origV - newV)
-                            >= UV_EPS)
-                    {
-                        byte[] bu = BitConverter
-                            .GetBytes(newU);
-                        byte[] bv = BitConverter
-                            .GetBytes(newV);
-                        data[uro + 4] = bu[0];
-                        data[uro + 5] = bu[1];
-                        data[uro + 6] = bu[2];
-                        data[uro + 7] = bu[3];
-                        data[uro + 8] = bv[0];
-                        data[uro + 9] = bv[1];
-                        data[uro + 10] = bv[2];
-                        data[uro + 11] = bv[3];
-                        changed++;
+                        int bSize =
+                            16 +
+                            3 * vc * 16 +
+                            16;
+                        if (pos + bSize +
+                            16 <= end &&
+                            BitConverter
+                                .ToUInt32(
+                                    data,
+                                    pos + bSize)
+                            == EOF_FLAG)
+                            bSize += 16;
+                        pos += bSize;
+                        continue;
                     }
                 }
-
-                int bSize = 16 + 3 * vc * 16 + 16;
-                if (pos + bSize + 16 <= end &&
-                    BitConverter.ToUInt32(
-                        data, pos + bSize)
-                    == EOF_FLAG)
-                    bSize += 16;
-                pos += bSize;
+                pos += 4;
             }
 
             return changed;
