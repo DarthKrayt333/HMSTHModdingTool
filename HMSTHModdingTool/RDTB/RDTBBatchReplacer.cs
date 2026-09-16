@@ -3384,22 +3384,13 @@ namespace HMSTHModdingTool.RDTB
         // from the right raw slot for
         // each format.
         // ═════════════════════════════
-        static byte[] ApplySlotMirror(
-            byte[] data)
+        static byte[] ApplySlotMirror(byte[] data)
         {
-            uint[] rawSlots =
-                new uint[14];
+            uint[] rawSlots = new uint[14];
             for (int i = 0; i < 14; i++)
             {
-                if (0x10 + i * 4 + 4 >
-                    data.Length)
-                    break;
-                rawSlots[i] =
-                    BitConverter
-                        .ToUInt32(
-                            data,
-                            0x10 +
-                            i * 4);
+                if (0x10 + i * 4 + 4 > data.Length) break;
+                rawSlots[i] = BitConverter.ToUInt32(data, 0x10 + i * 4);
             }
 
             int HDR = 0x48;
@@ -3407,124 +3398,107 @@ namespace HMSTHModdingTool.RDTB
             uint c8 = rawSlots[8];
             uint c11 = rawSlots[11];
 
-            // Bail if essential slots
-            // are sentinels
-            if (c8 == 0xFFFFFFFF
-                || c8 == 0
-                || c11 == 0xFFFFFFFF
-                || c11 == 0)
-            {
+            if (c8 == 0xFFFFFFFF || c8 == 0 || c11 == 0xFFFFFFFF || c11 == 0)
                 return data;
-            }
 
-            // Compute chunk 8 end:
-            // next valid offset after
-            // c8 in the slot table
             uint c8End = (uint)data.Length;
             for (int i = 0; i < 14; i++)
             {
                 uint v = rawSlots[i];
-                if (v > c8
-                    && v < c8End
-                    && v != 0xFFFFFFFF
-                    && v != 0)
+                if (v > c8 && v < c8End && v != 0xFFFFFFFF)
                     c8End = v;
             }
 
-            // Compute chunk 11 end:
-            // next valid offset after
-            // c11, OR file end
             uint c11End = (uint)data.Length;
             for (int i = 0; i < 14; i++)
             {
                 uint v = rawSlots[i];
-                if (v > c11
-                    && v < c11End
-                    && v != 0xFFFFFFFF
-                    && v != 0)
+                if (v > c11 && v < c11End && v != 0xFFFFFFFF)
                     c11End = v;
             }
 
-            // Extract chunks
-            byte[] chunks07 =
-                new byte[c8 - c0];
-            Array.Copy(data,
-                (int)c0, chunks07,
-                0, chunks07.Length);
+            byte[] chunks07 = new byte[c8 - c0];
+            Array.Copy(data, (int)c0, chunks07, 0, chunks07.Length);
 
-            byte[] chunk8 = new byte[
-                c8End - c8];
-            Array.Copy(data,
-                (int)c8, chunk8,
-                0, chunk8.Length);
+            byte[] chunk8 = new byte[c8End - c8];
+            Array.Copy(data, (int)c8, chunk8, 0, chunk8.Length);
 
-            byte[] chunk11 = new byte[
-                c11End - c11];
-            Array.Copy(data,
-                (int)c11, chunk11,
-                0, chunk11.Length);
+            byte[] chunk11 = new byte[c11End - c11];
+            Array.Copy(data, (int)c11, chunk11, 0, chunk11.Length);
 
-            // Build new file
-            using (var ms =
-                new MemoryStream())
+            uint mFirst = BitConverter.ToUInt32(chunk11, 0);
+            int nptrs = (int)(mFirst / 4);
+
+            using (var ms = new MemoryStream())
             {
-                ms.Write(
-                    new byte[HDR],
-                    0, HDR);
-                ms.Write(chunks07, 0,
-                    chunks07.Length);
-                uint newC8 =
-                    (uint)ms.Length;
-                ms.Write(chunk8, 0,
-                    chunk8.Length);
-                uint newC11 =
-                    (uint)ms.Length;
-                ms.Write(chunk11, 0,
-                    chunk11.Length);
+                ms.Write(new byte[HDR], 0, HDR);
+                ms.Write(chunks07, 0, chunks07.Length);
 
-                byte[] result =
-                    ms.ToArray();
+                // Write 3 distinct copies of Lookup Chunk (Slots 8, 9, 10)
+                uint newC8 = (uint)ms.Length;
+                ms.Write(chunk8, 0, chunk8.Length);
 
-                Array.Copy(data, 0,
-                    result, 0, HDR);
+                uint newC9 = (uint)ms.Length;
+                ms.Write(chunk8, 0, chunk8.Length);
 
-                // Patch slots 0-7
-                for (int i = 0;
-                     i < 8; i++)
+                uint newC10 = (uint)ms.Length;
+                ms.Write(chunk8, 0, chunk8.Length);
+
+                // Pre-calculate where Chunk 11 (High LOD Mesh) will sit
+                int ptrTableSize = nptrs * 4;
+                uint newC12 = (uint)ms.Length;
+                uint newC13 = newC12 + (uint)ptrTableSize;
+                uint newC11 = newC13 + (uint)ptrTableSize;
+
+                // Chunk 12 (Med LOD): Pointer table pointing to Chunk 11 mesh data
+                for (int i = 0; i < nptrs; i++)
                 {
-                    byte[] ob =
-                        BitConverter
-                            .GetBytes(
-                                rawSlots[i]);
-                    Array.Copy(ob, 0,
-                        result,
-                        0x10 + i * 4,
-                        4);
+                    uint bp = BitConverter.ToUInt32(chunk11, i * 4);
+                    if (bp == 0)
+                    {
+                        ms.Write(BitConverter.GetBytes(0u), 0, 4);
+                    }
+                    else
+                    {
+                        uint relOffset = (newC11 + bp) - newC12;
+                        ms.Write(BitConverter.GetBytes(relOffset), 0, 4);
+                    }
                 }
 
-                // Slots 8, 9, 10 ->
-                // new chunk 8 offset
-                byte[] c8b =
-                    BitConverter
-                        .GetBytes(newC8);
-                for (int i = 8;
-                     i <= 10; i++)
-                    Array.Copy(c8b, 0,
-                        result,
-                        0x10 + i * 4,
-                        4);
+                // Chunk 13 (Low LOD): Pointer table pointing to Chunk 11 mesh data
+                for (int i = 0; i < nptrs; i++)
+                {
+                    uint bp = BitConverter.ToUInt32(chunk11, i * 4);
+                    if (bp == 0)
+                    {
+                        ms.Write(BitConverter.GetBytes(0u), 0, 4);
+                    }
+                    else
+                    {
+                        uint relOffset = (newC11 + bp) - newC13;
+                        ms.Write(BitConverter.GetBytes(relOffset), 0, 4);
+                    }
+                }
 
-                // Slots 11, 12, 13 ->
-                // new chunk 11 offset
-                byte[] c11b =
-                    BitConverter
-                        .GetBytes(newC11);
-                for (int i = 11;
-                     i <= 13; i++)
-                    Array.Copy(c11b, 0,
-                        result,
-                        0x10 + i * 4,
-                        4);
+                // Chunk 11 (High LOD): Main Pointer Table + Single Copy of VIF Mesh Data
+                ms.Write(chunk11, 0, chunk11.Length);
+
+                byte[] result = ms.ToArray();
+                Array.Copy(data, 0, result, 0, HDR);
+
+                for (int i = 0; i < 8; i++)
+                {
+                    byte[] ob = BitConverter.GetBytes(rawSlots[i]);
+                    Array.Copy(ob, 0, result, 0x10 + i * 4, 4);
+                }
+
+                WriteU32At(result, 0x10 + 8 * 4, newC8);
+                WriteU32At(result, 0x10 + 9 * 4, newC9);
+                WriteU32At(result, 0x10 + 10 * 4, newC10);
+
+                WriteU32At(result, 0x10 + 11 * 4, newC11);
+                WriteU32At(result, 0x10 + 12 * 4, newC12);
+                WriteU32At(result, 0x10 + 13 * 4, newC13);
 
                 return result;
             }
@@ -3838,22 +3812,13 @@ namespace HMSTHModdingTool.RDTB
         // own offsets (not mirrored).
         // Matches original game format.
         // ═════════════════════════════
-        static byte[] ApplyBigLayout(
-            byte[] data)
+        static byte[] ApplyBigLayout(byte[] data)
         {
-            uint[] rawSlots =
-                new uint[14];
+            uint[] rawSlots = new uint[14];
             for (int i = 0; i < 14; i++)
             {
-                if (0x10 + i * 4 + 4 >
-                    data.Length)
-                    break;
-                rawSlots[i] =
-                    BitConverter
-                        .ToUInt32(
-                            data,
-                            0x10 +
-                            i * 4);
+                if (0x10 + i * 4 + 4 > data.Length) break;
+                rawSlots[i] = BitConverter.ToUInt32(data, 0x10 + i * 4);
             }
 
             int HDR = 0x48;
@@ -3861,193 +3826,74 @@ namespace HMSTHModdingTool.RDTB
             uint c8 = rawSlots[8];
             uint c11 = rawSlots[11];
 
-            // Validate
-            if (c8 == 0xFFFFFFFF
-                || c11 == 0xFFFFFFFF
-                || c11 <= c8)
-            {
-                // Source malformed —
-                // fall back to mirror
-                return ApplySlotMirror(
-                    data);
-            }
+            if (c8 == 0xFFFFFFFF || c8 == 0 || c11 == 0xFFFFFFFF || c11 == 0)
+                return ApplySlotMirror(data);
 
-            // Find chunk 8 end and
-            // chunk 11 end via next
-            // distinct offset
-            uint c8End = data.Length
-                == 0
-                ? 0
-                : (uint)data.Length;
+            uint c8End = (uint)data.Length;
             for (int i = 0; i < 14; i++)
             {
                 uint v = rawSlots[i];
-                if (v > c8 &&
-                    v < c8End &&
-                    v != 0xFFFFFFFF)
+                if (v > c8 && v < c8End && v != 0xFFFFFFFF)
                     c8End = v;
             }
 
-            uint c11End = (uint)
-                data.Length;
+            uint c11End = (uint)data.Length;
             for (int i = 0; i < 14; i++)
             {
                 uint v = rawSlots[i];
-                if (v > c11 &&
-                    v < c11End &&
-                    v != 0xFFFFFFFF)
+                if (v > c11 && v < c11End && v != 0xFFFFFFFF)
                     c11End = v;
             }
 
-            byte[] chunks07 =
-                new byte[c8 - c0];
-            Array.Copy(data,
-                (int)c0, chunks07,
-                0, chunks07.Length);
+            byte[] chunks07 = new byte[c8 - c0];
+            Array.Copy(data, (int)c0, chunks07, 0, chunks07.Length);
 
-            byte[] chunk8 = new byte[
-                c8End - c8];
-            Array.Copy(data,
-                (int)c8, chunk8,
-                0, chunk8.Length);
+            byte[] chunk8 = new byte[c8End - c8];
+            Array.Copy(data, (int)c8, chunk8, 0, chunk8.Length);
 
-            byte[] chunk11 = new byte[
-                c11End - c11];
-            Array.Copy(data,
-                (int)c11, chunk11,
-                0, chunk11.Length);
+            byte[] chunk11 = new byte[c11End - c11];
+            Array.Copy(data, (int)c11, chunk11, 0, chunk11.Length);
 
-            // Preserve lookup chunks
-            // 9/10 if they exist as
-            // distinct chunks in source
-            byte[] chunk9 = null;
-            byte[] chunk10 = null;
-            uint c9 = rawSlots[9];
-            uint c10 = rawSlots[10];
-            if (c9 != 0xFFFFFFFF
-                && c9 != c8
-                && c9 > c8)
+            using (var ms = new MemoryStream())
             {
-                uint c9End = c10 ==
-                    0xFFFFFFFF
-                    ? c11
-                    : c10;
-                chunk9 = new byte[
-                    c9End - c9];
-                Array.Copy(data,
-                    (int)c9, chunk9,
-                    0, chunk9.Length);
-            }
-            if (c10 != 0xFFFFFFFF
-                && c10 != c8
-                && c10 > c8)
-            {
-                chunk10 = new byte[
-                    c11 - c10];
-                Array.Copy(data,
-                    (int)c10, chunk10,
-                    0,
-                    chunk10.Length);
-            }
+                ms.Write(new byte[HDR], 0, HDR);
+                ms.Write(chunks07, 0, chunks07.Length);
 
-            using (var ms =
-                new MemoryStream())
-            {
-                ms.Write(
-                    new byte[HDR],
-                    0, HDR);
-                ms.Write(chunks07, 0,
-                    chunks07.Length);
+                // Write Chunk 8, 9, 10 (all using updated Chunk 8 to ensure QW alignment)
+                uint newC8 = (uint)ms.Length;
+                ms.Write(chunk8, 0, chunk8.Length);
 
-                uint newC8 =
-                    (uint)ms.Length;
-                ms.Write(chunk8, 0,
-                    chunk8.Length);
+                uint newC9 = (uint)ms.Length;
+                ms.Write(chunk8, 0, chunk8.Length);
 
-                uint newC9;
-                if (chunk9 != null)
+                uint newC10 = (uint)ms.Length;
+                ms.Write(chunk8, 0, chunk8.Length);
+
+                // Write Chunk 11, 12, 13 (all using rebuilt Chunk 11 mesh)
+                uint newC11 = (uint)ms.Length;
+                ms.Write(chunk11, 0, chunk11.Length);
+
+                uint newC12 = (uint)ms.Length;
+                ms.Write(chunk11, 0, chunk11.Length);
+
+                uint newC13 = (uint)ms.Length;
+                ms.Write(chunk11, 0, chunk11.Length);
+
+                byte[] result = ms.ToArray();
+                Array.Copy(data, 0, result, 0, HDR);
+
+                for (int i = 0; i < 8; i++)
                 {
-                    newC9 =
-                        (uint)ms.Length;
-                    ms.Write(chunk9, 0,
-                        chunk9.Length);
-                }
-                else
-                {
-                    // Duplicate chunk 8
-                    // for slot 9
-                    newC9 =
-                        (uint)ms.Length;
-                    ms.Write(chunk8, 0,
-                        chunk8.Length);
+                    byte[] ob = BitConverter.GetBytes(rawSlots[i]);
+                    Array.Copy(ob, 0, result, 0x10 + i * 4, 4);
                 }
 
-                uint newC10;
-                if (chunk10 != null)
-                {
-                    newC10 =
-                        (uint)ms.Length;
-                    ms.Write(chunk10, 0,
-                        chunk10.Length);
-                }
-                else
-                {
-                    newC10 =
-                        (uint)ms.Length;
-                    ms.Write(chunk8, 0,
-                        chunk8.Length);
-                }
-
-                uint newC11 =
-                    (uint)ms.Length;
-                ms.Write(chunk11, 0,
-                    chunk11.Length);
-
-                uint newC12 =
-                    (uint)ms.Length;
-                ms.Write(chunk11, 0,
-                    chunk11.Length);
-
-                uint newC13 =
-                    (uint)ms.Length;
-                ms.Write(chunk11, 0,
-                    chunk11.Length);
-
-                byte[] result =
-                    ms.ToArray();
-
-                Array.Copy(data, 0,
-                    result, 0, HDR);
-
-                for (int i = 0; i < 8;
-                     i++)
-                {
-                    byte[] ob =
-                        BitConverter
-                            .GetBytes(
-                                rawSlots[i]);
-                    Array.Copy(ob, 0,
-                        result,
-                        0x10 + i * 4,
-                        4);
-                }
-
-                WriteU32At(result,
-                    0x10 + 8 * 4, newC8);
-                WriteU32At(result,
-                    0x10 + 9 * 4, newC9);
-                WriteU32At(result,
-                    0x10 + 10 * 4,
-                    newC10);
-                WriteU32At(result,
-                    0x10 + 11 * 4,
-                    newC11);
-                WriteU32At(result,
-                    0x10 + 12 * 4,
-                    newC12);
-                WriteU32At(result,
-                    0x10 + 13 * 4,
-                    newC13);
+                WriteU32At(result, 0x10 + 8 * 4, newC8);
+                WriteU32At(result, 0x10 + 9 * 4, newC9);
+                WriteU32At(result, 0x10 + 10 * 4, newC10);
+                WriteU32At(result, 0x10 + 11 * 4, newC11);
+                WriteU32At(result, 0x10 + 12 * 4, newC12);
+                WriteU32At(result, 0x10 + 13 * 4, newC13);
 
                 return result;
             }
@@ -4058,22 +3904,13 @@ namespace HMSTHModdingTool.RDTB
         // Single mesh chunk, slots
         // 9/10/12/13 = 0xFFFFFFFF.
         // ═════════════════════════════
-        static byte[] ApplySmallLayout(
-            byte[] data)
+        static byte[] ApplySmallLayout(byte[] data)
         {
-            uint[] rawSlots =
-                new uint[14];
+            uint[] rawSlots = new uint[14];
             for (int i = 0; i < 14; i++)
             {
-                if (0x10 + i * 4 + 4 >
-                    data.Length)
-                    break;
-                rawSlots[i] =
-                    BitConverter
-                        .ToUInt32(
-                            data,
-                            0x10 +
-                            i * 4);
+                if (0x10 + i * 4 + 4 > data.Length) break;
+                rawSlots[i] = BitConverter.ToUInt32(data, 0x10 + i * 4);
             }
 
             int HDR = 0x48;
@@ -4081,110 +3918,60 @@ namespace HMSTHModdingTool.RDTB
             uint c8 = rawSlots[8];
             uint c11 = rawSlots[11];
 
-            if (c8 == 0xFFFFFFFF
-                || c11 == 0xFFFFFFFF
-                || c11 <= c8)
-            {
-                return ApplySlotMirror(
-                    data);
-            }
+            if (c8 == 0xFFFFFFFF || c8 == 0 || c11 == 0xFFFFFFFF || c11 == 0)
+                return ApplySlotMirror(data);
 
-            uint c8End = (uint)
-                data.Length;
+            uint c8End = (uint)data.Length;
             for (int i = 0; i < 14; i++)
             {
                 uint v = rawSlots[i];
-                if (v > c8 &&
-                    v < c8End &&
-                    v != 0xFFFFFFFF)
+                if (v > c8 && v < c8End && v != 0xFFFFFFFF)
                     c8End = v;
             }
 
-            uint c11End = (uint)
-                data.Length;
+            uint c11End = (uint)data.Length;
             for (int i = 0; i < 14; i++)
             {
                 uint v = rawSlots[i];
-                if (v > c11 &&
-                    v < c11End &&
-                    v != 0xFFFFFFFF)
+                if (v > c11 && v < c11End && v != 0xFFFFFFFF)
                     c11End = v;
             }
 
-            byte[] chunks07 =
-                new byte[c8 - c0];
-            Array.Copy(data,
-                (int)c0, chunks07,
-                0, chunks07.Length);
+            byte[] chunks07 = new byte[c8 - c0];
+            Array.Copy(data, (int)c0, chunks07, 0, chunks07.Length);
 
-            byte[] chunk8 = new byte[
-                c8End - c8];
-            Array.Copy(data,
-                (int)c8, chunk8,
-                0, chunk8.Length);
+            byte[] chunk8 = new byte[c8End - c8];
+            Array.Copy(data, (int)c8, chunk8, 0, chunk8.Length);
 
-            byte[] chunk11 = new byte[
-                c11End - c11];
-            Array.Copy(data,
-                (int)c11, chunk11,
-                0, chunk11.Length);
+            byte[] chunk11 = new byte[c11End - c11];
+            Array.Copy(data, (int)c11, chunk11, 0, chunk11.Length);
 
-            using (var ms =
-                new MemoryStream())
+            using (var ms = new MemoryStream())
             {
-                ms.Write(
-                    new byte[HDR],
-                    0, HDR);
-                ms.Write(chunks07, 0,
-                    chunks07.Length);
+                ms.Write(new byte[HDR], 0, HDR);
+                ms.Write(chunks07, 0, chunks07.Length);
 
-                uint newC8 =
-                    (uint)ms.Length;
-                ms.Write(chunk8, 0,
-                    chunk8.Length);
+                uint newC8 = (uint)ms.Length;
+                ms.Write(chunk8, 0, chunk8.Length);
 
-                uint newC11 =
-                    (uint)ms.Length;
-                ms.Write(chunk11, 0,
-                    chunk11.Length);
+                uint newC11 = (uint)ms.Length;
+                ms.Write(chunk11, 0, chunk11.Length);
 
-                byte[] result =
-                    ms.ToArray();
+                byte[] result = ms.ToArray();
+                Array.Copy(data, 0, result, 0, HDR);
 
-                Array.Copy(data, 0,
-                    result, 0, HDR);
-
-                for (int i = 0; i < 8;
-                     i++)
+                for (int i = 0; i < 8; i++)
                 {
-                    byte[] ob =
-                        BitConverter
-                            .GetBytes(
-                                rawSlots[i]);
-                    Array.Copy(ob, 0,
-                        result,
-                        0x10 + i * 4,
-                        4);
+                    byte[] ob = BitConverter.GetBytes(rawSlots[i]);
+                    Array.Copy(ob, 0, result, 0x10 + i * 4, 4);
                 }
 
-                WriteU32At(result,
-                    0x10 + 8 * 4,
-                    newC8);
-                WriteU32At(result,
-                    0x10 + 9 * 4,
-                    0xFFFFFFFF);
-                WriteU32At(result,
-                    0x10 + 10 * 4,
-                    0xFFFFFFFF);
-                WriteU32At(result,
-                    0x10 + 11 * 4,
-                    newC11);
-                WriteU32At(result,
-                    0x10 + 12 * 4,
-                    0xFFFFFFFF);
-                WriteU32At(result,
-                    0x10 + 13 * 4,
-                    0xFFFFFFFF);
+                WriteU32At(result, 0x10 + 8 * 4, newC8);
+                WriteU32At(result, 0x10 + 9 * 4, 0xFFFFFFFF);
+                WriteU32At(result, 0x10 + 10 * 4, 0xFFFFFFFF);
+                WriteU32At(result, 0x10 + 11 * 4, newC11);
+                WriteU32At(result, 0x10 + 12 * 4, 0xFFFFFFFF);
+                WriteU32At(result, 0x10 + 13 * 4, 0xFFFFFFFF);
 
                 return result;
             }
