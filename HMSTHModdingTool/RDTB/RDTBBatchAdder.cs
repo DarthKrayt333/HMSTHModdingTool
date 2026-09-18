@@ -1290,26 +1290,117 @@ namespace HMSTHModdingTool.RDTB
             var result =
                 new List<int>();
 
-            // Try slots 11, 12, 13
-            int[] meshSlots =
-                { 11, 12, 13 };
-            foreach (int ms in
-                meshSlots)
+            // For MIRROR format RDTBs
+            // (like BOY), slots 12 and
+            // 13 are NOT full mesh chunks.
+            // They are small pointer-only
+            // tables that point INTO the
+            // mesh data of slot 11.
+            // We must ONLY expand slot 11
+            // (the real HIGH LOD mesh).
+            // Expanding 12 and 13 as if
+            // they were full mesh chunks
+            // corrupts the pointer tables
+            // and causes Array.Copy crash
+            // in Reassemble() because the
+            // computed newOffs go out of
+            // bounds.
+            //
+            // Detection: A real mesh chunk
+            // has pointer table size that
+            // matches its VIF data count.
+            // A mirror pointer table has
+            // ONLY a pointer table (no VIF
+            // data after it) - its size is
+            // exactly nPtrs * 4 bytes or
+            // very small compared to slot
+            // 11's chunk.
+            //
+            // Safe rule: Only use slot 11.
+            // Slots 12 and 13 are rebuilt
+            // by ApplySlotMirror later.
+
+            uint sv11 = rawSlots[11];
+            if (sv11 != 0 &&
+                sv11 != 0xFFFFFFFF)
             {
-                uint sv = rawSlots[ms];
-                if (sv == 0 ||
-                    sv == 0xFFFFFFFF)
-                    continue;
                 int idx =
                     FindChunkIdx(
-                        offs, sv);
-                if (idx >= 0 &&
-                    !result.Contains(
-                        idx))
+                        offs, sv11);
+                if (idx >= 0)
                     result.Add(idx);
             }
 
-            // If none found, use
+            // If slot 11 not found,
+            // fall back to VIF scan:
+            // find chunk with most
+            // VIF blocks (real mesh).
+            if (result.Count == 0)
+            {
+                // Find material chunk
+                // index to skip it
+                int matIdx = -1;
+                uint sv8 = rawSlots[8];
+                if (sv8 != 0 &&
+                    sv8 != 0xFFFFFFFF)
+                {
+                    matIdx =
+                        FindChunkIdx(
+                            offs, sv8);
+                }
+
+                int bestVif = 0;
+                int bestIdx = -1;
+                for (int ci = 0;
+                     ci < chunks.Count;
+                     ci++)
+                {
+                    if (ci == matIdx)
+                        continue;
+
+                    byte[] c =
+                        chunks[ci];
+                    if (c.Length < 64)
+                        continue;
+
+                    uint first =
+                        BitConverter
+                            .ToUInt32(
+                                c, 0);
+                    if (first == 0 ||
+                        first > (uint)
+                            c.Length ||
+                        first < 4)
+                        continue;
+
+                    int vifCount = 0;
+                    for (int i = 0;
+                         i + 16 <=
+                             c.Length;
+                         i += 4)
+                    {
+                        if (c[i] == 0x00
+                            && c[i + 1]
+                                == 0x80
+                            && c[i + 3]
+                                == 0x6C)
+                            vifCount++;
+                    }
+
+                    if (vifCount >
+                        bestVif)
+                    {
+                        bestVif =
+                            vifCount;
+                        bestIdx = ci;
+                    }
+                }
+
+                if (bestIdx >= 0)
+                    result.Add(bestIdx);
+            }
+
+            // Last resort: use
             // last chunk
             if (result.Count == 0 &&
                 chunks.Count > 0)
