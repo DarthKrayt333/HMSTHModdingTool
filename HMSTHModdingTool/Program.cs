@@ -21,7 +21,7 @@ namespace HMSTHModdingTool
             "HMSTHModdingTool original as" +
             " HDATextTool by gdkchan";
         const string TOOL_VERSION =
-            "v1.5.6-Beta";
+            "v1.5.8-Beta";
         const string TOOL_AUTHOR =
             "gdkchan + DarthKrayt333" +
             " & HMSTH Community";
@@ -3942,6 +3942,17 @@ namespace HMSTHModdingTool
 
 
                     // ════════════════════════
+                    // RDTB TO MDS ATTEMPT 01
+                    // ════════════════════════
+
+                    case "rdtb2mds":
+                        if (args.Length >= 4)
+                            RDTBToMDS.Convert(
+                                args[1], args[2], args[3]);
+                        break;
+
+
+                    // ════════════════════════
                     // UNKNOWN COMMAND
                     // ════════════════════════
                     default:
@@ -4188,6 +4199,7 @@ namespace HMSTHModdingTool
                     "iobj",      "inspectobj",
                     "idae",      "inspectdae",
                     "xsrdbbatches", "csrdbbatches",
+                    "rdtb2mds",
                 };
 
             bool firstIsCommand =
