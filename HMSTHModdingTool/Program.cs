@@ -3942,17 +3942,6 @@ namespace HMSTHModdingTool
 
 
                     // ════════════════════════
-                    // RDTB TO MDS ATTEMPT 01
-                    // ════════════════════════
-
-                    case "rdtb2mds":
-                        if (args.Length >= 4)
-                            RDTBToMDS.Convert(
-                                args[1], args[2], args[3]);
-                        break;
-
-
-                    // ════════════════════════
                     // UNKNOWN COMMAND
                     // ════════════════════════
                     default:
@@ -4199,7 +4188,6 @@ namespace HMSTHModdingTool
                     "iobj",      "inspectobj",
                     "idae",      "inspectdae",
                     "xsrdbbatches", "csrdbbatches",
-                    "rdtb2mds",
                 };
 
             bool firstIsCommand =
