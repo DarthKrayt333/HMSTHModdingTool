@@ -21,7 +21,7 @@ namespace HMSTHModdingTool
             "HMSTHModdingTool original as" +
             " HDATextTool by gdkchan";
         const string TOOL_VERSION =
-            "v1.5.8-Beta";
+            "v1.5.9-Beta";
         const string TOOL_AUTHOR =
             "gdkchan + DarthKrayt333" +
             " & HMSTH Community";
