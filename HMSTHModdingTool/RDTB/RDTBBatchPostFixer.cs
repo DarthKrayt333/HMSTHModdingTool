@@ -689,35 +689,36 @@ namespace HMSTHModdingTool.RDTB
                       float[] norm)>
                     samples)
         {
-            var result =
-                new List<float[]>();
+            var result = new List<float[]>();
 
-            foreach (float[] v in
-                objVerts)
+            // Direct index copy when vertex counts match
+            if (samples != null && samples.Count == objVerts.Count)
             {
-                float bestD =
-                    float.MaxValue;
-                float[] bestN =
-                    new float[]
-                    { 0f, 1f, 0f };
-
-                foreach (var s in
-                    samples)
+                for (int i = 0; i < objVerts.Count; i++)
                 {
-                    float dx =
-                        v[0] - s.pos[0];
-                    float dy =
-                        v[1] - s.pos[1];
-                    float dz =
-                        v[2] - s.pos[2];
-                    float d =
-                        dx * dx +
-                        dy * dy +
-                        dz * dz;
-                    if (d < bestD)
+                    result.Add(samples[i].norm);
+                }
+                return result;
+            }
+
+            foreach (float[] v in objVerts)
+            {
+                float bestD = float.MaxValue;
+                float[] bestN = new float[] { 0f, 1f, 0f };
+
+                if (samples != null)
+                {
+                    foreach (var s in samples)
                     {
-                        bestD = d;
-                        bestN = s.norm;
+                        float dx = v[0] - s.pos[0];
+                        float dy = v[1] - s.pos[1];
+                        float dz = v[2] - s.pos[2];
+                        float d = dx * dx + dy * dy + dz * dz;
+                        if (d < bestD)
+                        {
+                            bestD = d;
+                            bestN = s.norm;
+                        }
                     }
                 }
                 result.Add(bestN);
