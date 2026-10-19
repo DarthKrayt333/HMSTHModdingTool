@@ -701,6 +701,36 @@ namespace HMSTHModdingTool
                 switch (cmd)
                 {
                     // ════════════════════════
+                    // READ-ONLY ARCHIVE VALIDATION
+                    // ════════════════════════
+                    case "verify":
+                        {
+                            if (args.Length != 2 && args.Length != 4)
+                            {
+                                Console.WriteLine("Usage: verify <file.hda|file.rdtb|file.gdtb|file.srdb> [--json <report.json>]");
+                                return;
+                            }
+
+                            string jsonPath = null;
+                            if (args.Length == 4)
+                            {
+                                if (!args[2].Equals("--json", StringComparison.OrdinalIgnoreCase) &&
+                                    !args[2].Equals("-json", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    Console.WriteLine("Usage: verify <file.hda|file.rdtb|file.gdtb|file.srdb> [--json <report.json>]");
+                                    return;
+                                }
+                                jsonPath = args[3];
+                            }
+
+                            // Validation is read-only. Its own report includes PASS/FAIL,
+                            // so don't append the generic success message for malformed files.
+                            ArchiveValidator.Verify(args[1], jsonPath);
+                            customFinish = true;
+                        }
+                        break;
+
+                    // ════════════════════════
                     // HDA COMMANDS
                     // ════════════════════════
                     case "xhda":
@@ -3126,6 +3156,53 @@ namespace HMSTHModdingTool
                         break;
 
                     // ════════════════════════
+                    // BATCH 3D EXPORT WITH MANIFEST
+                    // ════════════════════════
+                    case "batch3d":
+                        {
+                            if (args.Length < 3)
+                            {
+                                Console.WriteLine("Usage: batch3d <input-directory|archive.hda> <output-directory> [--overwrite] [--split] [--gdtb <file.gdtb>]");
+                                break;
+                            }
+
+                            bool batchOverwrite = false;
+                            bool batchSplit = false;
+                            string batchGdtb = null;
+                            for (int optionIndex = 3; optionIndex < args.Length; optionIndex++)
+                            {
+                                string option = args[optionIndex];
+                                if (option.Equals("--overwrite", StringComparison.OrdinalIgnoreCase) ||
+                                    option.Equals("-overwrite", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    batchOverwrite = true;
+                                }
+                                else if (option.Equals("--split", StringComparison.OrdinalIgnoreCase) ||
+                                    option.Equals("-split", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    batchSplit = true;
+                                }
+                                else if (option.Equals("--gdtb", StringComparison.OrdinalIgnoreCase) ||
+                                    option.Equals("-gdtb", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    if (optionIndex + 1 >= args.Length)
+                                        throw new ArgumentException("The --gdtb option requires a file path.");
+                                    batchGdtb = args[++optionIndex];
+                                }
+                                else
+                                {
+                                    throw new ArgumentException("Unknown batch3d option: " + option);
+                                }
+                            }
+
+                            Batch3DExporter.Run(
+                                args[1], args[2], batchOverwrite, batchSplit,
+                                batchGdtb, Extract3DModel);
+                            customFinish = true;
+                        }
+                        break;
+
+                    // ════════════════════════
                     // DIRECT OBJ -> GLB CONVERSION
                     // ════════════════════════
                     case "obj2glb":
@@ -4126,7 +4203,7 @@ namespace HMSTHModdingTool
                 new System.Collections
                     .Generic.HashSet<string>
                 {
-                    "xhda",       "chda",
+                    "verify",     "xhda",       "chda",
                     "raw",        "uncomp",
                     "comp",
                     "compress",   "uncompress",
@@ -4170,7 +4247,7 @@ namespace HMSTHModdingTool
                     "boymodv4",
                     "boyoriginal","boyrestore",
                     "boyback",    "boyorig",
-                    "x3d",        "c3d", "x3dglb", "obj2glb",
+                    "x3d",        "c3d", "x3dglb", "obj2glb", "batch3d",
                     "scanbatch",
                     "xbatch", "extractbatch",
                     "xmodel", "extractmodel",
@@ -4233,6 +4310,18 @@ namespace HMSTHModdingTool
         // ═════════════════════════════════════
         static void PrintUsage()
         {
+            // ── Read-only validation ──────────
+            Console.ForegroundColor =
+                ConsoleColor.White;
+            Console.WriteLine(
+                "=== Archive Validation ===");
+            Console.ResetColor();
+            Console.WriteLine(
+                "  -verify <file.hda|file.rdtb|file.gdtb|file.srdb> [--json <report.json>]");
+            Console.WriteLine(
+                "    Check archive headers, offset tables, and data bounds without modifying the input.");
+            Console.WriteLine();
+
             // ── HDA ───────────────────────────
             Console.ForegroundColor =
                 ConsoleColor.White;
@@ -5122,6 +5211,18 @@ namespace HMSTHModdingTool
             Console.WriteLine(
                 "    Convert an existing OBJ/MTL/texture set"
                 + " to a self-contained GLB.");
+            Console.WriteLine(
+                "  -batch3d <input-dir|archive.hda> <output-dir>"
+                + " [--overwrite] [--split] [--gdtb <file.gdtb>]");
+            Console.WriteLine(
+                "    Batch export RDTB/SRDB models to OBJ and GLB"
+                + " with manifest.json and per-model status.");
+            Console.WriteLine(
+                "    Ambiguous GDTB pairs are skipped unless"
+                + " an explicit --gdtb is supplied.");
+            Console.WriteLine(
+                "    --overwrite replaces only obj/, glb/, and"
+                + " manifest.json in the output directory.");
             Console.WriteLine(
                 "    GLB includes mesh, UVs, normals, materials,"
                 + " and embedded BMP-derived PNG textures.");
