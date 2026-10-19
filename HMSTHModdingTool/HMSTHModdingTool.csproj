@@ -38,6 +38,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System" />
+    <Reference Include="System.Drawing" />
     <Reference Include="System.Core" />
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
@@ -70,6 +71,7 @@
     <Compile Include="IO\IsoFakeYear.cs" />
     <Compile Include="IO\IsoLogoPatcher.cs" />
     <Compile Include="IO\IsoRepair.cs" />
+    <Compile Include="IO\ObjGltfExporter.cs" />
     <Compile Include="RDTB\RDTB3D.cs" />
     <Compile Include="RDTB\RDTBArchive.cs" />
     <Compile Include="Program.cs" />

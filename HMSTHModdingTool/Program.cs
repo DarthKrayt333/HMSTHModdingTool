@@ -1,4 +1,4 @@
-using HMSTHModdingTool;
+﻿using HMSTHModdingTool;
 using HMSTHModdingTool.BMP;
 using HMSTHModdingTool.BoyMods;
 using HMSTHModdingTool.GDTB;
@@ -21,7 +21,7 @@ namespace HMSTHModdingTool
             "HMSTHModdingTool original as" +
             " HDATextTool by gdkchan";
         const string TOOL_VERSION =
-            "v1.6.0-Beta";
+            "v1.5.9-Beta";
         const string TOOL_AUTHOR =
             "gdkchan + DarthKrayt333" +
             " & HMSTH Community";
@@ -68,15 +68,20 @@ namespace HMSTHModdingTool
                     string input =
                         Console.ReadLine();
 
+                    // EOF means the input stream has closed. Continuing here
+                    // would spin forever and consume CPU in redirected sessions.
                     if (input == null)
-                        continue;
+                    {
+                        Console.WriteLine();
+                        break;
+                    }
                     input = input.Trim();
                     if (input == string.Empty)
                         continue;
 
-                    if (input.ToLower() == "exit" ||
-                        input.ToLower() == "quit" ||
-                        input.ToLower() == "q")
+                    if (input.Equals("exit", StringComparison.OrdinalIgnoreCase) ||
+                        input.Equals("quit", StringComparison.OrdinalIgnoreCase) ||
+                        input.Equals("q", StringComparison.OrdinalIgnoreCase))
                     {
                         Console.ForegroundColor =
                             ConsoleColor.Cyan;
@@ -86,15 +91,15 @@ namespace HMSTHModdingTool
                         break;
                     }
 
-                    if (input.ToLower() == "help" ||
-                        input.ToLower() == "?")
+                    if (input.Equals("help", StringComparison.OrdinalIgnoreCase) ||
+                        input.Equals("?", StringComparison.OrdinalIgnoreCase))
                     {
                         PrintUsage();
                         continue;
                     }
 
-                    if (input.ToLower() == "cls" ||
-                        input.ToLower() == "clear")
+                    if (input.Equals("cls", StringComparison.OrdinalIgnoreCase) ||
+                        input.Equals("clear", StringComparison.OrdinalIgnoreCase))
                     {
                         Console.Clear();
                         Console.ForegroundColor =
@@ -150,11 +155,11 @@ namespace HMSTHModdingTool
         {
             if (cmd.StartsWith("--"))
                 return cmd.Substring(2)
-                    .ToLower();
+                    .ToLowerInvariant();
             if (cmd.StartsWith("-"))
                 return cmd.Substring(1)
-                    .ToLower();
-            return cmd.ToLower();
+                    .ToLowerInvariant();
+            return cmd.ToLowerInvariant();
         }
 
         // ═════════════════════════════════════
@@ -609,6 +614,75 @@ namespace HMSTHModdingTool
                 Console.WriteLine();
                 aborted = true;
                 return GameVersion.USA;
+            }
+        }
+
+        // Detect model container by its magic bytes, with an extension fallback.
+        private static string DetectModelFileType(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                return "unknown";
+            try
+            {
+                byte[] hdr = new byte[8];
+                using (var fs = File.OpenRead(path))
+                    fs.Read(hdr, 0, hdr.Length);
+                if (hdr[0] == 0x52 && hdr[1] == 0x44 &&
+                    hdr[2] == 0x54 && hdr[3] == 0x42)
+                    return "rdtb";
+                if (hdr[0] == 0x53 && hdr[1] == 0x52 &&
+                    hdr[2] == 0x44 && hdr[3] == 0x42)
+                    return "srdb";
+                string ext = Path.GetExtension(path).ToLowerInvariant();
+                if (ext == ".rdtb") return "rdtb";
+                if (ext == ".srdb") return "srdb";
+            }
+            catch { }
+            return "unknown";
+        }
+
+        // Shared extraction path for x3d and x3dglb. Keeps the established RDTB/SRDB
+        // parser and the project's post-processing fixes in one place.
+        private static void Extract3DModel(string[] modelArgs, bool splitMode)
+        {
+            if (modelArgs == null || modelArgs.Length != 3)
+            {
+                Console.WriteLine("Usage: x3d <rdtb_or_srdb> <gdtb> <base>");
+                return;
+            }
+
+            string fileType = DetectModelFileType(modelArgs[0]);
+            if (fileType == "srdb")
+            {
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.WriteLine("[Auto-detect] SRDB file detected -> xsrdb3d");
+                Console.ResetColor();
+                SRDBArchive.Extract3D(modelArgs[0], modelArgs[1], modelArgs[2]);
+
+                string outDirFix = Path.GetDirectoryName(Path.GetFullPath(modelArgs[0]));
+                string[] folderSuffixes = { "_embedded_rdtbs_obj", "_all_obj" };
+                foreach (string fSuffix in folderSuffixes)
+                {
+                    string fPath = Path.Combine(outDirFix, modelArgs[2] + fSuffix);
+                    SRDBEmbedObjTextureFixer.ApplyForSRDB(fPath);
+                }
+            }
+            else
+            {
+                if (splitMode)
+                    Model3D.ExtractSplit(modelArgs[0], modelArgs[1], modelArgs[2]);
+                else
+                    Model3D.Extract(modelArgs[0], modelArgs[1], modelArgs[2]);
+
+                RDTBBatchFolder.ExtractBatchFolder(modelArgs[0], modelArgs[1], modelArgs[2]);
+
+                string outDirFix = Path.GetDirectoryName(Path.GetFullPath(modelArgs[0]));
+                string[] folderSuffixes = { "_obj", "_all_obj" };
+                foreach (string fSuffix in folderSuffixes)
+                {
+                    string fPath = Path.Combine(outDirFix, modelArgs[2] + fSuffix);
+                    SRDBEmbedObjTextureFixer.ApplyForRDTB(modelArgs[0], fPath, modelArgs[2]);
+                }
             }
         }
 
@@ -3051,35 +3125,67 @@ namespace HMSTHModdingTool
                                 args[2]);
                         break;
 
-                        // ═════════════════════════════════════
-                        // DETECT FILE TYPE BY MAGIC BYTES
-                        // ═════════════════════════════════════
-                        string DetectFileType(string path)
+                    // ════════════════════════
+                    // DIRECT OBJ -> GLB CONVERSION
+                    // ════════════════════════
+                    case "obj2glb":
                         {
-                            if (!File.Exists(path))
-                                return "unknown";
-                            try
+                            if (args.Length < 2 || args.Length > 3)
                             {
-                                byte[] hdr = new byte[8];
-                                using (var fs = File.OpenRead(path))
-                                    fs.Read(hdr, 0, 8);
-                                // RDTB magic: 52 44 54 42
-                                if (hdr[0] == 0x52 && hdr[1] == 0x44 &&
-                                    hdr[2] == 0x54 && hdr[3] == 0x42)
-                                    return "rdtb";
-                                // SRDB magic: 53 52 44 42
-                                if (hdr[0] == 0x53 && hdr[1] == 0x52 &&
-                                    hdr[2] == 0x44 && hdr[3] == 0x42)
-                                    return "srdb";
-                                // Check extension fallback
-                                string ext = Path.GetExtension(path)
-                                    .ToLower();
-                                if (ext == ".rdtb") return "rdtb";
-                                if (ext == ".srdb") return "srdb";
+                                Console.WriteLine("Usage: obj2glb <input.obj> [output.glb]");
+                                return;
                             }
-                            catch { }
-                            return "unknown";
+
+                            string objPath = args[1];
+                            string glbPath = args.Length == 3
+                                ? args[2]
+                                : Path.ChangeExtension(objPath, ".glb");
+
+                            ObjGltfExporter.ConvertObjToGlb(objPath, glbPath);
+                            Console.ForegroundColor = ConsoleColor.Green;
+                            Console.WriteLine("[OK] GLB created: " + Path.GetFullPath(glbPath));
+                            Console.ResetColor();
                         }
+                        break;
+
+                    // ════════════════════════
+                    // 3D MODEL EXPORT: OBJ + GLB
+                    // Reuses the established x3d extraction path, then packages
+                    // complete OBJ models into self-contained glTF binary files.
+                    // ════════════════════════
+                    case "x3dglb":
+                        {
+                            bool exportSplitMode = false;
+                            int exportArgStart = 1;
+                            if (args.Length > 1 &&
+                                args[1].ToLowerInvariant().TrimStart('-') == "split")
+                            {
+                                exportSplitMode = true;
+                                exportArgStart = 2;
+                            }
+
+                            var exportArgs = new string[args.Length - exportArgStart];
+                            Array.Copy(args, exportArgStart, exportArgs, 0, exportArgs.Length);
+                            if (exportArgs.Length != 3)
+                            {
+                                Console.WriteLine("Usage: x3dglb [split] <file.rdtb|file.srdb> <file.gdtb> <base>");
+                                Console.WriteLine("Creates the existing OBJ output plus adjacent self-contained GLB model files.");
+                                break;
+                            }
+
+                            // Execute the same extraction path directly so errors stop this
+                            // command before any previously generated OBJ can be re-exported.
+                            Extract3DModel(exportArgs, exportSplitMode);
+
+                            string exportRoot = Path.GetDirectoryName(
+                                Path.GetFullPath(exportArgs[0]));
+                            int glbCount = ObjGltfExporter.ExportModelFolders(
+                                exportRoot, exportArgs[2]);
+                            if (glbCount == 0)
+                                throw new InvalidOperationException(
+                                    "No GLB was created. Check the x3d extraction output and the OBJ/MTL files.");
+                        }
+                        break;
 
                     // ════════════════════════
                     // 3D MODEL COMMANDS
@@ -3088,121 +3194,18 @@ namespace HMSTHModdingTool
                         {
                             bool splitMode = false;
                             int argStart = 1;
-                            if (args.Length > 1
-                                && args[1].ToLower().TrimStart('-')
-                                    == "split")
+                            if (args.Length > 1 &&
+                                args[1].ToLowerInvariant().TrimStart('-') == "split")
                             {
                                 splitMode = true;
                                 argStart = 2;
                             }
-                            var rem3d = new string[
-                                args.Length - argStart];
-                            Array.Copy(args, argStart,
-                                rem3d, 0, rem3d.Length);
-
+                            var rem3d = new string[args.Length - argStart];
+                            Array.Copy(args, argStart, rem3d, 0, rem3d.Length);
                             if (rem3d.Length == 3)
-                            {
-                                // Auto-detect file type
-                                string fileType =
-                                    DetectFileType(rem3d[0]);
-                                if (fileType == "srdb")
-                                {
-                                    // Route to SRDB 3D extractor
-                                    Console.ForegroundColor =
-                                        ConsoleColor.Cyan;
-                                    Console.WriteLine(
-                                        "[Auto-detect] SRDB file" +
-                                        " detected -> xsrdb3d");
-                                    Console.ResetColor();
-                                    SRDBArchive.Extract3D(
-                                        rem3d[0],
-                                        rem3d[1],
-                                        rem3d[2]);
-
-                                    // ═══════════════════════════
-                                    // FIX: Post-process to align
-                                    // textures in _obj folders
-                                    // ═══════════════════════════
-                                    string outDirFix =
-                                        Path.GetDirectoryName(
-                                            Path.GetFullPath(
-                                                rem3d[0]));
-                                    string[] folderSuffixes =
-                                        new string[]
-                                        {
-                                            "_embedded_rdtbs_obj",
-                                            "_all_obj",
-                                        };
-                                    foreach (string fSuffix in
-                                        folderSuffixes)
-                                    {
-                                        string fPath =
-                                            Path.Combine(
-                                                outDirFix,
-                                                rem3d[2] + fSuffix);
-                                        SRDBEmbedObjTextureFixer
-                                            .ApplyForSRDB(fPath);
-                                    }
-                                }
-                                else
-                                {
-                                    // Default RDTB path
-                                    if (splitMode)
-                                        Model3D.ExtractSplit(
-                                            rem3d[0],
-                                            rem3d[1],
-                                            rem3d[2]);
-                                    else
-                                        Model3D.Extract(
-                                            rem3d[0],
-                                            rem3d[1],
-                                            rem3d[2]);
-
-                                    // NEW: Also extract
-                                    // 5th batch folder
-                                    RDTBBatchFolder
-                                        .ExtractBatchFolder(
-                                            rem3d[0],
-                                            rem3d[1],
-                                            rem3d[2]);
-
-                                    // ═══════════════════════════
-                                    // FIX: Post-process to align
-                                    // textures in _obj folder
-                                    // for embedded/small RDTBs
-                                    // ═══════════════════════════
-                                    string outDirFix2 =
-                                        Path.GetDirectoryName(
-                                            Path.GetFullPath(
-                                                rem3d[0]));
-                                    string[] rdtbSuffixes =
-                                        new string[]
-                                        {
-                                            "_obj",
-                                            "_all_obj",
-                                        };
-                                    foreach (string fSuffix in
-                                        rdtbSuffixes)
-                                    {
-                                        string fPath =
-                                            Path.Combine(
-                                                outDirFix2,
-                                                rem3d[2] + fSuffix);
-                                        HMSTHModdingTool.SRDB
-                                            .SRDBEmbedObjTextureFixer
-                                            .ApplyForRDTB(
-                                                rem3d[0],
-                                                fPath,
-                                                rem3d[2]);
-                                    }
-                                }
-                            }
+                                Extract3DModel(rem3d, splitMode);
                             else
-                            {
-                                Console.WriteLine(
-                                    "Usage: x3d <rdtb_or_srdb>" +
-                                    " <gdtb> <base>");
-                            }
+                                Console.WriteLine("Usage: x3d <rdtb_or_srdb> <gdtb> <base>");
                         }
                         break;
 
@@ -4117,7 +4120,7 @@ namespace HMSTHModdingTool
                 return new string[0];
 
             string first =
-                tokens[0].ToLower();
+                tokens[0].ToLowerInvariant();
 
             var knownCommands =
                 new System.Collections
@@ -4167,7 +4170,7 @@ namespace HMSTHModdingTool
                     "boymodv4",
                     "boyoriginal","boyrestore",
                     "boyback",    "boyorig",
-                    "x3d",        "c3d",
+                    "x3d",        "c3d", "x3dglb", "obj2glb",
                     "scanbatch",
                     "xbatch", "extractbatch",
                     "xmodel", "extractmodel",
@@ -4196,7 +4199,7 @@ namespace HMSTHModdingTool
 
             bool secondIsAll =
                 tokens.Count >= 2 &&
-                tokens[1].ToLower() == "all";
+                tokens[1].ToLowerInvariant() == "all";
 
             if (!firstIsCommand &&
                 !secondIsAll &&
@@ -5108,6 +5111,22 @@ namespace HMSTHModdingTool
             Console.WriteLine(
                 "  -x3d <file.rdtb>"
                 + " <file.gdtb> <base>");
+            Console.WriteLine(
+                "  -x3dglb [split] <file.rdtb|file.srdb>"
+                + " <file.gdtb> <base>");
+            Console.WriteLine(
+                "    Export the usual OBJ/MTL/textures plus"
+                + " self-contained GLB model(s).");
+            Console.WriteLine(
+                "  -obj2glb <input.obj> [output.glb]");
+            Console.WriteLine(
+                "    Convert an existing OBJ/MTL/texture set"
+                + " to a self-contained GLB.");
+            Console.WriteLine(
+                "    GLB includes mesh, UVs, normals, materials,"
+                + " and embedded BMP-derived PNG textures.");
+            Console.WriteLine(
+                "    Static mesh export; skeleton animation/weights are not embedded.");
             Console.WriteLine(
                 "    Extract for VIEWING"
                 + " only. Creates:");
