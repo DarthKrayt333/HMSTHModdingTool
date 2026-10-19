@@ -1,4 +1,4 @@
-# HMSTHModdingTool
+﻿# HMSTHModdingTool
 2026 UPDATED - HDA (un)packer and tool for modding in Harvest Moon: Save the Homeland - Original as HDATextTool made by gdkchan
 
 
@@ -7,11 +7,44 @@
 
 ---
 
+### Stability and workflow improvements (October 2026)
+
+- Interactive mode now exits cleanly when standard input reaches EOF instead of spinning indefinitely.
+- Command comparisons use invariant/culture-independent casing.
+- GLB writes use a temporary sibling file and atomic replacement so a failed export does not partially overwrite a prior result; the exporter also refuses to overwrite its source OBJ.
+- Added `obj2glb <input.obj> [output.glb]` to convert an already-extracted OBJ/MTL/texture set without re-running RDTB/SRDB extraction.
+
+
 ## What is this?
 
 HMSTHModdingTool is a modding tool for **Harvest Moon: Save the Homeland** (PS2).
 Originally created by **gdkchan** as **HDATextTool**, it has been expanded with many
 new features to allow deep modding of the game's assets including textures, audio archives, and text.
+
+---
+
+## 3D Model Export (OBJ + GLB)
+
+The `x3dglb` command uses the existing RDTB/SRDB model and GDTB texture parsers, keeps the ordinary OBJ/MTL/textures for editing, and also writes `.glb` files that can be opened directly in Blender, Godot, Unity (via glTF import), and glTF viewers.
+
+```text
+tool.exe x3dglb <file.rdtb|file.srdb> <file.gdtb> <base>
+tool.exe x3dglb split <file.rdtb> <file.gdtb> <base>
+tool.exe obj2glb <input.obj> [output.glb]
+```
+
+Use `obj2glb` when you already have an OBJ exported by this tool or another application. It reads the associated MTL and relative textures; if the output path is omitted, the GLB is written beside the OBJ with the same base name. The GLB output is written through a temporary file before replacing the final file.
+
+For a model stored inside an HDA archive, first unpack the HDA with the existing command, then point `x3dglb` at the matching RDTB and GDTB entries. Example:
+
+```text
+tool.exe xhda DAVID.HDA extracted\DAVID
+tool.exe x3dglb extracted\DAVID\DAVID_00000.RDTB extracted\DAVID\DAVID_00001.GDTB DAVID
+```
+
+GLB output preserves triangle geometry, UV coordinates, exported normals (or recalculates placeholder/missing normals), material grouping, diffuse colors, and supported diffuse textures. BMP textures extracted from GDTB are converted to PNG and embedded in the GLB, so the `.glb` does not depend on separate texture files. The existing OBJ, MTL, and texture files remain available next to the model.
+
+This exporter currently produces **static meshes**. It does not export skeleton hierarchy, skin weights, or animation clips; the model parser's reconstructed mesh positions are used as the exported geometry.
 
 ---
 
