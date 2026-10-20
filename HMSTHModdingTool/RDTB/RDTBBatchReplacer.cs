@@ -1117,83 +1117,151 @@ namespace HMSTHModdingTool.RDTB
                             };
                 }
 
-                else if ((normalsMode == "match" || (sourceIsSmall && autoScaleInvert == 1.0f))
-                    && origNormals.ContainsKey(bi))
+                else if ((normalsMode
+                        == "match" ||
+                        (sourceIsSmall
+                        && autoScaleInvert
+                            == 1.0f))
+                    && origNormals
+                        .ContainsKey(
+                            bi))
                 {
-                    var samples = origNormals[bi];
+                    var samples =
+                        origNormals[bi];
 
-                    if (samples.Count > 0)
+                    if (samples.Count
+                        > 0)
                     {
-                        // INDEX MATCHING (Equal vertex counts):
-                        // Copy game normals directly by vertex index.
-                        // Completely immune to scaling, rotation, or translation!
-                        if (samples.Count == verts.Count && normals.Count >= verts.Count)
+                        // Compute bounding box
+                        // diagonal of original
+                        // samples for auto-
+                        // scaling the distance
+                        // threshold.
+                        float oMnX =
+                            float.MaxValue;
+                        float oMxX =
+                            float.MinValue;
+                        float oMnY =
+                            float.MaxValue;
+                        float oMxY =
+                            float.MinValue;
+                        float oMnZ =
+                            float.MaxValue;
+                        float oMxZ =
+                            float.MinValue;
+                        foreach (var s in
+                            samples)
                         {
-                            for (int i = 0; i < verts.Count; i++)
-                            {
-                                normals[i] = samples[i].norm;
-                            }
+                            if (s.pos[0] < oMnX)
+                                oMnX = s.pos[0];
+                            if (s.pos[0] > oMxX)
+                                oMxX = s.pos[0];
+                            if (s.pos[1] < oMnY)
+                                oMnY = s.pos[1];
+                            if (s.pos[1] > oMxY)
+                                oMxY = s.pos[1];
+                            if (s.pos[2] < oMnZ)
+                                oMnZ = s.pos[2];
+                            if (s.pos[2] > oMxZ)
+                                oMxZ = s.pos[2];
                         }
-                        else
+                        float diagLen =
+                            (float)Math.Sqrt(
+                                (oMxX - oMnX) *
+                                (oMxX - oMnX) +
+                                (oMxY - oMnY) *
+                                (oMxY - oMnY) +
+                                (oMxZ - oMnZ) *
+                                (oMxZ - oMnZ));
+
+                        // Threshold = 3% of
+                        // bounding diagonal.
+                        float distThreshold =
+                            diagLen * 0.03f;
+                        float distThresholdSq =
+                            distThreshold *
+                            distThreshold;
+
+                        for (int i = 0;
+                             i < verts
+                                 .Count;
+                             i++)
                         {
-                            // NEAREST-NEIGHBOR MATCHING (Unequal vertex counts):
-                            // Distance gate threshold for map geometry additions.
-                            float oMnX = float.MaxValue, oMxX = float.MinValue;
-                            float oMnY = float.MaxValue, oMxY = float.MinValue;
-                            float oMnZ = float.MaxValue, oMxZ = float.MinValue;
-                            foreach (var s in samples)
+                            float bestD
+                                = float
+                                    .MaxValue;
+                            float[] bestN
+                                = new float[]
+                                { 0, 1, 0 };
+                            float vx =
+                                verts[i][0];
+                            float vy =
+                                verts[i][1];
+                            float vz =
+                                verts[i][2];
+                            foreach (var s
+                                in samples)
                             {
-                                if (s.pos[0] < oMnX) oMnX = s.pos[0];
-                                if (s.pos[0] > oMxX) oMxX = s.pos[0];
-                                if (s.pos[1] < oMnY) oMnY = s.pos[1];
-                                if (s.pos[1] > oMxY) oMxY = s.pos[1];
-                                if (s.pos[2] < oMnZ) oMnZ = s.pos[2];
-                                if (s.pos[2] > oMxZ) oMxZ = s.pos[2];
+                                float dx =
+                                    vx -
+                                    s.pos[0];
+                                float dy =
+                                    vy -
+                                    s.pos[1];
+                                float dz =
+                                    vz -
+                                    s.pos[2];
+                                float d =
+                                    dx * dx +
+                                    dy * dy +
+                                    dz * dz;
+                                if (d <
+                                    bestD)
+                                {
+                                    bestD =
+                                        d;
+                                    bestN =
+                                        s.norm;
+                                }
                             }
-                            float diagLen = (float)Math.Sqrt(
-                                (oMxX - oMnX) * (oMxX - oMnX) +
-                                (oMxY - oMnY) * (oMxY - oMnY) +
-                                (oMxZ - oMnZ) * (oMxZ - oMnZ));
 
-                            float distThreshold = diagLen * 0.03f;
-                            float distThresholdSq = distThreshold * distThreshold;
-
-                            for (int i = 0; i < verts.Count; i++)
+                            // Distance gate ONLY
+                            // for small RDTB maps
+                            // (where user adds new
+                            // geometry like statues).
+                            // For BIG/MIRROR sources
+                            // (characters like BOY),
+                            // ALWAYS copy the game's
+                            // original normal —
+                            // nearest-neighbor is
+                            // the correct behavior
+                            // for character mods.
+                            if (sourceIsSmall
+                                && bestD >
+                                    distThresholdSq)
                             {
-                                float bestD = float.MaxValue;
-                                float[] bestN = new float[] { 0, 1, 0 };
-                                float vx = verts[i][0];
-                                float vy = verts[i][1];
-                                float vz = verts[i][2];
-                                foreach (var s in samples)
-                                {
-                                    float dx = vx - s.pos[0];
-                                    float dy = vy - s.pos[1];
-                                    float dz = vz - s.pos[2];
-                                    float d = dx * dx + dy * dy + dz * dz;
-                                    if (d < bestD)
-                                    {
-                                        bestD = d;
-                                        bestN = s.norm;
-                                    }
-                                }
-
-                                if (sourceIsSmall && bestD > distThresholdSq)
-                                {
-                                    // Keep Blender normal
-                                }
-                                else
-                                {
-                                    if (i < normals.Count)
-                                        normals[i] = bestN;
-                                }
+                                // Small RDTB + far
+                                // from original →
+                                // keep Blender normal
+                            }
+                            else
+                            {
+                                if (i < normals
+                                        .Count)
+                                    normals[i]
+                                        = bestN;
                             }
                         }
                     }
                     else
                     {
-                        for (int i = 0; i < normals.Count; i++)
-                            normals[i] = new float[] { 0, 0, 0 };
+                        for (int i = 0;
+                             i < normals
+                                 .Count;
+                             i++)
+                            normals[i] =
+                                new float[]
+                                { 0, 0, 0 };
                     }
                 }
 

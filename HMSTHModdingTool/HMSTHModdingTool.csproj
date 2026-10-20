@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="14.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
   <PropertyGroup>
@@ -38,6 +38,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System" />
+    <Reference Include="System.Drawing" />
     <Reference Include="System.Core" />
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
@@ -53,6 +54,8 @@
     <Compile Include="BoyMods\UniversalBoneScaler.cs" />
     <Compile Include="IO\AudioBank.cs" />
     <Compile Include="IO\AudioConverter.cs" />
+    <Compile Include="IO\ArchiveValidator.cs" />
+    <Compile Include="IO\Batch3DExporter.cs" />
     <Compile Include="IO\BadEndingRemover.cs" />
     <Compile Include="IO\Compression\HarvestCompression.cs" />
     <Compile Include="GDTB\PS2Converter.cs" />
@@ -70,6 +73,7 @@
     <Compile Include="IO\IsoFakeYear.cs" />
     <Compile Include="IO\IsoLogoPatcher.cs" />
     <Compile Include="IO\IsoRepair.cs" />
+    <Compile Include="IO\ObjGltfExporter.cs" />
     <Compile Include="RDTB\RDTB3D.cs" />
     <Compile Include="RDTB\RDTBArchive.cs" />
     <Compile Include="Program.cs" />

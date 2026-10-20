@@ -492,80 +492,52 @@ namespace HMSTHModdingTool.RDTB
                 gameVerts.Count, n);
             if (cnt == 0) return 0;
 
-            // ── DIRECT OBJ POSITIONS (1:1 VERTEX COUNT) ──
-            // When OBJ vertex count matches original game vertex count,
-            // write OBJ positions directly. This is the ONLY path that
-            // preserves rotation (centroid-delta cannot encode rotation).
-            if (objVerts.Count == cnt && gameVerts.Count == cnt)
-            {
-                bool any = false;
-                for (int i = 0; i < cnt; i++)
-                {
-                    if (Math.Abs(objVerts[i][0] - gameVerts[i][0]) > EPS
-                        || Math.Abs(objVerts[i][1] - gameVerts[i][1]) > EPS
-                        || Math.Abs(objVerts[i][2] - gameVerts[i][2]) > EPS)
-                    {
-                        any = true;
-                        break;
-                    }
-                }
-
-                if (!any)
-                {
-                    // Restore original bytes if unchanged
-                    for (int i = 0; i < cnt; i++)
-                    {
-                        int outRow = outVertOffs[i];
-                        Array.Copy(
-                            originalData,
-                            origVertOffs[i] + 4,
-                            outputData,
-                            outRow + 4, 12);
-                    }
-                    return 0;
-                }
-
-                int changedCount = 0;
-                for (int i = 0; i < cnt; i++)
-                {
-                    int outRow = outVertOffs[i];
-                    WriteFloat(outputData, outRow + 4, objVerts[i][0]);
-                    WriteFloat(outputData, outRow + 8, objVerts[i][1]);
-                    WriteFloat(outputData, outRow + 12, objVerts[i][2]);
-                    changedCount++;
-                }
-                return changedCount;
-            }
-
-            // ── FALLBACK: COMPUTE CENTROIDS FOR CHANGED COUNT ──
-            double gSumX = 0, gSumY = 0, gSumZ = 0;
+            // ── COMPUTE CENTROIDS ──────────
+            // Centroid of original game verts
+            double gSumX = 0, gSumY = 0,
+                gSumZ = 0;
             for (int i = 0; i < cnt; i++)
             {
                 gSumX += gameVerts[i][0];
                 gSumY += gameVerts[i][1];
                 gSumZ += gameVerts[i][2];
             }
-            float gCentX = (float)(gSumX / cnt);
-            float gCentY = (float)(gSumY / cnt);
-            float gCentZ = (float)(gSumZ / cnt);
+            float gCentX =
+                (float)(gSumX / cnt);
+            float gCentY =
+                (float)(gSumY / cnt);
+            float gCentZ =
+                (float)(gSumZ / cnt);
 
-            double oSumX = 0, oSumY = 0, oSumZ = 0;
+            // Centroid of OBJ verts
+            double oSumX = 0, oSumY = 0,
+                oSumZ = 0;
             for (int i = 0; i < cnt; i++)
             {
                 oSumX += objVerts[i][0];
                 oSumY += objVerts[i][1];
                 oSumZ += objVerts[i][2];
             }
-            float oCentX = (float)(oSumX / cnt);
-            float oCentY = (float)(oSumY / cnt);
-            float oCentZ = (float)(oSumZ / cnt);
+            float oCentX =
+                (float)(oSumX / cnt);
+            float oCentY =
+                (float)(oSumY / cnt);
+            float oCentZ =
+                (float)(oSumZ / cnt);
 
-            float gMinX = float.MaxValue, gMaxX = float.MinValue;
-            float gMinY = float.MaxValue, gMaxY = float.MinValue;
-            float gMinZ = float.MaxValue, gMaxZ = float.MinValue;
-            float oMinX = float.MaxValue, oMaxX = float.MinValue;
-            float oMinY = float.MaxValue, oMaxY = float.MinValue;
-            float oMinZ = float.MaxValue, oMaxZ = float.MinValue;
+            // ── COMPUTE BBOX FOR SCALE ─────
+            float gMinX = float.MaxValue;
+            float gMaxX = float.MinValue;
+            float gMinY = float.MaxValue;
+            float gMaxY = float.MinValue;
+            float gMinZ = float.MaxValue;
+            float gMaxZ = float.MinValue;
+            float oMinX = float.MaxValue;
+            float oMaxX = float.MinValue;
+            float oMinY = float.MaxValue;
+            float oMaxY = float.MinValue;
+            float oMinZ = float.MaxValue;
+            float oMaxZ = float.MinValue;
 
             for (int i = 0; i < cnt; i++)
             {
@@ -592,35 +564,68 @@ namespace HMSTHModdingTool.RDTB
             float oSy = oMaxY - oMinY;
             float oSz = oMaxZ - oMinZ;
 
-            float scaleX = (gSx > 0.001f) ? (oSx / gSx) : 1.0f;
-            float scaleY = (gSy > 0.001f) ? (oSy / gSy) : 1.0f;
-            float scaleZ = (gSz > 0.001f) ? (oSz / gSz) : 1.0f;
+            float scaleX =
+                (gSx > 0.001f)
+                ? (oSx / gSx) : 1.0f;
+            float scaleY =
+                (gSy > 0.001f)
+                ? (oSy / gSy) : 1.0f;
+            float scaleZ =
+                (gSz > 0.001f)
+                ? (oSz / gSz) : 1.0f;
 
-            bool scaled = Math.Abs(scaleX - 1.0f) > 0.005f
-                || Math.Abs(scaleY - 1.0f) > 0.005f
-                || Math.Abs(scaleZ - 1.0f) > 0.005f;
+            bool scaled =
+                Math.Abs(scaleX - 1.0f)
+                    > 0.005f
+                || Math.Abs(scaleY - 1.0f)
+                    > 0.005f
+                || Math.Abs(scaleZ - 1.0f)
+                    > 0.005f;
 
+            // ── CENTROID-TO-CENTROID MOVE ──
+            // This works in any coordinate
+            // space because it measures the
+            // RELATIVE shift of the cloud
+            // center — bone offset cancels
+            // out since it is the same
+            // constant added to all verts
+            // in both OBJ and game space.
             float moveX = oCentX - gCentX;
             float moveY = oCentY - gCentY;
             float moveZ = oCentZ - gCentZ;
 
-            bool moved = Math.Abs(moveX) > 0.005f
+            bool moved =
+                Math.Abs(moveX) > 0.005f
                 || Math.Abs(moveY) > 0.005f
                 || Math.Abs(moveZ) > 0.005f;
 
             if (!scaled && !moved)
             {
-                for (int i = 0; i < cnt; i++)
+                // No real edit detected.
+                // Restore original bytes.
+                for (int i = 0;
+                     i < cnt; i++)
                 {
-                    int outRow = outVertOffs[i];
-                    Array.Copy(originalData, origVertOffs[i] + 4, outputData, outRow + 4, 12);
+                    int outRow =
+                        outVertOffs[i];
+                    Array.Copy(
+                        originalData,
+                        origVertOffs[i] + 4,
+                        outputData,
+                        outRow + 4, 12);
                 }
                 return 0;
             }
 
-            float gBbCx = (gMinX + gMaxX) * 0.5f;
-            float gBbCy = (gMinY + gMaxY) * 0.5f;
-            float gBbCz = (gMinZ + gMaxZ) * 0.5f;
+            // ── APPLY TRANSFORM ───────────
+            // Scale around game bbox center,
+            // then translate by centroid delta
+            float gBbCx =
+                (gMinX + gMaxX) * 0.5f;
+            float gBbCy =
+                (gMinY + gMaxY) * 0.5f;
+            float gBbCz =
+                (gMinZ + gMaxZ) * 0.5f;
 
             int changed = 0;
             for (int i = 0; i < cnt; i++)
@@ -630,21 +635,37 @@ namespace HMSTHModdingTool.RDTB
 
                 if (scaled)
                 {
-                    newX = (g[0] - gBbCx) * scaleX + gBbCx + moveX;
-                    newY = (g[1] - gBbCy) * scaleY + gBbCy + moveY;
-                    newZ = (g[2] - gBbCz) * scaleZ + gBbCz + moveZ;
+                    // Scale around bbox center
+                    // of game verts, then
+                    // add centroid move delta
+                    newX = (g[0] - gBbCx)
+                        * scaleX + gBbCx
+                        + moveX;
+                    newY = (g[1] - gBbCy)
+                        * scaleY + gBbCy
+                        + moveY;
+                    newZ = (g[2] - gBbCz)
+                        * scaleZ + gBbCz
+                        + moveZ;
                 }
                 else
                 {
+                    // Pure translation:
+                    // add centroid delta
+                    // to each original
+                    // game vert
                     newX = g[0] + moveX;
                     newY = g[1] + moveY;
                     newZ = g[2] + moveZ;
                 }
 
                 int outRow = outVertOffs[i];
-                WriteFloat(outputData, outRow + 4, newX);
-                WriteFloat(outputData, outRow + 8, newY);
-                WriteFloat(outputData, outRow + 12, newZ);
+                WriteFloat(outputData,
+                    outRow + 4, newX);
+                WriteFloat(outputData,
+                    outRow + 8, newY);
+                WriteFloat(outputData,
+                    outRow + 12, newZ);
                 changed++;
             }
             return changed;
