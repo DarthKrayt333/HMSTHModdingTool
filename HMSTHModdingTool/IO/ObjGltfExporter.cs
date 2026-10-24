@@ -389,7 +389,13 @@ namespace HMSTHModdingTool.IO
                 if (File.Exists(temporaryPath))
                 {
                     try { File.Delete(temporaryPath); }
-                    catch { /* Preserve the primary export error. */ }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine(
+                            "[WARN] Could not remove temporary export file '" +
+                            temporaryPath + "' while preserving the primary export result: " +
+                            ex.Message);
+                    }
                 }
             }
         }
