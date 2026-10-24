@@ -210,7 +210,12 @@ namespace HMSTHModdingTool.RDTB
                         tempFolder,
                         true);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine(
+                        "[WARN] Could not remove temporary OBJ folder '" +
+                        tempFolder + "': " + ex.Message);
+                }
             }
             Directory.CreateDirectory(
                 tempFolder);
