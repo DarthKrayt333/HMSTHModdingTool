@@ -237,6 +237,10 @@ namespace HMSTHModdingTool.SRDB
                 throw new InvalidDataException(
                     "Not SRDB: " + Path);
 
+            if (Data.Length < 0x10)
+                throw new InvalidDataException(
+                    "SRDB header or first offset is truncated: " + Path);
+
             Version =
                 BitConverter.ToUInt32(
                     Data, 0x04);
