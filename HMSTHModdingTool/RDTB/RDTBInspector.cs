@@ -531,7 +531,12 @@ namespace HMSTHModdingTool.RDTB
                             if (z > maxZ)
                                 maxZ = z;
                         }
-                        catch { }
+                        catch (Exception ex)
+                        {
+                            Console.Error.WriteLine(
+                                "[WARN] Ignoring malformed OBJ vertex in '" +
+                                objPath + "': " + ex.Message);
+                        }
                     }
                     else if (h == "vn")
                         normals++;
