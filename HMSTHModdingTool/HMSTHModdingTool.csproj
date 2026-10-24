@@ -74,6 +74,7 @@
     <Compile Include="IO\IsoLogoPatcher.cs" />
     <Compile Include="IO\IsoRepair.cs" />
     <Compile Include="IO\ObjGltfExporter.cs" />
+    <Compile Include="IO\GltfValidatorRunner.cs" />
     <Compile Include="RDTB\RDTB3D.cs" />
     <Compile Include="RDTB\RDTBArchive.cs" />
     <Compile Include="Program.cs" />
