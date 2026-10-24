@@ -52,7 +52,26 @@ namespace HMSTHModdingTool.IO
         /// </summary>
         private static int GetVagParamOffset(byte[] hd, int vagi, int index)
         {
-            return (int)ReadU32LE(hd, vagi + VAGI_PARAM_TABLE_OFFSET + (index * 4));
+            if (hd == null || vagi < 0 || index < 0)
+                throw new InvalidDataException(
+                    "Invalid HD VAG parameter table reference.");
+
+            long tableEntry = (long)vagi + VAGI_PARAM_TABLE_OFFSET +
+                (long)index * 4L;
+            if (tableEntry < 0 || tableEntry > hd.Length - 4L)
+                throw new InvalidDataException(
+                    "HD VAG parameter table entry " + index +
+                    " is outside the file.");
+
+            uint relativeOffset = ReadU32LE(hd, (int)tableEntry);
+            long recordOffset = (long)vagi + relativeOffset;
+            if (recordOffset < 0 || recordOffset > hd.Length - 6L ||
+                relativeOffset > int.MaxValue)
+                throw new InvalidDataException(
+                    "HD VAG parameter record " + index +
+                    " points outside the file.");
+
+            return (int)relativeOffset;
         }
 
         /// <summary>
@@ -61,7 +80,13 @@ namespace HMSTHModdingTool.IO
         /// </summary>
         private static int GetVagOffset(byte[] hd, int vagi, int index)
         {
-            return (int)ReadU32LE(hd, vagi + GetVagParamOffset(hd, vagi, index) + 0x00);
+            int recordOffset = vagi + GetVagParamOffset(hd, vagi, index);
+            uint offset = ReadU32LE(hd, recordOffset);
+            if (offset > int.MaxValue)
+                throw new InvalidDataException(
+                    "HD VAG offset for index " + index +
+                    " exceeds the supported file size.");
+            return (int)offset;
         }
 
         /// <summary>
@@ -70,7 +95,8 @@ namespace HMSTHModdingTool.IO
         /// </summary>
         private static ushort GetVagSampleRate(byte[] hd, int vagi, int index)
         {
-            return ReadU16LE(hd, vagi + GetVagParamOffset(hd, vagi, index) + 0x04);
+            int recordOffset = vagi + GetVagParamOffset(hd, vagi, index);
+            return ReadU16LE(hd, recordOffset + 0x04);
         }
 
         /// <summary>
@@ -97,17 +123,36 @@ namespace HMSTHModdingTool.IO
         /// </summary>
         private static int GetVagSize(byte[] hd, int vagi, int index, int maxIndex)
         {
+            if (index < 0 || index > maxIndex)
+                throw new ArgumentOutOfRangeException("index");
+
             int vagOffset = GetVagOffset(hd, vagi, index);
+            if (vagOffset < 0)
+                throw new InvalidDataException(
+                    "HD VAG offset for index " + index + " is negative.");
+
+            long size;
             if (index < maxIndex)
             {
                 int nextOffset = GetVagOffset(hd, vagi, index + 1);
-                return nextOffset - vagOffset;
+                if (nextOffset <= vagOffset)
+                    throw new InvalidDataException(
+                        "HD VAG offsets are not increasing at index " + index + ".");
+                size = (long)nextOffset - vagOffset;
             }
             else
             {
                 uint bdSize = ReadU32LE(hd, HD_BD_SIZE_OFFSET);
-                return (int)bdSize - vagOffset;
+                if (bdSize > int.MaxValue)
+                    throw new InvalidDataException(
+                        "HD BD size exceeds the supported file size.");
+                size = (long)bdSize - vagOffset;
             }
+
+            if (size <= 0 || size > int.MaxValue)
+                throw new InvalidDataException(
+                    "HD VAG size for index " + index + " is invalid.");
+            return (int)size;
         }
 
         // ─────────────────────────────────────────────────────────────────
@@ -137,7 +182,8 @@ namespace HMSTHModdingTool.IO
             ushort VagRate = GetVagSampleRate(HdData, Vagi, Index);
             int VagSize = GetVagSize(HdData, Vagi, Index, MaxIndex);
 
-            if (VagOffset < 0 || VagOffset + VagSize > BdData.Length)
+            if (VagOffset < 0 || VagSize <= 0 ||
+                VagOffset > BdData.Length - VagSize)
                 throw new InvalidDataException(string.Format(
                     "VAG index {0} points outside BD " +
                     "(offset 0x{1:X}, size 0x{2:X}).",
@@ -209,7 +255,7 @@ namespace HMSTHModdingTool.IO
                 // ── Bounds check ─────────────────────────────────────────
                 if (VagOffset < 0 ||
                     VagSize <= 0 ||
-                    VagOffset + VagSize > BdData.Length)
+                    VagOffset > BdData.Length - VagSize)
                 {
                     Console.ForegroundColor = ConsoleColor.Yellow;
                     Console.WriteLine(string.Format(
@@ -303,6 +349,17 @@ namespace HMSTHModdingTool.IO
             // ── Get old VAG info ─────────────────────────────────────────
             int OldOffset = GetVagOffset(HdData, Vagi, Index);
             int OldSize = GetVagSize(HdData, Vagi, Index, MaxIndex);
+            if (NewAdpcmSz <= 0 || OldOffset < 0 || OldSize <= 0 ||
+                OldOffset > BdData.Length - OldSize)
+                throw new InvalidDataException(
+                    "The target VAG range is invalid for the supplied BD file.");
+            long newBdLength = (long)BdData.Length + NewAdpcmSz - OldSize;
+            long newBdHeaderSize = (long)ReadU32LE(HdData, HD_BD_SIZE_OFFSET) +
+                NewAdpcmSz - OldSize;
+            if (newBdLength < 0 || newBdLength > int.MaxValue ||
+                newBdHeaderSize < 0 || newBdHeaderSize > uint.MaxValue)
+                throw new InvalidDataException(
+                    "Replacing this VAG would produce an unsupported BD size.");
 
             // ── Update sample rate ───────────────────────────────────────
             PutVagSampleRate(HdData, Vagi, Index, (ushort)(NewRate & 0xFFFF));
@@ -312,17 +369,24 @@ namespace HMSTHModdingTool.IO
             for (int sub = Index + 1; sub <= MaxIndex; sub++)
             {
                 int SubOldOffset = GetVagOffset(HdData, Vagi, sub);
+                long updatedOffset = (long)SubOldOffset + Delta;
+                if (updatedOffset < 0 || updatedOffset > uint.MaxValue ||
+                    updatedOffset > newBdLength)
+                    throw new InvalidDataException(
+                        "Replacing VAG " + Index +
+                        " would move later VAG " + sub +
+                        " outside the resulting BD file.");
                 PutVagOffset(HdData, Vagi, sub,
-                    (uint)(SubOldOffset + Delta));
+                    (uint)updatedOffset);
             }
 
             // ── Update BD size ───────────────────────────────────────────
             uint OldBdSize = ReadU32LE(HdData, HD_BD_SIZE_OFFSET);
             WriteU32LE(HdData, HD_BD_SIZE_OFFSET,
-                (uint)((int)OldBdSize + Delta));
+                (uint)((long)OldBdSize + Delta));
 
             // ── Rebuild BD ───────────────────────────────────────────────
-            byte[] NewBd = new byte[BdData.Length + Delta];
+            byte[] NewBd = new byte[(int)newBdLength];
             Array.Copy(BdData, 0,
                 NewBd, 0, OldOffset);
             Array.Copy(NewAdpcm, 0,
@@ -414,7 +478,25 @@ namespace HMSTHModdingTool.IO
                 // as the position in NewBd (no TotalDelta needed)
                 int OldOffset = GetVagOffset(HdData, Vagi, i);
                 int OldSize = GetVagSize(HdData, Vagi, i, MaxIndex);
+                if (NewAdpcmSz <= 0 || OldOffset < 0 || OldSize <= 0 ||
+                    OldOffset > NewBd.Length - OldSize)
+                {
+                    Console.Error.WriteLine(
+                        "[WARN] Skipping replacement " + i +
+                        " because its target VAG range or new payload size is invalid.");
+                    continue;
+                }
                 int Delta = NewAdpcmSz - OldSize;
+                long newLength = (long)NewBd.Length + Delta;
+                long newHeaderSize = (long)ReadU32LE(HdData, HD_BD_SIZE_OFFSET) + Delta;
+                if (newLength < 0 || newLength > int.MaxValue ||
+                    newHeaderSize < 0 || newHeaderSize > uint.MaxValue)
+                {
+                    Console.Error.WriteLine(
+                        "[WARN] Skipping replacement " + i +
+                        " because it would produce an unsupported BD size.");
+                    continue;
+                }
 
                 // ── Update sample rate in HD ─────────────────────────────
                 PutVagSampleRate(HdData, Vagi, i,
@@ -424,19 +506,26 @@ namespace HMSTHModdingTool.IO
                 for (int sub = i + 1; sub <= MaxIndex; sub++)
                 {
                     int SubOld = GetVagOffset(HdData, Vagi, sub);
+                    long updatedOffset = (long)SubOld + Delta;
+                    if (updatedOffset < 0 || updatedOffset > uint.MaxValue ||
+                        updatedOffset > newLength)
+                        throw new InvalidDataException(
+                            "Replacing VAG " + i +
+                            " would move later VAG " + sub +
+                            " outside the resulting BD file.");
                     PutVagOffset(HdData, Vagi, sub,
-                        (uint)(SubOld + Delta));
+                        (uint)updatedOffset);
                 }
 
                 // ── Update BD size in HD ─────────────────────────────────
                 uint OldBdSize = ReadU32LE(HdData, HD_BD_SIZE_OFFSET);
                 WriteU32LE(HdData, HD_BD_SIZE_OFFSET,
-                    (uint)((int)OldBdSize + Delta));
+                    (uint)((long)OldBdSize + Delta));
 
                 // ── Splice into NewBd ─────────────────────────────────────
                 // OldOffset is already the correct position in NewBd
                 // because HD offsets are updated each iteration
-                byte[] Spliced = new byte[NewBd.Length + Delta];
+                byte[] Spliced = new byte[(int)newLength];
 
                 Array.Copy(NewBd, 0,
                     Spliced, 0, OldOffset);
@@ -476,7 +565,7 @@ namespace HMSTHModdingTool.IO
 
         private static void ValidateHd(byte[] HdData)
         {
-            if (HdData.Length < 0x40)
+            if (HdData == null || HdData.Length < 0x40)
                 throw new InvalidDataException("HD file too small.");
 
             if (ReadAscii(HdData, 0x00, 8) != "IECSsreV" ||
@@ -484,6 +573,22 @@ namespace HMSTHModdingTool.IO
                 throw new InvalidDataException(
                     "HD file missing expected magic " +
                     "(IECSsreV / IECSdaeH).");
+
+            uint vagiValue = ReadU32LE(HdData, HD_VAGI_OFFSET_OFFSET);
+            if (vagiValue > int.MaxValue ||
+                vagiValue > (uint)(HdData.Length - 0x10))
+                throw new InvalidDataException(
+                    "HD VAGI chunk offset is outside the file.");
+
+            int vagi = (int)vagiValue;
+            uint maxIndex = ReadU32LE(
+                HdData, vagi + VAGI_MAX_INDEX_OFFSET);
+            long entryCount = (long)maxIndex + 1L;
+            long tableStart = (long)vagi + VAGI_PARAM_TABLE_OFFSET;
+            if (tableStart > HdData.Length ||
+                entryCount > (HdData.Length - tableStart) / 4L)
+                throw new InvalidDataException(
+                    "HD VAG parameter-offset table is truncated or has an invalid index count.");
         }
 
         // ─────────────────────────────────────────────────────────────────
