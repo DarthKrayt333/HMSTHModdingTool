@@ -1,4 +1,4 @@
-﻿using HMSTHModdingTool;
+using HMSTHModdingTool;
 using HMSTHModdingTool.BMP;
 using HMSTHModdingTool.BoyMods;
 using HMSTHModdingTool.GDTB;
@@ -254,8 +254,11 @@ namespace HMSTHModdingTool
                        hdr[2] == 0x44 &&
                        hdr[3] == 0x42;
             }
-            catch
+            catch (Exception ex)
             {
+                Console.Error.WriteLine(
+                    "[WARN] Could not inspect SRDB signature for '" +
+                    path + "': " + ex.Message);
                 return false;
             }
         }
@@ -637,7 +640,12 @@ namespace HMSTHModdingTool
                 if (ext == ".rdtb") return "rdtb";
                 if (ext == ".srdb") return "srdb";
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    "[WARN] Could not inspect file signature for '" +
+                    path + "': " + ex.Message);
+            }
             return "unknown";
         }
 
