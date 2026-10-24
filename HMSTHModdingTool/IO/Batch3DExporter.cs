@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -208,6 +208,11 @@ namespace HMSTHModdingTool.IO
                                 if (File.Exists(glbPath))
                                     File.Delete(glbPath); // work directory is unique; never reuse old output.
                                 ObjGltfExporter.ConvertObjToGlb(objPath, glbPath);
+                                GltfValidationResult validation = GltfValidatorRunner.ValidateAfterExportIfConfigured(glbPath);
+                                if (validation.Status == GltfValidationStatus.Invalid ||
+                                    validation.Status == GltfValidationStatus.Failed ||
+                                    validation.Status == GltfValidationStatus.TimedOut)
+                                    throw new InvalidDataException("GLB was written but validator did not pass: " + validation.Message);
                                 if (!File.Exists(glbPath) || new FileInfo(glbPath).Length < 20)
                                     throw new InvalidDataException("Exporter did not produce a non-empty GLB.");
                                 successfulGlbs.Add(glbPath);

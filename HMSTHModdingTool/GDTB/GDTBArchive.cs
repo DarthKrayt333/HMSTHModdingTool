@@ -1,4 +1,4 @@
-using HMSTHModdingTool.BMP;
+﻿using HMSTHModdingTool.BMP;
 using HMSTHModdingTool.IO;
 using System;
 using System.Collections.Generic;
@@ -186,6 +186,60 @@ namespace HMSTHModdingTool.GDTB
             }
 
             _textureCount = _textures.Count;
+        }
+
+        /// <summary>
+        /// Number of successfully parsed textures in the loaded archive.
+        /// </summary>
+        public int TextureCount
+        {
+            get { return _textures == null ? 0 : _textures.Count; }
+        }
+
+        /// <summary>
+        /// Returns a detached copy of texture metadata for read-only tools such as previewers.
+        /// Call Load() before using this method.
+        /// </summary>
+        public GDTBTexture GetTextureInfo(int index)
+        {
+            EnsureTextureIndex(index);
+            GDTBTexture texture = _textures[index];
+            return new GDTBTexture
+            {
+                Index = texture.Index,
+                BodyOffset = texture.BodyOffset,
+                PaletteOffset = texture.PaletteOffset,
+                PaletteSize = texture.PaletteSize,
+                Width = texture.Width,
+                Height = texture.Height,
+                BitDepth = texture.BitDepth,
+                ImageSize = texture.ImageSize
+            };
+        }
+
+        /// <summary>
+        /// Decodes one texture to BMP bytes without writing a file or modifying the archive.
+        /// Call Load() before using this method.
+        /// </summary>
+        public byte[] GetTextureBitmap(int index)
+        {
+            EnsureTextureIndex(index);
+            byte[] bitmap = ExtractTextureToBmp(index);
+            if (bitmap == null || bitmap.Length == 0)
+                throw new InvalidDataException(
+                    "GDTB texture " + index + " could not be decoded: " + _filepath);
+            return bitmap;
+        }
+
+        private void EnsureTextureIndex(int index)
+        {
+            if (_data == null || _textures == null)
+                throw new InvalidOperationException(
+                    "GDTB archive must be loaded before reading texture data.");
+            if (index < 0 || index >= _textures.Count)
+                throw new ArgumentOutOfRangeException("index",
+                    "Texture index " + index + " is outside the loaded range 0.." +
+                    (_textures.Count - 1) + ".");
         }
 
         // ═════════════════════════════════════════

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -154,6 +154,11 @@ namespace HMSTHModdingTool.IO
                 try
                 {
                     ConvertObjToGlb(objPath, glbPath);
+                    GltfValidationResult validation = GltfValidatorRunner.ValidateAfterExportIfConfigured(glbPath);
+                    if (validation.Status == GltfValidationStatus.Invalid ||
+                        validation.Status == GltfValidationStatus.Failed ||
+                        validation.Status == GltfValidationStatus.TimedOut)
+                        throw new InvalidDataException("GLB was written but validator did not pass: " + validation.Message);
                     Console.ForegroundColor = ConsoleColor.Green;
                     Console.WriteLine("[GLB] " + glbPath);
                     Console.ResetColor();
@@ -168,7 +173,7 @@ namespace HMSTHModdingTool.IO
                 }
             }
 
-            Console.WriteLine("[OK] GLB export: " + exported + " file(s) created.");
+            Console.WriteLine("[OK] GLB export: " + exported + " file(s) created and not rejected by the configured validator.");
             return exported;
         }
 

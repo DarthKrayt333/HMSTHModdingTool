@@ -1,4 +1,4 @@
-using HMSTHModdingTool.IO;
+﻿using HMSTHModdingTool.IO;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -553,11 +553,11 @@ namespace HMSTHModdingTool
                         if (File.Exists(tempIso))
                             File.Delete(tempIso);
                     }
-                    catch (Exception ex)
+                    catch (Exception cleanupException)
                     {
                         Console.Error.WriteLine(
                             "[WARN] Could not remove temporary ISO '" + tempIso +
-                            "': " + ex.Message);
+                            "': " + cleanupException.Message);
                     }
                 }
 
@@ -2552,11 +2552,11 @@ namespace HMSTHModdingTool
                         if (File.Exists(tempIso))
                             File.Delete(tempIso);
                     }
-                    catch (Exception ex)
+                    catch (Exception cleanupException)
                     {
                         Console.Error.WriteLine(
                             "[WARN] Could not remove temporary ISO '" + tempIso +
-                            "': " + ex.Message);
+                            "': " + cleanupException.Message);
                     }
                 }
 
