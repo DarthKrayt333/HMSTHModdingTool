@@ -3557,7 +3557,12 @@ namespace HMSTHModdingTool.RDTB
                                 true);
                             found = true;
                         }
-                        catch { }
+                        catch (Exception ex)
+                        {
+                            Console.Error.WriteLine(
+                                "[WARN] Could not copy texture '" + bmp +
+                                "' to '" + dst + "': " + ex.Message);
+                        }
                     }
                 }
 
@@ -3604,7 +3609,12 @@ namespace HMSTHModdingTool.RDTB
                     Directory.Delete(
                         tempTex, true);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine(
+                        "[WARN] Could not remove temporary texture directory '" +
+                        tempTex + "': " + ex.Message);
+                }
             }
         }
 
