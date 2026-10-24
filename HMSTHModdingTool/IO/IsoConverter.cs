@@ -389,8 +389,11 @@ namespace HMSTHModdingTool
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                Console.Error.WriteLine(
+                    "[WARN] Could not parse the CUE file for '" + cuePath +
+                    "'; using the same-name BIN fallback: " + ex.Message);
             }
 
             // Fallback: same name .bin
