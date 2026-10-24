@@ -1924,8 +1924,11 @@ namespace HMSTHModdingTool.RDTB
                         .ToString()
                         .Replace('\\', '/'));
             }
-            catch
+            catch (Exception ex)
             {
+                Console.Error.WriteLine(
+                    "[WARN] Could not form a relative texture path from '" +
+                    fromFile + "' to '" + target + "': " + ex.Message);
                 return Path.GetFileName(target);
             }
         }
@@ -5020,7 +5023,12 @@ namespace HMSTHModdingTool.RDTB
                         bo.Verts.Count;
                     fileSlot++;
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine(
+                        "[WARN] Could not merge split model batch " + fileSlot +
+                        " for texture " + tid + ": " + ex.Message);
+                }
             }
             if (merged.Verts.Count > 0)
             {
