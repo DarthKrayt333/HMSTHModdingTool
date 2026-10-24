@@ -95,7 +95,12 @@ namespace HMSTHModdingTool.IO
                         dir, realName);
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    "[WARN] Could not resolve the actual ISO filename for '" +
+                    path + "': " + ex.Message);
+            }
             return path;
         }
 
