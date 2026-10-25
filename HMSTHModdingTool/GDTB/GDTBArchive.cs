@@ -61,14 +61,35 @@ namespace HMSTHModdingTool.GDTB
         // ─────────────────────────────────────────
         // PRIVATE READER HELPERS
         // ─────────────────────────────────────────
+        private void EnsureReadable(
+            long offset,
+            long length,
+            string description,
+            int textureIndex)
+        {
+            if (_data == null || offset < 0 || length < 0 ||
+                offset > _data.LongLength - length)
+                throw new InvalidDataException(
+                    "GDTB " + description + " for texture " + textureIndex +
+                    " is outside the file: " + _filepath);
+        }
+
         private int ReadInt32(int offset)
         {
+            if (_data == null || offset < 0 || offset > _data.Length - 4)
+                throw new InvalidDataException(
+                    "GDTB 32-bit field is outside the file at offset " + offset +
+                    ": " + _filepath);
             return BitConverter.ToInt32(
                 _data, offset);
         }
 
         private int ReadUInt16(int offset)
         {
+            if (_data == null || offset < 0 || offset > _data.Length - 2)
+                throw new InvalidDataException(
+                    "GDTB 16-bit field is outside the file at offset " + offset +
+                    ": " + _filepath);
             return BitConverter.ToUInt16(
                 _data, offset);
         }
@@ -77,6 +98,11 @@ namespace HMSTHModdingTool.GDTB
             int offset,
             int length)
         {
+            if (_data == null || offset < 0 || length < 0 ||
+                offset > _data.Length - length)
+                throw new InvalidDataException(
+                    "GDTB byte range is outside the file (offset=" + offset +
+                    ", length=" + length + "): " + _filepath);
             byte[] result = new byte[length];
             Array.Copy(
                 _data, offset,
@@ -107,6 +133,11 @@ namespace HMSTHModdingTool.GDTB
         {
             _data = File.ReadAllBytes(_filepath);
 
+            if (_data.Length < 0x18)
+                throw new InvalidDataException(
+                    "GDTB header is truncated; expected at least 0x18 bytes: " +
+                    _filepath);
+
             if (_data[0] != 'G' ||
                 _data[1] != 'D' ||
                 _data[2] != 'T' ||
@@ -119,6 +150,10 @@ namespace HMSTHModdingTool.GDTB
 
             _originalCount =
                 ReadInt32(8);
+            if (_originalCount < 0)
+                throw new InvalidDataException(
+                    "GDTB declares a negative texture count: " +
+                    _filepath);
             _textureCount =
                 _originalCount;
             _imageOffsetTable =
@@ -138,13 +173,73 @@ namespace HMSTHModdingTool.GDTB
                     _textures.Add(
                         ParseTexture(i));
                 }
-                catch
+                catch (OutOfMemoryException)
                 {
-                    break;
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidDataException(
+                        "Failed to parse GDTB texture " + i +
+                        " in " + _filepath + ".", ex);
                 }
             }
 
             _textureCount = _textures.Count;
+        }
+
+        /// <summary>
+        /// Number of successfully parsed textures in the loaded archive.
+        /// </summary>
+        public int TextureCount
+        {
+            get { return _textures == null ? 0 : _textures.Count; }
+        }
+
+        /// <summary>
+        /// Returns a detached copy of texture metadata for read-only tools such as previewers.
+        /// Call Load() before using this method.
+        /// </summary>
+        public GDTBTexture GetTextureInfo(int index)
+        {
+            EnsureTextureIndex(index);
+            GDTBTexture texture = _textures[index];
+            return new GDTBTexture
+            {
+                Index = texture.Index,
+                BodyOffset = texture.BodyOffset,
+                PaletteOffset = texture.PaletteOffset,
+                PaletteSize = texture.PaletteSize,
+                Width = texture.Width,
+                Height = texture.Height,
+                BitDepth = texture.BitDepth,
+                ImageSize = texture.ImageSize
+            };
+        }
+
+        /// <summary>
+        /// Decodes one texture to BMP bytes without writing a file or modifying the archive.
+        /// Call Load() before using this method.
+        /// </summary>
+        public byte[] GetTextureBitmap(int index)
+        {
+            EnsureTextureIndex(index);
+            byte[] bitmap = ExtractTextureToBmp(index);
+            if (bitmap == null || bitmap.Length == 0)
+                throw new InvalidDataException(
+                    "GDTB texture " + index + " could not be decoded: " + _filepath);
+            return bitmap;
+        }
+
+        private void EnsureTextureIndex(int index)
+        {
+            if (_data == null || _textures == null)
+                throw new InvalidOperationException(
+                    "GDTB archive must be loaded before reading texture data.");
+            if (index < 0 || index >= _textures.Count)
+                throw new ArgumentOutOfRangeException("index",
+                    "Texture index " + index + " is outside the loaded range 0.." +
+                    (_textures.Count - 1) + ".");
         }
 
         // ═════════════════════════════════════════
@@ -158,21 +253,27 @@ namespace HMSTHModdingTool.GDTB
                 Index = index
             };
 
-            int ptr =
-                _imageOffsetTable + index * 4;
-            int val = ReadInt32(ptr);
-            tex.BodyOffset =
-                val + _imageOffsetTable;
+            long ptr = (long)_imageOffsetTable + (long)index * 4L;
+            EnsureReadable(ptr, 4, "image offset pointer", index);
+            int val = ReadInt32((int)ptr);
+            long bodyOffset = (long)_imageOffsetTable + val;
+            EnsureReadable(bodyOffset, 1, "image payload", index);
+            tex.BodyOffset = (int)bodyOffset;
 
-            int fptr =
-                _formatChunkOffset + index * 4;
-            int fval = ReadInt32(fptr);
-            int foff =
-                _formatChunkOffset + fval;
+            long fptr = (long)_formatChunkOffset + (long)index * 4L;
+            EnsureReadable(fptr, 4, "format offset pointer", index);
+            int fval = ReadInt32((int)fptr);
+            long foff = (long)_formatChunkOffset + fval;
+            EnsureReadable(foff, 8, "format metadata", index);
 
-            tex.Width = ReadUInt16(foff);
-            tex.Height = ReadUInt16(foff + 2);
-            int bdf = ReadInt32(foff + 4);
+            tex.Width = ReadUInt16((int)foff);
+            tex.Height = ReadUInt16((int)foff + 2);
+            int bdf = ReadInt32((int)foff + 4);
+
+            if (tex.Width <= 0 || tex.Height <= 0)
+                throw new InvalidDataException(
+                    "Texture " + index + " has invalid dimensions " +
+                    tex.Width + "x" + tex.Height + ".");
 
             if (!GDTBTexture.HexToBitDepth
                     .ContainsKey(bdf))
@@ -185,23 +286,25 @@ namespace HMSTHModdingTool.GDTB
 
             tex.BitDepth =
                 GDTBTexture.HexToBitDepth[bdf];
-            tex.ImageSize =
-                GDTBTexture.GetImageSize(
-                    tex.Width,
-                    tex.Height,
-                    tex.BitDepth);
+            long imageSize =
+                ((long)tex.Width * (long)tex.Height * tex.BitDepth + 7L) / 8L;
+            if (imageSize <= 0 || imageSize > int.MaxValue)
+                throw new InvalidDataException(
+                    "Texture " + index + " has an unsupported image size.");
+            EnsureReadable(bodyOffset, imageSize, "image payload", index);
+            tex.ImageSize = (int)imageSize;
             tex.PaletteSize =
                 GDTBTexture.GetPaletteSize(
                     tex.BitDepth);
 
             if (tex.IsPaletted)
             {
-                int pptr =
-                    _paletteChunkOffset +
-                    index * 4;
-                int pval = ReadInt32(pptr);
-                tex.PaletteOffset =
-                    _paletteChunkOffset + pval;
+                long pptr = (long)_paletteChunkOffset + (long)index * 4L;
+                EnsureReadable(pptr, 4, "palette offset pointer", index);
+                int pval = ReadInt32((int)pptr);
+                long paletteOffset = (long)_paletteChunkOffset + pval;
+                EnsureReadable(paletteOffset, tex.PaletteSize, "palette data", index);
+                tex.PaletteOffset = (int)paletteOffset;
             }
 
             return tex;
@@ -549,6 +652,10 @@ namespace HMSTHModdingTool.GDTB
             byte[] data =
                 File.ReadAllBytes(path);
 
+            if (data.Length < 54)
+                throw new InvalidDataException(
+                    "BMP header is truncated: " + path);
+
             if (data[0] != 'B' ||
                 data[1] != 'M')
                 throw new InvalidDataException(
@@ -560,6 +667,9 @@ namespace HMSTHModdingTool.GDTB
                 BitConverter.ToInt32(data, 18);
             int hRaw =
                 BitConverter.ToInt32(data, 22);
+            if (width <= 0 || hRaw == 0 || hRaw == int.MinValue)
+                throw new InvalidDataException(
+                    "BMP dimensions are invalid: " + path);
             int height = Math.Abs(hRaw);
             int bd =
                 BitConverter.ToUInt16(data, 28);
@@ -578,24 +688,42 @@ namespace HMSTHModdingTool.GDTB
             {
                 int colors =
                     bd == 8 ? 256 : 16;
+                int paletteBytes = colors * 4;
+                if (data.Length < 54 + paletteBytes)
+                    throw new InvalidDataException(
+                        "BMP palette is truncated: " + path);
+                if (pxOff < 54 + paletteBytes)
+                    throw new InvalidDataException(
+                        "BMP pixel-data offset overlaps the palette: " + path);
                 palette =
-                    new byte[colors * 4];
+                    new byte[paletteBytes];
                 Array.Copy(
                     data, 54,
                     palette, 0,
-                    colors * 4);
+                    paletteBytes);
             }
             else
             {
                 palette = new byte[0];
             }
 
-            int bpr =
-                GDTBTexture.GetBytesPerRow(
-                    width, bd);
-            int rs =
-                GDTBTexture.GetBmpRowSize(
-                    width, bd);
+            if (pxOff < 54 || pxOff > data.Length)
+                throw new InvalidDataException(
+                    "BMP pixel-data offset is outside the supported header/file range: " + path);
+
+            long rowBits = (long)width * bd;
+            long bprLong = (rowBits + 7L) / 8L;
+            long rowSizeLong = ((rowBits + 31L) / 32L) * 4L;
+            if (bprLong <= 0 || rowSizeLong <= 0 ||
+                bprLong > int.MaxValue || rowSizeLong > int.MaxValue)
+                throw new InvalidDataException(
+                    "BMP row size is invalid: " + path);
+            int bpr = (int)bprLong;
+            int rs = (int)rowSizeLong;
+            long pixelBytes = rowSizeLong * height;
+            if (pixelBytes > data.LongLength - pxOff)
+                throw new InvalidDataException(
+                    "BMP pixel data is truncated: " + path);
 
             var pixList = new List<byte>();
 

@@ -292,6 +292,10 @@ namespace HMSTHModdingTool.BadEndingRemover
                     Data[3] != 0x46)
                     return;
 
+                if (Data.Length < 0x2E)
+                    throw new InvalidDataException(
+                        "ELF header is truncated; required fields extend to 0x2D.");
+
                 IsElf = true;
 
                 uint ePhoff = BitConverter
@@ -303,13 +307,19 @@ namespace HMSTHModdingTool.BadEndingRemover
                     BitConverter.ToUInt16(
                         Data, 0x2C);
 
+                if (ePhnum > 0 && ePhentsize < 24)
+                    throw new InvalidDataException(
+                        "ELF program-header entry size is too small.");
+
                 for (int i = 0; i < ePhnum; i++)
                 {
-                    int phStart = (int)(ePhoff +
-                        i * ePhentsize);
-                    if (phStart + 24 >
-                        Data.Length)
-                        break;
+                    long phStartLong = (long)ePhoff +
+                        (long)i * ePhentsize;
+                    if (phStartLong < 0 ||
+                        phStartLong > Data.Length - 24L)
+                        throw new InvalidDataException(
+                            "ELF program-header table is truncated or outside the file.");
+                    int phStart = (int)phStartLong;
 
                     uint pType = BitConverter
                         .ToUInt32(Data, phStart);
@@ -542,8 +552,15 @@ namespace HMSTHModdingTool.BadEndingRemover
                     }
                     return -1;
                 }
-                catch
+                catch (OutOfMemoryException)
                 {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine(
+                        "[WARN] ELF/ISO root-directory scan failed: " +
+                        ex.Message);
                     return -1;
                 }
             }

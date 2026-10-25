@@ -1092,8 +1092,15 @@ namespace HMSTHModdingTool.SRDB
                         .ToString()
                         .Replace('\\', '/'));
             }
-            catch
+            catch (OutOfMemoryException)
             {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    "[WARN] Could not form a relative texture path from '" +
+                    fromFile + "' to '" + target + "': " + ex.Message);
                 return
                     Path.GetFileName(
                         target);

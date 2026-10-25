@@ -594,7 +594,17 @@ namespace HMSTHModdingTool.IO.Compression
                 for (int i = 0; i < raw.Length; i++) if (test[i] != raw[i]) return false;
                 return true;
             }
-            catch { return false; }
+            catch (OutOfMemoryException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    "[WARN] Compression round-trip verification failed: " +
+                    ex.Message);
+                return false;
+            }
         }
     }
 }

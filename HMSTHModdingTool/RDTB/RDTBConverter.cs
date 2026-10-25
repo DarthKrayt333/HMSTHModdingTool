@@ -1020,7 +1020,12 @@ namespace HMSTHModdingTool.RDTB
                         File.Delete(
                             tempPath);
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine(
+                            "[WARN] Could not remove temporary file '" +
+                            tempPath + "': " + ex.Message);
+                    }
                 }
             }
         }
@@ -1062,7 +1067,12 @@ namespace HMSTHModdingTool.RDTB
                         File.Delete(
                             tempPath);
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine(
+                            "[WARN] Could not remove temporary file '" +
+                            tempPath + "': " + ex.Message);
+                    }
                 }
             }
         }

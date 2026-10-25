@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>HMSTHPreview</RootNamespace>
+    <AssemblyName>HMSTHPreview</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- WPF MarkupCompilePass1 must see System.Web explicitly because System.Web.Extensions depends on it. -->
+    <Reference Include="System.Web" />
+    <Reference Include="System.Web.Extensions" />
+    <ProjectReference Include="..\HMSTHModdingTool\HMSTHModdingTool.csproj" />
+  </ItemGroup>
+</Project>

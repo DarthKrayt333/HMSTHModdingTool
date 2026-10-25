@@ -95,10 +95,18 @@ namespace HMSTHModdingTool
                         isoPath,
                         out detElf);
             }
-            catch
+            catch (OutOfMemoryException)
             {
-                // Auto-detect failed,
-                // fall back to isJap flag
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    "[WARN] Game-version auto-detection failed for '" +
+                    isoPath + "'; using " + (isJap ? "JAP" : "USA") +
+                    " fallback: " + ex.Message);
+                // Auto-detect failed; preserve the existing fallback
+                // based on the isJap flag.
                 if (isJap)
                     version =
                         GameVersion.JAP;

@@ -386,7 +386,12 @@ namespace HMSTHModdingTool.IO
             if (File.Exists(path))
             {
                 try { File.SetAttributes(path, FileAttributes.Normal); }
-                catch { }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine(
+                        "[WARN] Could not clear file attributes for '" +
+                        path + "' before writing metadata: " + ex.Message);
+                }
             }
 
             using (FileStream fs = new FileStream(
@@ -413,7 +418,12 @@ namespace HMSTHModdingTool.IO
             }
 
             try { File.SetAttributes(path, FileAttributes.Normal); }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    "[WARN] Metadata was written, but file attributes could not be reset for '" +
+                    path + "': " + ex.Message);
+            }
         }
 
         private static List<HiddenEntry> ReadDat(string path)
@@ -427,7 +437,12 @@ namespace HMSTHModdingTool.IO
                     path);
 
             try { File.SetAttributes(path, FileAttributes.Normal); }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    "[WARN] Could not clear file attributes before reading metadata '" +
+                    path + "': " + ex.Message);
+            }
 
             using (FileStream fs = new FileStream(
                        path, FileMode.Open,

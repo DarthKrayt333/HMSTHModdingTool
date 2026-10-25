@@ -58,6 +58,10 @@ namespace HMSTHModdingTool.IO
         private const int ROLE_HD = 2;
         private const int ROLE_SQ = 3;
 
+        // Defensive resource policy, not a claim about the HDA file format.
+        // One million slots already implies multi-megabyte arrays in pack paths.
+        private const int MAX_MANIFEST_SLOTS = 1000000;
+
         // ═══════════════════════════════════════════════════════════
         // UNPACK — PUBLIC ENTRY POINTS
         // ═══════════════════════════════════════════════════════════
@@ -81,6 +85,16 @@ namespace HMSTHModdingTool.IO
             string OutputFolder,
             string archiveName = "FILE")
         {
+            if (Data == null)
+                throw new ArgumentNullException("Data");
+            if (!Data.CanRead || !Data.CanSeek)
+                throw new ArgumentException(
+                    "HDA unpack requires a readable, seekable stream.",
+                    "Data");
+            if (Data.Length < 4)
+                throw new InvalidDataException(
+                    "HDA header is truncated; expected at least 4 bytes.");
+
             if (!Directory.Exists(OutputFolder))
                 Directory.CreateDirectory(OutputFolder);
 
@@ -89,6 +103,10 @@ namespace HMSTHModdingTool.IO
 
             // ── Step 1: Read file header ─────────────────────────
             uint BaseOffset = Reader.ReadUInt32();
+            if ((long)BaseOffset > Data.Length - 4)
+                throw new InvalidDataException(
+                    "HDA base offset 0x" + BaseOffset.ToString("X") +
+                    " does not leave room for the first offset-table value.");
 
             if (BaseOffset == 0 || BaseOffset > 0x1000)
             {
@@ -117,8 +135,22 @@ namespace HMSTHModdingTool.IO
                 return;
             }
 
-            int maxPossibleSlots =
-                (int)(firstRelOffset / 4);
+            if (firstRelOffset < 4 || (firstRelOffset % 4) != 0)
+                throw new InvalidDataException(
+                    "HDA offset-table size 0x" + firstRelOffset.ToString("X") +
+                    " is invalid; expected a positive multiple of 4.");
+
+            long availableAfterBase = Data.Length - (long)BaseOffset;
+            if ((long)firstRelOffset > availableAfterBase)
+                throw new InvalidDataException(
+                    "HDA offset table extends beyond the end of the file.");
+
+            long slotCount = (long)firstRelOffset / 4L;
+            if (slotCount > int.MaxValue)
+                throw new InvalidDataException(
+                    "HDA offset table has too many slots to process safely.");
+
+            int maxPossibleSlots = (int)slotCount;
             uint[] tempTable =
                 new uint[maxPossibleSlots];
             tempTable[0] = firstRelOffset;
@@ -195,7 +227,7 @@ namespace HMSTHModdingTool.IO
                     uint pkStored = Reader.ReadUInt32();
                     Reader.ReadUInt32(); // padding
 
-                    if (pkStored == 0) continue;
+                    if (pkStored == 0 || pkStored > int.MaxValue) continue;
                     if (peekAbs + 0x10 + pkStored
                         > Data.Length) continue;
 
@@ -229,7 +261,7 @@ namespace HMSTHModdingTool.IO
                                 peekAbs + 0x10,
                                 SeekOrigin.Begin);
                             byte[] full =
-                                new byte[pkStored];
+                                new byte[(int)pkStored];
                             int fr = 0;
                             while (fr < (int)pkStored)
                             {
@@ -239,17 +271,25 @@ namespace HMSTHModdingTool.IO
                                 if (rr <= 0) break;
                                 fr += rr;
                             }
+                            if (fr != full.Length)
+                                throw new EndOfStreamException(
+                                    "HDA entry " + i +
+                                    " ended during compressed type detection.");
                             checkBuf =
                                 HarvestCompression
                                     .Decompress(full);
                         }
-                        catch
+                        catch (OutOfMemoryException)
                         {
-                            // Decompress failed —
-                            // keep raw sniff bytes.
-                            // It won't match HD/SQ
-                            // magic so it will stay
-                            // ROLE_REGULAR which is safe.
+                            throw;
+                        }
+                        catch (Exception ex)
+                        {
+                            // A failed pre-scan must not misclassify the entry.
+                            // Keep the raw sniff bytes, but report the failure.
+                            Console.Error.WriteLine(
+                                "[WARN] Could not decompress HDA entry " + i +
+                                " while detecting its type: " + ex.Message);
                             checkBuf = sniff;
                         }
                     }
@@ -320,16 +360,16 @@ namespace HMSTHModdingTool.IO
                     (long)BaseOffset +
                     (long)relOffset;
 
-                if (entryAbsPos >= Data.Length)
+                if (entryAbsPos < 0 || entryAbsPos > Data.Length - 0x10)
                 {
                     slotMap[i] = null;
                     Console.ForegroundColor =
                         ConsoleColor.Red;
                     Console.WriteLine(
                         "  [ERROR] Entry " + i +
-                        " offset 0x" +
+                        " header at 0x" +
                         entryAbsPos.ToString("X") +
-                        " beyond file end. Skipping.");
+                        " is truncated or beyond file end. Skipping.");
                     Console.ResetColor();
                     continue;
                 }
@@ -361,6 +401,16 @@ namespace HMSTHModdingTool.IO
                     continue;
                 }
 
+                if (storedSize > int.MaxValue ||
+                    (isCompressed && decompressedSize > int.MaxValue))
+                {
+                    slotMap[i] = null;
+                    Console.Error.WriteLine(
+                        "[ERROR] HDA entry " + i +
+                        " declares a size greater than this process can represent safely. Skipping.");
+                    continue;
+                }
+
                 long dataEnd =
                     entryAbsPos + 0x10 + storedSize;
 
@@ -378,15 +428,23 @@ namespace HMSTHModdingTool.IO
                 }
 
                 // ── Read raw stored bytes ──────────────────────
-                byte[] buffer = new byte[storedSize];
+                byte[] buffer = new byte[(int)storedSize];
                 int totalRead = 0;
-                while (totalRead < (int)storedSize)
+                while (totalRead < buffer.Length)
                 {
                     int n = Data.Read(
                         buffer, totalRead,
-                        (int)storedSize - totalRead);
+                        buffer.Length - totalRead);
                     if (n <= 0) break;
                     totalRead += n;
+                }
+                if (totalRead != buffer.Length)
+                {
+                    slotMap[i] = null;
+                    Console.Error.WriteLine(
+                        "[ERROR] HDA entry " + i +
+                        " ended before its declared stored size was read. Skipping.");
+                    continue;
                 }
 
                 bool isV2Compression = false;
@@ -646,7 +704,13 @@ namespace HMSTHModdingTool.IO
                        firstLine.Trim()
                                 .StartsWith("SLOTS=");
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    "[WARN] Could not inspect possible HDA manifest '" +
+                    filePath + "': " + ex.Message);
+                return false;
+            }
         }
 
         // ═══════════════════════════════════════════════════════════
@@ -693,9 +757,17 @@ namespace HMSTHModdingTool.IO
             if (!int.TryParse(
                     firstLine.Substring(6),
                     out totalSlots))
-                return false;
+                throw new InvalidDataException(
+                    "HDA manifest has an invalid SLOTS value: " + manifestPath);
 
-            if (totalSlots <= 0) return false;
+            if (totalSlots <= 0)
+                throw new InvalidDataException(
+                    "HDA manifest must declare a positive slot count: " + manifestPath);
+            if (totalSlots > MAX_MANIFEST_SLOTS)
+                throw new InvalidDataException(
+                    "HDA manifest declares " + totalSlots +
+                    " slots, exceeding the configured safety limit of " +
+                    MAX_MANIFEST_SLOTS + ": " + manifestPath);
 
             slotFiles = new string[totalSlots];
 

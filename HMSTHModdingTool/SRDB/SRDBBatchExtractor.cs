@@ -1125,7 +1125,12 @@ namespace HMSTHModdingTool.SRDB
                 Directory.Delete(
                     tmpTex, true);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    "[WARN] Could not remove temporary texture directory '" +
+                    tmpTex + "': " + ex.Message);
+            }
 
             Console.ForegroundColor =
                 ConsoleColor.Green;
@@ -1514,7 +1519,12 @@ namespace HMSTHModdingTool.SRDB
                             Directory.Delete(
                                 tempOut, true);
                         }
-                        catch { }
+                        catch (Exception cleanupEx)
+                        {
+                            Console.Error.WriteLine(
+                                "[WARN] Could not remove temporary output directory '" +
+                                tempOut + "': " + cleanupEx.Message);
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -1816,8 +1826,11 @@ namespace HMSTHModdingTool.SRDB
                                 sz = new FileInfo(
                                     c).Length;
                             }
-                            catch
+                            catch (Exception ex)
                             {
+                                Console.Error.WriteLine(
+                                    "[WARN] Could not read size of candidate file '" +
+                                    c + "'; treating its size as zero: " + ex.Message);
                                 sz = 0;
                             }
                             if (!groups
@@ -1845,7 +1858,12 @@ namespace HMSTHModdingTool.SRDB
                                         .ReadAllBytes(
                                             first);
                             }
-                            catch { }
+                            catch (Exception ex)
+                            {
+                                Console.Error.WriteLine(
+                                    "[WARN] Could not read reference candidate '" +
+                                    first + "' for byte comparison: " + ex.Message);
+                            }
 
                             string different =
                                 null;
@@ -1871,7 +1889,12 @@ namespace HMSTHModdingTool.SRDB
                                             break;
                                         }
                                     }
-                                    catch { }
+                                    catch (Exception ex)
+                                    {
+                                        Console.Error.WriteLine(
+                                            "[WARN] Could not compare candidate file '" +
+                                            c + "' byte-for-byte: " + ex.Message);
+                                    }
                                 }
                             }
 
@@ -2066,7 +2089,12 @@ namespace HMSTHModdingTool.SRDB
                         Directory.Delete(
                             tempDir, true);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine(
+                        "[WARN] Could not remove temporary directory '" +
+                        tempDir + "': " + ex.Message);
+                }
             }
         }
 

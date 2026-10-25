@@ -1,4 +1,4 @@
-﻿using HMSTHModdingTool;
+using HMSTHModdingTool;
 using HMSTHModdingTool.BMP;
 using HMSTHModdingTool.BoyMods;
 using HMSTHModdingTool.GDTB;
@@ -254,8 +254,11 @@ namespace HMSTHModdingTool
                        hdr[2] == 0x44 &&
                        hdr[3] == 0x42;
             }
-            catch
+            catch (Exception ex)
             {
+                Console.Error.WriteLine(
+                    "[WARN] Could not inspect SRDB signature for '" +
+                    path + "': " + ex.Message);
                 return false;
             }
         }
@@ -637,7 +640,12 @@ namespace HMSTHModdingTool
                 if (ext == ".rdtb") return "rdtb";
                 if (ext == ".srdb") return "srdb";
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    "[WARN] Could not inspect file signature for '" +
+                    path + "': " + ex.Message);
+            }
             return "unknown";
         }
 
@@ -726,6 +734,42 @@ namespace HMSTHModdingTool
                             // Validation is read-only. Its own report includes PASS/FAIL,
                             // so don't append the generic success message for malformed files.
                             ArchiveValidator.Verify(args[1], jsonPath);
+                            customFinish = true;
+                        }
+                        break;
+
+                    // ════════════════════════
+                    // GLB VALIDATION
+                    // ════════════════════════
+                    case "glbvalidate":
+                        {
+                            if (args.Length < 2 || args.Length > 3)
+                            {
+                                Console.WriteLine("Usage: glbvalidate <file.glb> [gltf_validator.exe]");
+                                Console.WriteLine("Uses Khronos glTF-Validator; JSON report is written beside the GLB.");
+                                Environment.ExitCode = 1;
+                                customFinish = true;
+                                break;
+                            }
+
+                            GltfValidationResult validation;
+                            try
+                            {
+                                validation = GltfValidatorRunner.Validate(args[1],
+                                    args.Length == 3 ? args[2] : null);
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine("[GLB-VALIDATOR] FAILED: " + ex.GetType().Name + ": " + ex.Message);
+                                Environment.ExitCode = 1;
+                                customFinish = true;
+                                break;
+                            }
+
+                            GltfValidatorRunner.PrintResult(validation, false);
+                            Environment.ExitCode = validation.Status == GltfValidationStatus.Valid
+                                ? 0
+                                : validation.Status == GltfValidationStatus.NotConfigured ? 2 : 1;
                             customFinish = true;
                         }
                         break;
@@ -3219,6 +3263,11 @@ namespace HMSTHModdingTool
                                 : Path.ChangeExtension(objPath, ".glb");
 
                             ObjGltfExporter.ConvertObjToGlb(objPath, glbPath);
+                            GltfValidationResult validation = GltfValidatorRunner.ValidateAfterExportIfConfigured(glbPath);
+                            if (validation.Status == GltfValidationStatus.Invalid ||
+                                validation.Status == GltfValidationStatus.Failed ||
+                                validation.Status == GltfValidationStatus.TimedOut)
+                                Console.WriteLine("[WARN] GLB file was created, but validation did not pass. Inspect the validator report.");
                             Console.ForegroundColor = ConsoleColor.Green;
                             Console.WriteLine("[OK] GLB created: " + Path.GetFullPath(glbPath));
                             Console.ResetColor();
@@ -4247,7 +4296,7 @@ namespace HMSTHModdingTool
                     "boymodv4",
                     "boyoriginal","boyrestore",
                     "boyback",    "boyorig",
-                    "x3d",        "c3d", "x3dglb", "obj2glb", "batch3d",
+                    "x3d",        "c3d", "x3dglb", "obj2glb", "batch3d", "glbvalidate",
                     "scanbatch",
                     "xbatch", "extractbatch",
                     "xmodel", "extractmodel",
@@ -5211,6 +5260,12 @@ namespace HMSTHModdingTool
             Console.WriteLine(
                 "    Convert an existing OBJ/MTL/texture set"
                 + " to a self-contained GLB.");
+            Console.WriteLine(
+                "  -glbvalidate <file.glb> [gltf_validator.exe]");
+            Console.WriteLine(
+                "    Validate a GLB with Khronos glTF-Validator.");
+            Console.WriteLine(
+                "    Set HMSTH_GLTF_VALIDATOR or place the tool beside the EXE/in tools/.");
             Console.WriteLine(
                 "  -batch3d <input-dir|archive.hda> <output-dir>"
                 + " [--overwrite] [--split] [--gdtb <file.gdtb>]");

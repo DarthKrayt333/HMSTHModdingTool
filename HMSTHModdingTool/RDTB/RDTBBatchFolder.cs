@@ -62,7 +62,12 @@ namespace HMSTHModdingTool.RDTB
                         gdtbPath,
                         tempTex);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine(
+                        "[WARN] Could not extract textures from '" +
+                        gdtbPath + "': " + ex.Message);
+                }
             }
 
             // DEBUG: show what was extracted
@@ -545,7 +550,12 @@ namespace HMSTHModdingTool.RDTB
                             dstTex,
                             true);
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine(
+                            "[WARN] Could not copy texture '" + srcTex +
+                            "' to '" + dstTex + "': " + ex.Message);
+                    }
                 }
                 else
                 {
@@ -573,7 +583,12 @@ namespace HMSTHModdingTool.RDTB
                                 anyDst,
                                 true);
                         }
-                        catch { }
+                        catch (Exception ex)
+                        {
+                            Console.Error.WriteLine(
+                                "[WARN] Could not copy fallback texture '" +
+                                anyBmp + "' to '" + anyDst + "': " + ex.Message);
+                        }
                     }
                 }
 
@@ -766,7 +781,12 @@ namespace HMSTHModdingTool.RDTB
                 Directory.Delete(
                     tempTex, true);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    "[WARN] Could not remove temporary texture directory '" +
+                    tempTex + "': " + ex.Message);
+            }
 
             string infoPath =
                 Path.Combine(outDir,
